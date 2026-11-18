@@ -1,0 +1,20 @@
+# 虚拟环境 / 构建产物
+.venv/
+.venv-mac/
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# 运行数据（含登录态 Cookie，绝对不要上传）
+config.json
+saves/
+templates/
+人物图片/
+
+# 逆向分析临时文件
+_re/
+_extract_blyx/
+*.out
+_region16_20.txt

@@ -1,0 +1,27 @@
+name: build-mac
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    # macos-13 是 Intel 机器，直接产出 x86_64 的 .app
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build .app
+        run: bash build_mac.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zizuo-mac-x86_64
+          path: dist/Zizuo助手-mac.zip
+          if-no-files-found: error

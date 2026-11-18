@@ -1,0 +1,7 @@
+# macOS 版依赖（不含 pywin32 / keyboard / pywebview）
+numpy==1.26.4
+Pillow==10.4.0
+opencv-python==4.10.0.84
+mss==9.0.1
+websocket-client==1.9.2
+pyinstaller==6.11.1
