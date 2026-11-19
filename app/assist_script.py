@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 47
+RUNTIME_VERSION = 49
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 47
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 47;
+  const VERSION = 49;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1529,6 +1529,39 @@ RUNTIME_JS = r"""
     });
   }
 
+  /** 游戏自带的「立即复活」：RZFJ 发请求 + HVLS 应用服务器返回，原地把倒地英雄拉起来。
+   *  只消耗绿币（映射里的 currencyId），不传送、怪不回血。 */
+  function instantRevive(cfg) {
+    const yx = gameBag(cfg)[cfg.heroService];
+    const api = (cfg.instant && cfg.instant.api) || 'RZFJ';
+    const applyName = (cfg.instant && cfg.instant.apply) || 'HVLS';
+    if (!yx || typeof yx[api] !== 'function') {
+      throw Error('英雄服务里没有复活接口（' + api + '），该版本可能改了');
+    }
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => { if (!settled) { settled = true; resolve(value); } };
+      const timer = setTimeout(() => finish({ ok: false, error: '复活请求超时' }), 8000);
+      try {
+        yx[api](false, function (ok, resp) {
+          clearTimeout(timer);
+          const code = resp && resp.RUKU ? resp.RUKU.WCHC : undefined;
+          if (ok && resp) {
+            // 和游戏面板一样：用服务器返回的战斗数据把客户端状态刷新过来
+            try {
+              const world = window[mapConfig().holder];
+              if (world && typeof world[applyName] === 'function') world[applyName](resp.EADX);
+            } catch (_) { /* ignore */ }
+          }
+          finish({ ok: !!ok, code });
+        });
+      } catch (cause) {
+        clearTimeout(timer);
+        finish({ ok: false, error: msgOf(cause) });
+      }
+    });
+  }
+
   /** 回营地复活：点「放弃」回营地，再自动回原地图。 */
   function reviveByCamp(cfg, panel) {
     const mapCfg = mapConfig();
@@ -1886,7 +1919,7 @@ RUNTIME_JS = r"""
     if (!panel) {
       // 没有全灭面板时：传送/道具/广告这几种也按「有英雄倒地」触发
       let dead = 0;
-      if (box.mode === 'tp' || box.mode === 'item' || box.mode === 'ad') {
+      if (box.mode === 'instant' || box.mode === 'tp' || box.mode === 'item' || box.mode === 'ad') {
         try {
           const hcfg = (mapping() && mapping().heroRevive) || {};
           const ctx = mapContext();
@@ -1906,7 +1939,9 @@ RUNTIME_JS = r"""
         }
         if (box.phase === 'waiting') {
           reviveReset();
-          box.reason = box.mode === 'tp'
+          box.reason = box.mode === 'instant'
+            ? '监控中：英雄倒地就原地立即复活（20 绿币/次，怪不回血）'
+            : box.mode === 'tp'
             ? '监控中：英雄倒地就传营地复活，约 0.3 秒回原位（全灭约 11 秒）'
             : '监控中：英雄倒地或全灭后 ' + (box.delayMs / 1000) + ' 秒自动'
               + (box.mode === 'campfly' ? '回营地复活并飞回原位' : '复活');
@@ -1916,8 +1951,8 @@ RUNTIME_JS = r"""
     }
 
     if (!box.pendingAt) {
-      // 传送复活是服务端瞬发的，不需要等，延迟只对道具/广告复活有意义
-      box.pendingAt = nowMs + (box.mode === 'tp' ? 0 : box.delayMs);
+      // 传送复活是服务端瞬发的，不需要等；立即复活留 0.5 秒把同一波倒地的合在一起
+      box.pendingAt = nowMs + (box.mode === 'tp' ? 0 : box.mode === 'instant' ? 500 : box.delayMs);
       box.phase = 'waiting';
       const deadNow = box.deadCount || 0;
       box.reason = (panel ? '检测到全灭' : '检测到 ' + deadNow + ' 个英雄倒地')
@@ -1925,6 +1960,49 @@ RUNTIME_JS = r"""
       return;
     }
     if (nowMs < box.pendingAt) return;
+
+    // 立即复活：游戏自带的服务器复活，原地起来，怪不回血（消耗绿币）
+    if (box.mode === 'instant') {
+      if (box.busy) return;
+      box.busy = true;
+      box.pendingAt = 0;
+      box.phase = 'instant';
+      const price = Number((cfg.instant && cfg.instant.price) || 20);
+      const currencyId = (cfg.instant && cfg.instant.currencyId) || 0;
+      instantRevive(cfg)
+        .then(res => {
+          if (res.ok) {
+            box.count += 1;
+            let left = null;
+            try { left = gameBag(cfg).AUJP.PKQL(currencyId); } catch (_) { left = null; }
+            box.lastResult = '立即复活（原地，-' + price + ' 绿'
+              + (left === null ? '' : '，剩 ' + left) + '）';
+            box.reason = box.lastResult + ' · 今日 ' + box.count + ' 次';
+            box.returnTo = null;
+            box.nextTryAt = now() + 800;
+
+            // 防烧钱：刚复活又秒死，说明队伍打不过，连续 3 次就停 10 秒
+            const gap = now() - (box.lastAt || 0);
+            box.lastAt = now();
+            box.rapid = gap < 5000 ? (box.rapid || 0) + 1 : 0;
+            if (box.rapid >= 3) {
+              box.rapid = 0;
+              box.nextTryAt = now() + 10000;
+              box.reason = '连续秒死，暂停 10 秒（不然绿币一直掉，换个图或升级再来）';
+            }
+          } else {
+            box.reason = '立即复活失败：' + (res.error || ('错误码 ' + res.code))
+              + '（绿币不够就换成「传送回营地复活」）';
+            box.nextTryAt = now() + 3000;
+          }
+        })
+        .catch(cause => {
+          box.reason = '立即复活失败：' + msgOf(cause);
+          box.nextTryAt = now() + 3000;
+        })
+        .then(() => { box.busy = false; box.phase = ''; });
+      return;
+    }
 
     // 传送回营地复活：传到营地（TCLA/CLAT）→ 等复活 → 传回原位
     if (box.mode === 'tp') {
@@ -2799,7 +2877,7 @@ RUNTIME_JS = r"""
         return { ok: true, message: '快速复活已关闭' };
       }
       const box = state.revive;
-      const mode = ['local', 'item', 'ad', 'camp', 'campfly', 'free', 'tp'].indexOf(raw.mode) >= 0 ? raw.mode : 'item';
+      const mode = ['instant', 'local', 'item', 'ad', 'camp', 'campfly', 'free', 'tp'].indexOf(raw.mode) >= 0 ? raw.mode : 'item';
       let seconds = Number(raw.delay);
       if (!Number.isFinite(seconds) || seconds < 0) seconds = 0.5;
       seconds = Math.min(10, seconds);
@@ -2824,6 +2902,7 @@ RUNTIME_JS = r"""
       box.nextTryAt = 0;
       box.reason = '监控中：' + (
         mode === 'local' ? '英雄倒地就立刻原地复活'
+          : mode === 'instant' ? '英雄倒地就原地立即复活（每次 20 绿币）'
           : '全灭后 ' + seconds + ' 秒自动' + (
         mode === 'tp' ? '传送回营地复活'
           : mode === 'free' ? '免费回营地复活'
@@ -2831,6 +2910,7 @@ RUNTIME_JS = r"""
             : mode === 'camp' ? '放弃回营地复活并返回地图'
               : (mode === 'ad' ? '看广告复活' : '用道具复活')));
       const label = mode === 'local' ? '原地秒复活'
+        : mode === 'instant' ? '立即复活（原地）'
         : mode === 'tp' ? '传送回营地复活'
         : mode === 'free' ? '免费回营地复活'
         : mode === 'campfly' ? '回营地复活 + 飞回原位'

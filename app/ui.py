@@ -112,17 +112,19 @@ def _vision_mode(text: Any) -> int:
 
 
 # 快速复活方式
-REVIVE_TP = "快速复活（0.3 秒，不花道具/广告，推荐）"
+REVIVE_INSTANT = "立即复活（原地秒起，20 绿币/次，推荐）"
+REVIVE_TP = "传送回营地复活（免费，怪会回满血）"
 REVIVE_FREE = "免费回营地复活（不花道具/广告）"
 REVIVE_ITEM = "道具复活（消耗复活道具）"
 REVIVE_AD = "广告复活（看广告，不花道具）"
 REVIVE_CAMP = "回营地复活（放弃战斗，回营地满血）"
 REVIVE_CAMPFLY = "回营地复活（队伍留在营地，不飞回）"
-REVIVE_CHOICES = [REVIVE_TP, REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
+REVIVE_CHOICES = [REVIVE_INSTANT, REVIVE_TP, REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
 
 
 def _revive_text(mode: Any) -> str:
     return {
+        "instant": REVIVE_INSTANT,
         "tp": REVIVE_TP,
         "free": REVIVE_FREE,
         "ad": REVIVE_AD,
@@ -133,6 +135,8 @@ def _revive_text(mode: Any) -> str:
 
 def _revive_mode(text: Any) -> str:
     value = str(text or "")
+    if value == REVIVE_INSTANT:
+        return "instant"
     if value == REVIVE_TP:
         return "tp"
     if value == REVIVE_FREE:
@@ -1161,7 +1165,7 @@ class AppUI:
         self.assist.set_feature("revive", {"mode": mode, "delay": delay})
         self.assist_revive_btn.configure(text="关闭")
         self.assist_revive_status.set("正在开启…")
-        label = {"tp": "传送回营地复活", "free": "免费回营地复活", "item": "道具复活", "ad": "广告复活", "camp": "回营地复活"}.get(mode, mode)
+        label = {"instant": "立即复活", "tp": "传送回营地复活", "free": "免费回营地复活", "item": "道具复活", "ad": "广告复活", "camp": "回营地复活"}.get(mode, mode)
         self.append_log(f"已发送：开启快速复活（{label}，延迟 {delay:g} 秒）")
 
     def blink_assist(self) -> None:

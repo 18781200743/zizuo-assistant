@@ -375,6 +375,12 @@
           "opts": {
             "CTXT": true
           }
+        },
+        "instant": {
+          "api": "RZFJ",
+          "apply": "HVLS",
+          "currencyId": 88,
+          "price": 20
         }
       },
       "_heroReviveComment": [
