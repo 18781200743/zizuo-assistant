@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 85
+RUNTIME_VERSION = 86
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 85
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 85;
+  const VERSION = 86;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -836,7 +836,15 @@ RUNTIME_JS = r"""
     const label = kind === 'boss' ? 'BOSS' : '小怪';
 
     return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
-      if (result !== true) throw Error('地图重进没有成功（游戏返回 ' + result + '）');
+      if (result !== true) {
+        // 游戏没开始切图：保留这轮死亡计时，5 秒后自动重试（不再假装成功）
+        state.map.entering = false;
+        state.map.pendingKind = '';
+        state.map.bossAt = now() + 5000;
+        state.map.mobAt = now() + 5000;
+        runMapReport('重进地图没生效（游戏拒绝切图），5 秒后重试');
+        return '';
+      }
       // 和参考工具一致：重进成功后清空这轮死亡计时；怪若还没活，下一轮会重新计时再重进
       state.map.deathSince = Object.create(null);
       state.map.enterBlocked = false;
@@ -1898,14 +1906,25 @@ RUNTIME_JS = r"""
     try { Promise.resolve(raw).catch(() => {}); } catch (_) { /* 忽略游戏自己的拒绝 */ }
     return new Promise(resolve => {
       const t0 = now();
+      let sawLoading = false;
       const check = () => {
         let world = null;
         try { world = holder[mapCfg.core]; } catch (_) { world = null; }
-        const changed = world && world !== before;
-        if (changed || now() - t0 > 2500) {
+        try {
+          const st2 = holder[mapCfg.state];
+          if (st2 && mapCfg.changing && st2[mapCfg.changing]) sawLoading = true;
+          if (st2 && st2.MAOP === true) sawLoading = true;
+        } catch (_) { /* ignore */ }
+        const changed = (world && world !== before) || sawLoading;
+        if (changed) {
           // 再压 600ms，避免加载页在这一瞬间又闪一下
           setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
           resolve(true);
+          return;
+        }
+        if (now() - t0 > 2500) {
+          // 游戏根本没开始切图（拒绝/战斗/过场）：返回 false，别假装成功
+          resolve(false);
           return;
         }
         setTimeout(check, 80);
