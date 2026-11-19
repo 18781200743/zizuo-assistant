@@ -22,6 +22,8 @@ pyinstaller --noconfirm --clean --windowed \
   --osx-bundle-identifier com.zizuo.assist \
   --target-arch x86_64 \
   --add-data "app/assist_mapping.json:app" \
+  --add-data "app/instructions.json:app" \
+  --add-data "app/automation_config.json:app" \
   main.py
 
 # ad-hoc 签名（不是开发者签名，但能让本机少一点麻烦）

@@ -34,7 +34,20 @@ from .gacha_store import (
     ui_dir,
 )
 from .game_window import GAME_WINDOW_TITLE, SIZE_PRESETS, open_game_window
-from .game_assist import GameAssist
+from .game_assist import GameAssist, load_mapping
+from .instruction_library import (
+    CATEGORY_ALL,
+    delete_user_instruction,
+    export_code,
+    format_content,
+    import_code,
+    library_categories,
+    library_instructions,
+    load_library,
+    save_user_instruction,
+    script_title,
+)
+from .instruction_runner import InstructionRunner
 from .build_info import dev_mode
 from .gacha_cdp import GachaCdp
 
@@ -223,6 +236,15 @@ class AppUI:
         self._game_proc = None
         self._loading_slot = False
         self._assist_auto_started = False
+        self.instruction_runner = InstructionRunner(
+            lambda: getattr(self.assist, "bridge", None),
+            log=self.append_log,
+            on_step=self._on_instruction_step,
+            on_finished=self._on_instruction_finished,
+        )
+        self.cmd_library: Dict[str, Any] = load_library()
+        self.cmd_category: int = CATEGORY_ALL
+        self.cmd_rows: List[Dict[str, Any]] = []
         # 开发模式：源码运行显示开发功能；打包成 exe 默认隐藏（--dev / ZIZUO_DEV=1 可强制打开）
         self.dev_mode = dev_mode()
         self.record_status = tk.StringVar(value="录制: 未开始（游戏窗口内相对坐标）")
@@ -336,6 +358,17 @@ class AppUI:
             command=lambda: self._switch_mode("assist"),
         )
         self._mode_btn_assist.pack(side=tk.LEFT, padx=(6, 0))
+        self._mode_btn_commands = tk.Button(
+            mode_bar,
+            text="运行指令",
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=8,
+            font=("Microsoft YaHei UI", 10, "bold"),
+            command=lambda: self._switch_mode("commands"),
+        )
+        self._mode_btn_commands.pack(side=tk.LEFT, padx=(6, 0))
         ttk.Separator(self.root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=18, pady=(8, 0))
 
         # 窗口参数：变量始终创建（保存/读取要用），控件只在开发模式显示
@@ -387,11 +420,13 @@ class AppUI:
         self._page_slots = ttk.Frame(self._content, padding=4)
         self._page_gacha = ttk.Frame(self._content, padding=4)
         self._page_assist = ttk.Frame(self._content, padding=4)
+        self._page_commands = ttk.Frame(self._content, padding=4)
         self._scroll_canvases: Dict[str, tk.Canvas] = {}
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
         self._build_slots_tab(self._page_slots)
         self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
         self._build_assist_tab(self._make_scroll(self._page_assist, "assist"))
+        self._build_commands_tab(self._page_commands)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self._page_gacha.pack(fill=tk.BOTH, expand=True)
         self._switch_mode("gacha")
@@ -411,10 +446,12 @@ class AppUI:
         pages = {
             "gacha": self._page_gacha,
             "assist": self._page_assist,
+            "commands": self._page_commands,
         }
         buttons = {
             "gacha": self._mode_btn_gacha,
             "assist": self._mode_btn_assist,
+            "commands": self._mode_btn_commands,
         }
         for name, page in pages.items():
             if name == mode:
@@ -824,6 +861,253 @@ class AppUI:
             ttk.Button(row, text="保存辅助设置", command=self.save_all).pack(side=tk.LEFT, padx=2)
 
         self.root.after(800, self._tick_assist)
+
+    # ---------------------------------------------------------------- 运行指令
+
+    def _build_commands_tab(self, parent: ttk.Frame) -> None:
+        c = self.colors
+        bar = tk.Frame(parent, bg=c["page"])
+        bar.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(
+            bar, text="运行指令", bg=c["page"], fg=c["text"], font=("Microsoft YaHei UI", 11, "bold")
+        ).pack(side=tk.LEFT)
+        self.cmd_status = tk.StringVar(value="选一条指令，点「运行」")
+        tk.Label(bar, textvariable=self.cmd_status, bg=c["page"], fg="#1a4d8f").pack(side=tk.LEFT, padx=12)
+        ttk.Button(bar, text="停止", width=8, command=self.stop_instruction).pack(side=tk.RIGHT)
+        self.cmd_run_btn = ttk.Button(bar, text="运行", width=10, style="Accent.TButton", command=self.run_instruction)
+        self.cmd_run_btn.pack(side=tk.RIGHT, padx=6)
+
+        cats = tk.Frame(parent, bg=c["page"])
+        cats.pack(fill=tk.X, pady=(0, 8))
+        self._cmd_cat_buttons: Dict[int, tk.Button] = {}
+        for cat in library_categories(self.cmd_library):
+            btn = tk.Button(
+                cats,
+                text=cat["name"],
+                relief=tk.FLAT,
+                bd=0,
+                padx=14,
+                pady=5,
+                font=("Microsoft YaHei UI", 9),
+                command=lambda cid=int(cat["id"]): self._select_cmd_category(cid),
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 6))
+            self._cmd_cat_buttons[int(cat["id"])] = btn
+        tk.Label(cats, text="搜索", bg=c["page"], fg=c["sub"]).pack(side=tk.LEFT, padx=(14, 4))
+        self.cmd_search_var = tk.StringVar()
+        search = ttk.Entry(cats, textvariable=self.cmd_search_var, width=16)
+        search.pack(side=tk.LEFT)
+        search.bind("<Return>", lambda _e: self.refresh_command_list())
+        ttk.Button(cats, text="搜索", width=6, command=self.refresh_command_list).pack(side=tk.LEFT, padx=4)
+
+        mid = ttk.Panedwindow(parent, orient=tk.HORIZONTAL)
+        mid.pack(fill=tk.BOTH, expand=True)
+        left = ttk.Frame(mid, padding=4)
+        right = ttk.Frame(mid, padding=4)
+        mid.add(left, weight=2)
+        mid.add(right, weight=5)
+
+        self.cmd_list_hint = tk.StringVar(value="")
+        ttk.Label(left, textvariable=self.cmd_list_hint).pack(anchor=tk.W)
+        list_frame = ttk.Frame(left)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=4)
+        self.cmd_list = tk.Listbox(list_frame, activestyle="none", exportselection=False)
+        cmd_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.cmd_list.yview)
+        self.cmd_list.configure(yscrollcommand=cmd_sb.set)
+        self.cmd_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cmd_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cmd_list.bind("<<ListboxSelect>>", lambda _e: self._show_command_detail())
+        self.cmd_list.bind("<Double-Button-1>", lambda _e: self.run_instruction())
+
+        self.cmd_title_var = tk.StringVar(value="指令详情")
+        ttk.Label(
+            right, textvariable=self.cmd_title_var, font=("Microsoft YaHei UI", 10, "bold")
+        ).pack(anchor=tk.W)
+        text_frame = ttk.Frame(right)
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=4)
+        self.cmd_text = tk.Text(text_frame, wrap=tk.NONE, height=18, undo=False)
+        text_sb = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.cmd_text.yview)
+        self.cmd_text.configure(yscrollcommand=text_sb.set)
+        self.cmd_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cmd_text.configure(state=tk.DISABLED)
+
+        row = ttk.Frame(right)
+        row.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(row, text="复制", width=8, command=self.copy_instruction).pack(side=tk.LEFT)
+        ttk.Button(row, text="导出指令码", width=11, command=self.export_instruction).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="导入指令码", width=11, command=self.import_instruction).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="保存为我的", width=11, command=self.save_instruction).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="删除", width=8, command=self.delete_instruction).pack(side=tk.LEFT, padx=4)
+
+        ttk.Label(
+            parent,
+            text="提示：移动/传送 用参考工具的后台参数（摇杆 50%,78%、半径 8%）；采集 是瞬移到最近的资源点等游戏自己采，属于实验功能。",
+            foreground="#6b7280",
+        ).pack(anchor=tk.W, pady=(6, 0))
+
+        self.refresh_command_list()
+        self._select_cmd_category(CATEGORY_ALL)
+
+    def _select_cmd_category(self, category_id: int) -> None:
+        self.cmd_category = category_id
+        self.refresh_command_list()
+        c = self.colors
+        for cid, btn in getattr(self, "_cmd_cat_buttons", {}).items():
+            if cid == category_id:
+                btn.configure(bg=c["accent"], fg="#ffffff", activebackground=c["accent"], activeforeground="#ffffff")
+            else:
+                btn.configure(bg=c["soft"], fg=c["text"], activebackground="#e5e7eb", activeforeground=c["text"])
+
+    def refresh_command_list(self) -> None:
+        if not hasattr(self, "cmd_list"):
+            return
+        self.cmd_library = load_library()
+        keyword = self.cmd_search_var.get().strip() if hasattr(self, "cmd_search_var") else ""
+        self.cmd_rows = library_instructions(self.cmd_library, self.cmd_category, keyword)
+        self.cmd_list.delete(0, tk.END)
+        for item in self.cmd_rows:
+            content = str(item.get("content") or "")
+            count = sum(1 for line in content.splitlines() if line.strip() and not line.strip().startswith("#"))
+            mark = " ·我的" if item.get("custom") else ""
+            self.cmd_list.insert(tk.END, "%s（%d 步%s）" % (item.get("title") or "未命名", count, mark))
+        total = len(self.cmd_library.get("instructions") or [])
+        self.cmd_list_hint.set("共 %d 条，当前显示 %d 条" % (total, len(self.cmd_rows)))
+        if self.cmd_rows:
+            self.cmd_list.selection_set(0)
+            self._show_command_detail()
+
+    def _selected_command(self) -> Optional[Dict[str, Any]]:
+        try:
+            index = int(self.cmd_list.curselection()[0])
+        except (IndexError, AttributeError, tk.TclError):
+            return None
+        if 0 <= index < len(self.cmd_rows):
+            return self.cmd_rows[index]
+        return None
+
+    def _show_command_detail(self) -> None:
+        item = self._selected_command()
+        if not item:
+            return
+        self.cmd_title_var.set("%s%s" % (item.get("title") or "", "（我的）" if item.get("custom") else ""))
+        self.cmd_text.configure(state=tk.NORMAL)
+        self.cmd_text.delete("1.0", tk.END)
+        self.cmd_text.insert("1.0", format_content(str(item.get("content") or "")))
+        self.cmd_text.configure(state=tk.DISABLED)
+
+    def run_instruction(self) -> None:
+        item = self._selected_command()
+        if not item:
+            messagebox.showinfo("运行指令", "先在左边选一条指令")
+            return
+        if self.instruction_runner.running:
+            messagebox.showinfo("运行指令", "上一条还在跑，先点「停止」")
+            return
+        content = format_content(str(item.get("content") or ""))
+        try:
+            self.instruction_runner.start(
+                str(item.get("title") or script_title(content) or "指令"), content, load_mapping()
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("运行指令", str(exc))
+            return
+        self.cmd_status.set("运行中…")
+
+    def stop_instruction(self) -> None:
+        if self.instruction_runner.running:
+            self.instruction_runner.stop()
+            self.cmd_status.set("正在停止…")
+
+    def _on_instruction_step(self, index: int, total: int, text: str) -> None:
+        def _do() -> None:
+            self.cmd_status.set("运行中 %d/%d：%s" % (index, total, text))
+
+        try:
+            self.root.after(0, _do)
+        except tk.TclError:
+            pass
+
+    def _on_instruction_finished(self, ok: bool, message: str) -> None:
+        def _do() -> None:
+            self.cmd_status.set(("完成：" if ok else "已停：") + message)
+
+        try:
+            self.root.after(0, _do)
+        except tk.TclError:
+            pass
+
+    def copy_instruction(self) -> None:
+        item = self._selected_command()
+        if not item:
+            return
+        content = format_content(str(item.get("content") or ""))
+        self.root.clipboard_clear()
+        self.root.clipboard_append(content)
+        self.cmd_status.set("已复制到剪贴板")
+
+    def export_instruction(self) -> None:
+        item = self._selected_command()
+        if not item:
+            return
+        code = export_code(str(item.get("title") or "指令"), format_content(str(item.get("content") or "")))
+        self.root.clipboard_clear()
+        self.root.clipboard_append(code)
+        messagebox.showinfo("导出指令码", "指令码已复制，发给别人后让对方点「导入指令码」粘贴。")
+
+    def import_instruction(self) -> None:
+        text = simpledialog.askstring(
+            "导入指令码", "粘贴指令码（或直接粘贴脚本正文）：", parent=self.root
+        )
+        if not text:
+            return
+        try:
+            title, content = import_code(text)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("导入指令码", str(exc))
+            return
+        name = simpledialog.askstring("导入指令码", "保存成什么名字？", initialvalue=title, parent=self.root)
+        if not name:
+            return
+        try:
+            save_user_instruction(name.strip(), content)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("导入指令码", str(exc))
+            return
+        self.refresh_command_list()
+        self.cmd_status.set("已导入：%s" % name.strip())
+
+    def save_instruction(self) -> None:
+        item = self._selected_command()
+        if not item:
+            return
+        default = str(item.get("title") or "")
+        name = simpledialog.askstring("保存为我的指令", "指令名称：", initialvalue=default, parent=self.root)
+        if not name:
+            return
+        content = self.cmd_text.get("1.0", tk.END).strip() if hasattr(self, "cmd_text") else ""
+        if not content:
+            content = str(item.get("content") or "")
+        try:
+            save_user_instruction(
+                name.strip(), content, old_title=str(item.get("title") or "") if item.get("custom") else None
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("保存指令", str(exc))
+            return
+        self.refresh_command_list()
+        self.cmd_status.set("已保存：%s" % name.strip())
+
+    def delete_instruction(self) -> None:
+        item = self._selected_command()
+        if not item or not item.get("custom"):
+            messagebox.showinfo("删除指令", "只能删除「我的」里的指令")
+            return
+        if not messagebox.askyesno("删除指令", "删除「%s」？" % (item.get("title") or "")):
+            return
+        delete_user_instruction(str(item.get("title") or ""))
+        self.refresh_command_list()
+        self.cmd_status.set("已删除")
 
     def _assist_names(self) -> Dict[str, Any]:
         assist = normalize_assist(self.config.get("assist"))

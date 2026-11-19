@@ -135,6 +135,11 @@ def make_exe() -> Path | None:
         # 字段映射是数据文件，必须显式带进包里，否则 exe 会说「没有字段映射」
         "--add-data",
         f"{ROOT / 'app' / 'assist_mapping.json'};app",
+        # 运行指令：指令库 + 后台地图/摇杆参数
+        "--add-data",
+        f"{ROOT / 'app' / 'instructions.json'};app",
+        "--add-data",
+        f"{ROOT / 'app' / 'automation_config.json'};app",
         str(ROOT / "main.py"),
     ]
     print("运行:", " ".join(cmd))
