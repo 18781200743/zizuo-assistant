@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from .instruction_library import ScriptError, parse_script
+from .instruction_library import ScriptError, library_instructions, load_library, parse_script
 
 DIRECTIONS: Dict[str, tuple] = {
     "上": (0.0, -1.0),
@@ -536,7 +536,8 @@ class InstructionRunner:
             self._chest(args)
             return
         if name in ("跳转", "jump"):
-            raise RuntimeError("跳转(槽位)还没做（需要先做指令槽位）")
+            self._jump(args)
+            return
         raise RuntimeError("不认识的指令：%s" % name)
 
     # ---- 基础指令
@@ -723,6 +724,42 @@ class InstructionRunner:
             else:
                 self._log_line("    传送点定位失败：%s" % str(picked))
         time.sleep(0.8)
+
+    def _jump(self, args: List[str]) -> None:
+        """跳转(指令名或编号)：接着跑另一条指令（我的优先，最多套 5 层）。"""
+        if not args:
+            raise RuntimeError("跳转 需要写目标指令名或编号")
+        key = str(args[0]).strip()
+        library = load_library()
+        mine = library_instructions(library, -1)
+        pool = mine or library_instructions(library, 0)
+        target: Optional[Dict[str, Any]] = None
+        if key.isdigit():
+            index = int(key) - 1
+            if 0 <= index < len(pool):
+                target = pool[index]
+        if target is None:
+            for item in library_instructions(library, 0):
+                if str(item.get("title") or "").strip() == key:
+                    target = item
+                    break
+        if target is None:
+            raise RuntimeError("跳转目标不存在：%s" % key)
+        depth = getattr(self, "_jump_depth", 0)
+        if depth >= 5:
+            raise RuntimeError("跳转层数太深（可能有死循环）")
+        steps = parse_script(str(target.get("content") or ""))
+        title = str(target.get("title") or key)
+        self._log_line("    ↳ 跳转到「%s」（%d 步）" % (title, len(steps)))
+        self._jump_depth = depth + 1
+        try:
+            for step in steps:
+                if self._stop.is_set():
+                    raise _Stopped()
+                self._exec(str(step["name"]), step["args"], self._mapping)
+        finally:
+            self._jump_depth = depth
+        self._log_line("    ↳ 「%s」跑完，继续后面的步骤" % title)
 
     def _chest(self, args: List[str]) -> None:
         """开宝箱(个数,奖励模式)：个数不填=尽量全开；奖励模式=普通/双倍。"""

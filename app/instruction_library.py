@@ -93,7 +93,14 @@ def library_instructions(
                 continue
         rows.append(item)
     if category_id == CATEGORY_ALL:
-        rows.sort(key=lambda it: (0 if it.get("custom") else 1, int(it.get("id") or 0)))
+        def _order(item: Dict[str, Any]):
+            custom = 0 if item.get("custom") else 1
+            try:
+                return (custom, 0, float(item.get("id") or 0), "")
+            except (TypeError, ValueError):
+                return (custom, 1, 0.0, str(item.get("title") or ""))
+
+        rows.sort(key=_order)
     return rows
 
 
