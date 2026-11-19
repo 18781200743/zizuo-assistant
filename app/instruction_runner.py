@@ -233,6 +233,77 @@ def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
 """ % (_js(mapping), _js(str(teleport_id)))
 
 
+def _js_chest_service() -> str:
+    """宝箱服务 = 模块服务容器 HQQD 里的 HDPD（实测）。"""
+    return r"""
+(function () {
+  for (var pair of window.System.entries()) {
+    var ex = pair[1];
+    if (!ex || typeof ex !== 'object') continue;
+    var gen = ex.HQQD;
+    if (gen && gen.VKXX && gen.HDPD) return gen.HDPD;
+  }
+  return null;
+})()
+"""
+
+
+def _js_chest_targets(mapping: Dict[str, Any]) -> str:
+    """当前地图里能开宝箱的 BOSS（名字带 BOSS 的怪）。"""
+    return r"""
+(function () {
+  try {
+    var m = %s;
+    var b = (m.builds || {})[m.current] || {};
+    var mc = b.map || {};
+    var u = mc.unit || {};
+    var world = window[mc.holder || 'VKXX'];
+    var core = world[mc.core || 'ZRRU'];
+    var units = core[mc.manager || 'PFTN']()[mc.container || 'UFYI']();
+    var words = (mc.bossKeywords || ['boss', '首领', '精英', '头目']).map(function (w) { return String(w).toLowerCase(); });
+    var rows = [];
+    units[mc.each || 'OOIV'](function (index, unit) {
+      if (!unit) return false;
+      var tag = String(unit[u.tag || 'CLRB'] || '');
+      if (tag !== 'Monster') return false;
+      var name = String((unit[u.point || 'YLYI'] || {}).name || '');
+      var text = name.toLowerCase();
+      var hit = words.some(function (w) { return text.indexOf(w) >= 0; });
+      if (!hit) return false;
+      rows.push({cfg: String(unit[u.configId || 'EFDX']), uid: String(unit.PLVT), name: name});
+      return false;
+    });
+    return JSON.stringify(rows);
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % _js(mapping)
+
+
+def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
+    return r"""
+(function () {
+  try {
+    var chest = %s;
+    if (!chest) return 'ERR 没找到宝箱服务';
+    window.__zzClaim = {s: 'pending'};
+    var cfg = %s, uid = %s, mult = %d;
+    Promise.resolve()
+      .then(function () { return chest.DELV(cfg); })
+      .then(function () { return chest.KMYW(cfg, mult, true, uid, 0); })
+      .then(function () { return chest.IVTK(cfg, mult, true); })
+      .then(function (r) {
+        var text = JSON.stringify(r) || '';
+        var bad = text.indexOf('Err') >= 0 || text.indexOf('claimed') >= 0;
+        window.__zzClaim = {s: bad ? 'err' : 'ok', raw: text.slice(0, 200)};
+      }, function (e) {
+        window.__zzClaim = {s: 'err', raw: String((e && e.message) || e).slice(0, 200)};
+      });
+    return 'called';
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % (_js_chest_service(), _js(str(cfg)), _js(str(uid)), int(mult))
+
+
 def _js_collect_hook(mapping: Dict[str, Any]) -> str:
     """在采集事件分发器上装一个计数器：采一次 +1，用来判断「到底采到没有」。"""
     return r"""
@@ -462,7 +533,8 @@ class InstructionRunner:
             self._collect(args)
             return
         if name in ("开宝箱", "chest"):
-            raise RuntimeError("开宝箱还没做（正在研究游戏开箱接口）")
+            self._chest(args)
+            return
         if name in ("跳转", "jump"):
             raise RuntimeError("跳转(槽位)还没做（需要先做指令槽位）")
         raise RuntimeError("不认识的指令：%s" % name)
@@ -651,6 +723,68 @@ class InstructionRunner:
             else:
                 self._log_line("    传送点定位失败：%s" % str(picked))
         time.sleep(0.8)
+
+    def _chest(self, args: List[str]) -> None:
+        """开宝箱(个数,奖励模式)：个数不填=尽量全开；奖励模式=普通/双倍。"""
+        limit = 0
+        if args and str(args[0]).strip() != "":
+            try:
+                limit = max(0, int(float(str(args[0]).strip())))
+            except ValueError as exc:
+                raise RuntimeError("开宝箱 的个数必须是数字") from exc
+        mode = ""
+        if len(args) > 1:
+            mode = str(args[1]).strip()
+        mult = 2 if ("双倍" in mode or mode.lower() in ("double", "2")) else 1
+        mapping = getattr(self, "_mapping", None) or {}
+        raw = self._eval(_js_chest_targets(mapping))
+        text = str(raw)
+        if text.startswith("ERR"):
+            raise RuntimeError("开宝箱失败：%s" % text[4:])
+        try:
+            targets = json.loads(text) if text.startswith("[") else []
+        except ValueError:
+            targets = []
+        if not targets:
+            self._log_line("    当前地图没有可开箱的 BOSS")
+            return
+        self._log_line("    发现 %d 个 BOSS，奖励模式：%s" % (len(targets), "双倍" if mult == 2 else "普通"))
+        done = 0
+        for target in targets:
+            if self._stop.is_set():
+                raise _Stopped()
+            if limit and done >= limit:
+                break
+            cfg = str(target.get("cfg") or "")
+            uid = str(target.get("uid") or "")
+            if not cfg:
+                continue
+            self._eval(_js_chest_claim(cfg, uid, mult))
+            state = {}
+            for _ in range(12):
+                if self._stop.is_set():
+                    raise _Stopped()
+                time.sleep(0.5)
+                try:
+                    state = json.loads(str(self._eval("JSON.stringify(window.__zzClaim || {})") or "{}"))
+                except ValueError:
+                    state = {}
+                if state.get("s") in ("ok", "err"):
+                    break
+            if state.get("s") == "ok":
+                done += 1
+                self._log_line("    开箱成功：%s" % (target.get("name") or cfg))
+                self._sleep(0.8)
+            else:
+                reason = str(state.get("raw") or "")
+                if "claimed" in reason:
+                    reason = "已经领过"
+                elif "Err" in reason:
+                    reason = reason[reason.find("Err"):][:40]
+                else:
+                    reason = reason[:40] or "未知原因"
+                self._log_line("    跳过 %s（%s）" % (target.get("name") or cfg, reason))
+        self._log_line("    共开箱 %d 个" % done)
 
     def _collect(self, args: List[str]) -> None:
         keyword = str(args[0]).strip() if args else "活动"
