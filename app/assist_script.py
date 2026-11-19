@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 41
+RUNTIME_VERSION = 45
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 41
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 41;
+  const VERSION = 45;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -100,6 +100,8 @@ RUNTIME_JS = r"""
       busy: false,
       savedMapId: 0,
       lastResult: '',
+      returnTo: null,
+      returnNextAt: 0,
     },
     // 闪现寻怪：传送到最近的怪（或指定名字/编号的怪）
     blink: { busy: false, last: '', reason: '尚未使用' },
@@ -1567,6 +1569,16 @@ RUNTIME_JS = r"""
 
   /** 营地坐标：游戏自己的返回点（TCLA / CLAT，返回按钮用的就是它）。 */
   function campSpot(core, cfg) {
+    // 有些地图（如海底）游戏给的 CLAT 不在当前区域的坐标系里，可以在映射表里写死
+    try {
+      const mapCfg = mapConfig();
+      const holder = window[mapCfg.holder];
+      const st = holder && mapCfg.state ? holder[mapCfg.state] : null;
+      const id = st ? st[mapCfg.mapId] : null;
+      const table = (cfg && cfg.byMap) || {};
+      const fixed = id === null || id === undefined ? null : table[String(id)];
+      if (fixed && fixed.length === 2) return { x: Number(fixed[0]), y: Number(fixed[1]) };
+    } catch (_) { /* 读不到就用游戏自己的 */ }
     const names = (cfg && cfg.campCoords) || ['TCLA', 'CLAT'];
     for (const name of names) {
       try {
@@ -1615,6 +1627,8 @@ RUNTIME_JS = r"""
     const mapCfg = mapConfig();
     const world = window[mapCfg.holder];
     if (!world || typeof world.ZAVH !== 'function') throw Error('游戏没有传送入口（VKXX.ZAVH）');
+    // 游戏在加载状态会直接忽略传送请求，先清掉
+    dropLoading();
     world.ZAVH(x, y, true, function () { /* 不等它 */ });
   }
 
@@ -1771,6 +1785,27 @@ RUNTIME_JS = r"""
       box.reason = '「原地复活」会被服务端判为数据不一致，已停用；请用「传送回营地复活」';
       return;
     }
+    // 上一轮复活成功但没传回原位：继续补传，别把人留在营地
+    if (box.returnTo && now() < box.returnTo.until) {
+      let p = null;
+      try { p = teamLeaderSpot(); } catch (_) { p = null; }
+      if (p && Math.abs(p.x - box.returnTo.x) < 320 && Math.abs(p.y - box.returnTo.y) < 320) {
+        box.returnTo = null;
+        box.reason = '已回到刚才的位置';
+      } else if (!box.busy) {
+        if (now() >= (box.returnNextAt || 0)) {
+          box.returnNextAt = now() + 1500;
+          try {
+            teleportFire(box.returnTo.x, box.returnTo.y);
+            box.reason = '正在传回刚才的位置…';
+          } catch (_) { /* ignore */ }
+        }
+        return;
+      }
+    } else if (box.returnTo) {
+      box.returnTo = null;
+    }
+
     const nowMs = now();
     if (box.busy || nowMs < box.nextTryAt) return;
     // 场景遍历比较重，最多每 400ms 找一次面板
@@ -1884,55 +1919,78 @@ RUNTIME_JS = r"""
         return;
       }
 
+      let spot = null;
       Promise.resolve()
         .then(async () => {
-          const spot = teamLeaderSpot();
+          spot = teamLeaderSpot();
           if (!spot) throw Error('读不到队伍坐标');
           const core = window[mapConfig().holder][mapConfig().core];
           const camp = campSpot(core, reviveCfg.campTeleport);
           if (!camp) throw Error('读不到营地坐标（TCLA/CLAT）');
 
-          // 第一跳：传营地（不等加载）
-          box.reason = '正在传送到营地…';
-          teleportFire(camp.x, camp.y);
+          const near2 = (p, t) => !!p && !!t
+            && Math.abs(p.x - t.x) < 320 && Math.abs(p.y - t.y) < 320;
 
-          // 服务端接受传送的瞬间就把倒地的英雄拉起来，一般 0.1~0.5 秒
-          box.reason = '已到营地，等英雄复活…';
-          let left = -1;
+          // 第一跳：传营地。
+          // 注意：海底这类图「人已经在营地」时再传营地会被当成传送门，会飞到别处
+          let atCamp = near2(teamLeaderSpot(), camp);
+          if (!atCamp) {
+            box.reason = '正在传送到营地…';
+            teleportFire(camp.x, camp.y);
+          } else {
+            box.reason = '已在营地，等英雄复活…';
+          }
+
+          // 等复活：不同地图落地时间不一样（海底要 2~3 秒），最多等 10 秒
+          let revived = false;
           const t1 = now();
-          while (now() - t1 < 4000) {
-            await new Promise(r => setTimeout(r, 80));
+          while (now() - t1 < 10000) {
+            await new Promise(r => setTimeout(r, 100));
+            let left = 1;
             try { left = deadHeroCount(); } catch (_) { left = 1; }
-            if (left === 0) break;
+            if (left === 0) { revived = true; break; }
+            let p = null;
+            try { p = teamLeaderSpot(); } catch (_) { p = null; }
+            if (!atCamp && near2(p, camp)) {
+              atCamp = true;
+              box.reason = '已到营地，等英雄复活…';
+            }
           }
-          if (left !== 0) {
+          if (!revived) {
             dropLoading();
-            throw Error('到营地后英雄没有复活（怪可能已经回血）');
+            throw Error('到营地后英雄没有复活（这张图的复活点可能和其它图不一样）');
           }
 
-          // 关加载遮罩，否则下一跳会被游戏忽略
-          dropLoading();
-
-          // 第二跳：立刻传回原位
+          // 第二跳：回原地，最多重试 8 秒
           box.reason = '已复活，正在回原地…';
-          teleportFire(spot.x, spot.y);
+          box.returnTo = { x: spot.x, y: spot.y, until: now() + 20000 };
           let back = false;
           const t2 = now();
-          while (now() - t2 < 4000) {
-            await new Promise(r => setTimeout(r, 80));
-            const p = teamLeaderSpot();
-            if (p && Math.abs(p.x - spot.x) < 300 && Math.abs(p.y - spot.y) < 300) { back = true; break; }
+          while (now() - t2 < 8000) {
+            teleportFire(spot.x, spot.y);
+            const t3 = now();
+            while (now() - t3 < 1200) {
+              await new Promise(r => setTimeout(r, 100));
+              let p = null;
+              try { p = teamLeaderSpot(); } catch (_) { p = null; }
+              if (near2(p, spot)) { back = true; break; }
+            }
+            if (back) break;
+            await new Promise(r => setTimeout(r, 200));
           }
           dropLoading();
+          if (back) box.returnTo = null;
 
           box.count += 1;
           const cost = ((now() - began) / 1000).toFixed(1);
           box.lastResult = back
             ? '快速复活完成（' + cost + ' 秒）'
-            : '复活成功，但没传回原地（' + cost + ' 秒，可能被怪打断）';
+            : '已复活，正在补传回原地（' + cost + ' 秒）';
           box.reason = box.lastResult + ' · 今日 ' + box.count + ' 次';
         })
         .catch(cause => {
+          // 没复活成功也别把人扔在营地/奇怪的位置，先传回原来的地方
+          try { if (spot) teleportFire(spot.x, spot.y); } catch (_) { /* ignore */ }
           box.reason = '传送复活失败：' + msgOf(cause);
         })
         .then(() => {
