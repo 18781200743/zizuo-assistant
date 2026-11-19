@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 78
+RUNTIME_VERSION = 79
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 78
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 78;
+  const VERSION = 79;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1976,6 +1976,78 @@ RUNTIME_JS = r"""
     return out;
   }
 
+  /** 当前地图里活着的怪（名字/坐标/距离），按距离从近到远。 */
+  function monsterList() {
+    try {
+      const mapCfg = mapConfig();
+      const ctx = mapContext();
+      const core = ctx.core;
+      const world = ctx.holder;
+      const mgr = core[mapCfg.manager]();
+      const team = core[mapCfg.team](world[mapCfg.player]);
+      const ids = mgr[mapCfg.members](team) || [];
+      const leader = ids.length ? core[mapCfg.read](ids[0]) : null;
+      const lx = leader ? leader.ADUX : 0;
+      const ly = leader ? leader.WUZI : 0;
+      const out = [];
+      ctx.units[ctx.cfg.each](function (_index, unit) {
+        if (!unit) return false;
+        const u = ctx.cfg.unit;
+        if (typeof unit[u.monster] === 'function' && unit[u.monster]() !== true) return false;
+        if (typeof unit[u.dead] === 'function' && unit[u.dead]()) return false;
+        const point = unit[u.point] || {};
+        out.push({
+          x: Math.round(unit.ADUX),
+          y: Math.round(unit.WUZI),
+          name: String(point.name || ''),
+          cfg: unit[u.id],
+          d: Math.round(Math.hypot(unit.ADUX - lx, unit.WUZI - ly)),
+        });
+        return false;
+      });
+      out.sort((a, b) => a.d - b.d);
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /** 直接飞到/闪到指定坐标。mode = instant（瞬移）| fly（飞过去，播过场）。 */
+  function blinkToCoords(x, y, mode) {
+    const box = state.blink;
+    if (box.busy) throw Error('上一次闪现还没结束');
+    const fly = mode === 'fly';
+    box.busy = true;
+    const began = now();
+    box.reason = (fly ? '正在飞过去…' : '正在闪现…');
+    Promise.resolve()
+      .then(async () => {
+        if (fly) {
+          await teleportTo(x, y);
+          box.last = '已到达（' + ((now() - began) / 1000).toFixed(1) + ' 秒）';
+        } else {
+          teleportNoFx(x, y);
+          let arrived = false;
+          const deadline = now() + 4000;
+          while (now() < deadline) {
+            await new Promise(r => setTimeout(r, 60));
+            let p = null;
+            try { p = teamLeaderSpot(); } catch (_) { p = null; }
+            if (p && Math.abs(p.x - x) < 260 && Math.abs(p.y - y) < 260) { arrived = true; break; }
+          }
+          box.last = arrived
+            ? '已闪现到 (' + Math.round(x) + ',' + Math.round(y) + ')'
+            : '闪现没到位（可以再点一次）';
+        }
+        box.reason = box.last;
+      })
+      .catch(cause => {
+        box.reason = '移动失败：' + msgOf(cause);
+      })
+      .then(() => { box.busy = false; });
+    return { ok: true, message: fly ? '正在飞过去' : '正在闪现' };
+  }
+
   /** 闪现到最近的怪；filter 为空=最近，否则按名字包含 / 编号相等。 */
   function doBlink(filter) {
     const box = state.blink;
@@ -3094,6 +3166,15 @@ RUNTIME_JS = r"""
       return { ok: true, message: '已全部关闭（战斗数值已恢复）' };
     }
 
+    if (feature === 'blinkTo') {
+      const raw = value && typeof value === 'object' ? value : {};
+      try {
+        return blinkToCoords(Number(raw.x) || 0, Number(raw.y) || 0, raw.mode === 'fly' ? 'fly' : 'instant');
+      } catch (cause) {
+        return { ok: false, message: msgOf(cause) };
+      }
+    }
+
     if (feature === 'blink') {
       try {
         return doBlink(value);
@@ -3467,6 +3548,7 @@ RUNTIME_JS = r"""
     version: VERSION,
     snapshot,
     heroes: heroList,
+    monsters: monsterList,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

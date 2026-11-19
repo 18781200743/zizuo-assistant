@@ -557,6 +557,18 @@ class GameAssist:
         self._safe_log(f"自测：已假装击杀{label}，{seconds:g} 秒后应重进地图")
         return {"ok": True, "id": text, "feature": feature}
 
+    def list_monsters(self) -> list:
+        """读当前地图里活着的怪（名字/坐标/距离）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.monsters "
+                "? window.__zzAssist.monsters() : [])"
+            )
+            data = json.loads(raw or "[]")
+            return data if isinstance(data, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
     def list_heroes(self) -> list:
         """读游戏里拥有的英雄列表（编号/名字/品质）。"""
         try:

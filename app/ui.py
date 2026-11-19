@@ -748,12 +748,35 @@ class AppUI:
         ttk.Label(tools, textvariable=self.assist_revive_status, foreground="#666", wraplength=980).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
 
         ttk.Label(tools, text="闪现寻怪").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
-        self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
-        ttk.Entry(tools, textvariable=self.assist_blink_var, width=24).grid(row=2, column=1, columnspan=2, sticky=tk.W, padx=8, pady=(10, 0))
-        self.assist_blink_btn = ttk.Button(tools, text="闪现", width=10, command=self.blink_assist)
+        self.assist_blink_mode_var = tk.StringVar(value="瞬移")
+        ttk.Combobox(
+            tools,
+            textvariable=self.assist_blink_mode_var,
+            values=["瞬移", "飞过去"],
+            width=8,
+            state="readonly",
+        ).grid(row=2, column=1, sticky=tk.W, padx=8, pady=(10, 0))
+        ttk.Button(tools, text="刷新怪物", width=10, command=self.refresh_blink_list).grid(
+            row=2, column=2, sticky=tk.W, pady=(10, 0)
+        )
+        self.assist_blink_btn = ttk.Button(tools, text="过去", width=10, command=self.blink_assist)
         self.assist_blink_btn.grid(row=2, column=3, padx=(14, 10), pady=(10, 0))
-        self.assist_blink_status = tk.StringVar(value="留空 = 最近的怪；填名字/编号 = 指定怪")
-        ttk.Label(tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=560).grid(row=2, column=4, sticky=tk.W, pady=(10, 0))
+        self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
+        ttk.Label(
+            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=560
+        ).grid(row=2, column=4, sticky=tk.W, pady=(10, 0))
+
+        list_frame = ttk.Frame(tools)
+        list_frame.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(6, 0))
+        self.assist_monster_list = tk.Listbox(list_frame, height=7, activestyle="none")
+        list_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.assist_monster_list.yview)
+        self.assist_monster_list.configure(yscrollcommand=list_sb.set)
+        self.assist_monster_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        list_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.assist_monster_list.bind("<Double-Button-1>", lambda _e: self.blink_assist())
+        self._monster_rows: List[Dict[str, Any]] = []
+        # 兼容旧配置（名字过滤），没有输入框也不会报错
+        self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
         # ---------- 战斗参数 ----------
         combat = ttk.LabelFrame(parent, text="战斗参数（改战斗数值，有风险，默认关）", padding=10)
@@ -1120,17 +1143,54 @@ class AppUI:
         self.assist_revive_status.set("手动复活中…")
         self.append_log("已发送：立即复活（免费，瞬移营地复活后回到原地）")
 
-    def blink_assist(self) -> None:
-        """闪现到最近的怪（输入框填名字/编号就传送到指定怪）。"""
+    def refresh_blink_list(self) -> None:
+        """读当前地图的怪，填到列表里。"""
         if not self.assist.running:
             self.start_assist()
-        target = self.assist_blink_var.get().strip()
-        self._read_assist_into_config()
-        self.assist.set_feature("blink", target)
-        self.assist_blink_status.set("正在闪现…" if not target else f"正在找「{target}」…")
-        self.append_log(
-            "已发送：闪现到" + (f"「{target}」" if target else "最近的怪")
+        rows = []
+        try:
+            rows = self.assist.list_monsters() or []
+        except Exception:  # noqa: BLE001
+            rows = []
+        self._monster_rows = rows
+        lb = self.assist_monster_list
+        lb.delete(0, tk.END)
+        for item in rows[:400]:
+            name = str(item.get("name") or "怪")
+            dist = int(item.get("d") or 0)
+            lb.insert(tk.END, f"{name}    距离 {dist}")
+        self.assist_blink_status.set(
+            f"当前地图 {len(rows)} 只活怪：选一只，点「过去」或双击"
+            if rows
+            else "没读到怪（先进地图、等辅助连上再刷新）"
         )
+
+    def blink_assist(self) -> None:
+        """过去：瞬移或飞过去（选列表里那只怪）。"""
+        if not self.assist.running:
+            self.start_assist()
+        mode = "fly" if self.assist_blink_mode_var.get() == "飞过去" else "instant"
+        rows = getattr(self, "_monster_rows", []) or []
+        sel = self.assist_monster_list.curselection()
+        if sel and 0 <= int(sel[0]) < len(rows):
+            item = rows[int(sel[0])]
+            self.assist.set_feature(
+                "blinkTo",
+                {"x": item.get("x"), "y": item.get("y"), "mode": mode},
+            )
+            self.assist_blink_status.set("正在飞过去…" if mode == "fly" else "正在闪现…")
+            self.append_log(
+                ("已发送：飞过去 → " if mode == "fly" else "已发送：闪现 → ")
+                + str(item.get("name") or "")
+            )
+            return
+        target = self.assist_blink_var.get().strip()
+        if not target:
+            self.assist_blink_status.set("先在列表里选一只怪，或填名字")
+            return
+        self.assist.set_feature("blink", target)
+        self.assist_blink_status.set(f"正在找「{target}」…")
+        self.append_log(f"已发送：闪现到「{target}」")
 
     def _update_assist_labels(self) -> None:
         state = self.assist.state or {}
@@ -1165,7 +1225,7 @@ class AppUI:
             state=tk.DISABLED if gap else tk.NORMAL,
             text="闪现中…" if blink.get("busy") else "闪现",
         )
-        self.assist_blink_status.set(str(blink.get("reason") or "留空 = 最近的怪；填名字/编号 = 指定怪"))
+        self.assist_blink_status.set(str(blink.get("reason") or "点「刷新怪物」，选中一只再点「过去」"))
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
