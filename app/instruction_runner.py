@@ -31,9 +31,9 @@ DIRECTIONS: Dict[str, tuple] = {
     "右下": (0.7071, 0.7071),
 }
 
-# 采集关键字（和参考工具的说明一致）
+# 采集关键字（和参考工具的说明一致；游戏里的资源点名是「火龙岛红树」「蓝矿」这种）
 COLLECT_KEYWORDS = {
-    "木材": ("木材", "木头"),
+    "木材": ("红树", "树", "木头", "木材", "木"),
     "矿石": ("矿",),
     "蓝矿石": ("蓝矿",),
     "红矿石": ("红矿",),
@@ -42,7 +42,7 @@ COLLECT_KEYWORDS = {
     "幸运草": ("幸运草",),
     "训练石": ("训练石",),
     "肉块": ("肉",),
-    "活动": ("活动", "宝箱", "礼物", "采集"),
+    "活动": ("活动", "宝箱", "礼物", "采集", "宝"),
 }
 
 
@@ -233,13 +233,14 @@ def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
 """ % (_js(mapping), _js(str(teleport_id)))
 
 
-def _js_collect_target(keyword: str, radius: int = 3) -> str:
-    """在当前地图找最近的资源点（按名字关键字），瞬移过去。"""
+def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
+    """在当前地图找最近的资源点（按名字关键字），返回坐标（不瞬移）。"""
     words = list(COLLECT_KEYWORDS.get(keyword, (keyword,)))
     return r"""
 (function () {
   try {
     var words = %s;
+    var skip = %s;
     var m = window.__zzAssistMapping || { builds: {} };
     var b = (m.builds || {})[m.current] || {};
     var mc = b.map || {};
@@ -268,18 +269,19 @@ def _js_collect_target(keyword: str, radius: int = 3) -> str:
       var text = (name + ' ' + tag).toLowerCase();
       var hit = words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
       if (!hit) return false;
+      for (var i = 0; i < skip.length; i += 1) {
+        if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
+      }
       var d = Math.hypot(unit.ADUX - lx, unit.WUZI - ly);
       if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, name: name, d: d };
       return false;
     };
     if (units && typeof units[mc.each || 'OOIV'] === 'function') units[mc.each || 'OOIV'](visit);
     if (!best) return 'none';
-    if (typeof world.ZAVH !== 'function') return 'ERR 游戏没有传送入口';
-    world.ZAVH(best.x, best.y, false, function () {});
-    return 'ok ' + best.name + ' (' + Math.round(best.x) + ',' + Math.round(best.y) + ')';
+    return JSON.stringify({name: best.name, x: Math.round(best.x), y: Math.round(best.y)});
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % _js(words)
+""" % (_js(words), _js(skip or []))
 
 
 def _js_map_state(mapping: Dict[str, Any]) -> str:
@@ -617,20 +619,93 @@ class InstructionRunner:
     def _collect(self, args: List[str]) -> None:
         keyword = str(args[0]).strip() if args else "活动"
         hits = 0
-        for _ in range(4):
+        tried: List[tuple] = []
+        for _ in range(3):
             if self._stop.is_set():
                 raise _Stopped()
-            result = self._eval(_js_collect_target(keyword))
+            result = self._eval(_js_collect_target(keyword, tried))
             text = str(result)
             if text.startswith("ERR"):
                 raise RuntimeError("采集失败：%s" % text[4:])
-            if text == "none":
+            if text == "none" or not text.startswith("{"):
                 break
+            try:
+                target = json.loads(text)
+            except ValueError:
+                break
+            tx = float(target.get("x") or 0)
+            ty = float(target.get("y") or 0)
+            tried.append((tx, ty))
             hits += 1
-            self._log_line("    采集 %s" % text[3:])
-            time.sleep(2.2)
+            self._log_line("    采集 %s（%d,%d）" % (target.get("name"), int(tx), int(ty)))
+            if not self._teleport_to(tx, ty):
+                self._log_line("    瞬移没过去（可能刚切图），这次跳过")
+                continue
+            # 贴上去再往前走一点：游戏是「站到资源上才采」
+            self._nudge_towards(target)
+            self._sleep(2.6)
         if not hits:
             self._log_line("    附近没有「%s」资源，跳过" % keyword)
+
+    def _pos(self) -> Optional[tuple]:
+        try:
+            raw = self._eval(
+                "(function(){try{var c=window.VKXX.ZRRU;var ids=c.PFTN().YUWW(c.PMMA(window.VKXX.KBVD))||[];"
+                "var u=ids.length?c.YVSZ(ids[0]):null;return u?JSON.stringify([u.ADUX,u.WUZI]):'null'}"
+                "catch(e){return 'null'}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(data, list) and len(data) == 2:
+                return float(data[0]), float(data[1])
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    def _teleport_to(self, x: float, y: float, retries: int = 3) -> bool:
+        """游戏原生瞬移（无动画）。刚进图/过场时会被丢，所以带校验重试。"""
+        for _ in range(max(1, retries)):
+            if self._stop.is_set():
+                raise _Stopped()
+            try:
+                self._eval(
+                    "(function(){try{window.VKXX.ZAVH(%s,%s,false,function(){});return 'ok'}"
+                    "catch(e){return 'ERR '+(e&&e.message||e)}})()" % (_js(float(x)), _js(float(y)))
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(1.0)
+            pos = self._pos()
+            if pos and abs(pos[0] - x) < 260 and abs(pos[1] - y) < 260:
+                return True
+        return False
+
+    def _nudge_towards(self, target: Dict[str, Any]) -> None:
+        """朝资源方向轻推一下摇杆（方向取最近的 45°）。"""
+        try:
+            tx = float(target.get("x") or 0)
+            ty = float(target.get("y") or 0)
+        except (TypeError, ValueError):
+            return
+        pos = self._pos()
+        if not pos:
+            return
+        mx, my = pos
+        dx, dy = tx - mx, ty - my
+        if abs(dx) < 1 and abs(dy) < 1:
+            return
+        # 屏幕方向 = (dx, -dy)，摇杆 dy 是屏幕向下
+        import math
+
+        angle = math.degrees(math.atan2(-dy, dx))
+        buckets = [
+            ("右", 0), ("右上", 45), ("上", 90), ("左上", 135),
+            ("左", 180), ("左下", -135), ("下", -90), ("右下", -45),
+        ]
+        name = min(buckets, key=lambda b: abs(((angle - b[1] + 180) % 360) - 180))[0]
+        try:
+            self._move([name, "0.6"])
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class _Stopped(Exception):
