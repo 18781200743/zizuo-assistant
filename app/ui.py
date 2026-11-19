@@ -743,13 +743,9 @@ class AppUI:
             foreground="#0a7d2c",
         ).grid(row=11, column=1, columnspan=3, sticky=tk.W, padx=6)
         self.assist_revive_btn = ttk.Button(
-            box, text="开启", width=10, command=self.toggle_revive
+            box, text="复活", width=12, command=self.revive_now
         )
-        self.assist_revive_btn.grid(row=11, column=4, padx=8)
-        self.assist_revive_now_btn = ttk.Button(
-            box, text="立即复活", width=10, command=self.revive_now
-        )
-        self.assist_revive_now_btn.grid(row=11, column=5, padx=(0, 8))
+        self.assist_revive_btn.grid(row=11, column=4, columnspan=2, padx=8)
         self.assist_revive_status = tk.StringVar(value="尚未开启")
         ttk.Label(
             box, textvariable=self.assist_revive_status, foreground="#666", wraplength=980
@@ -789,9 +785,6 @@ class AppUI:
         ttk.Button(warn, text="全部关闭", width=12, command=self.stop_all_assist).pack(
             side=tk.RIGHT
         )
-        ttk.Button(
-            warn, text="手动复活一次", width=16, command=self.revive_now
-        ).pack(side=tk.RIGHT, padx=8)
 
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=4)
@@ -855,6 +848,10 @@ class AppUI:
 
     def start_assist(self) -> None:
         self._read_assist_into_config()
+        try:
+            self.assist.set_feature("revive", 0)  # 现在只有手动复活，自动一律关
+        except Exception:  # noqa: BLE001
+            pass
         self.assist.set_names(self._assist_names())
         if not self.assist.running:
             self.assist.start()
@@ -1093,24 +1090,6 @@ class AppUI:
         self.assist_revive_status.set("手动复活中…")
         self.append_log("已发送：立即复活（免费，瞬移营地复活后回到原地）")
 
-    def toggle_revive(self) -> None:
-        """快速复活：开启时把「方式 + 延迟」一起发过去，再点一次就是关闭。"""
-        if not self.assist.running:
-            self.start_assist()
-        revive = (self.assist.state or {}).get("revive") or {}
-        enabled = bool(revive.get("enabled"))
-        if enabled:
-            self.assist.set_feature("revive", 0)
-            self.assist_revive_btn.configure(text="开启")
-            self.assist_revive_status.set("正在关闭…")
-            self.append_log("已发送：关闭快速复活")
-            return
-        self._read_assist_into_config()
-        self.assist.set_feature("revive", {"mode": "tp", "delay": 0})
-        self.assist_revive_btn.configure(text="关闭")
-        self.assist_revive_status.set("正在开启…")
-        self.append_log("已发送：开启快速复活（免费·原地·0.1 秒）")
-
     def blink_assist(self) -> None:
         """闪现到最近的怪（输入框填名字/编号就传送到指定怪）。"""
         if not self.assist.running:
@@ -1171,7 +1150,6 @@ class AppUI:
         self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
         self.assist_vision_btn.configure(text="恢复" if vision.get("enabled") else "应用")
         self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
-        self.assist_revive_btn.configure(text="关闭" if revive.get("enabled") else "开启")
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
