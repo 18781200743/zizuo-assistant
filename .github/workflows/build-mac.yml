@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    # macos-13 是 Intel 机器，直接产出 x86_64 的 .app
-    runs-on: macos-13
+    # macos-13 已于 2025-12 下线，Intel 构建机改用 macos-15-intel（可用到 2027-08）
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
