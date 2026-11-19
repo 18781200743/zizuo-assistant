@@ -18,3 +18,6 @@ _re/
 _extract_blyx/
 *.out
 _region16_20.txt
+
+# 构建产物
+mac_build/
