@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 9
+GACHA_VERSION = 10
 
 GACHA_JS = r"""
 (() => {
@@ -488,6 +488,8 @@ GACHA_JS = r"""
     let bet = null;
     let drawCount = null;
     let fragments = {};
+    let gold = null;
+    let green = null;
     try {
       const g = cfg();
       const view = findView(g);
@@ -504,6 +506,14 @@ GACHA_JS = r"""
       }));
       ready = true;
       try { fragments = allFragments(g); } catch (_) { fragments = {}; }
+      try {
+        const H = holder(g);
+        const bal = H && H[g.refresh.balanceService];
+        if (bal && typeof bal[g.refresh.balance] === 'function') {
+          gold = Number(bal[g.refresh.balance](g.refresh.goldPid || 1));
+          green = Number(bal[g.refresh.balance](g.refresh.greenPid || 88));
+        }
+      } catch (_) { gold = null; green = null; }
     } catch (cause) {
       stateReason = msgOf(cause);
     }
@@ -527,6 +537,8 @@ GACHA_JS = r"""
       records: Object.keys(state.records).map(id => state.records[id]),
       counters: state.counters,
       fragments,
+      gold,
+      green,
       contextId,
       bet,
       drawCount,

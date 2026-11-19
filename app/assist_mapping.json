@@ -250,7 +250,8 @@
           "price": "OPTF",
           "balanceService": "AUJP",
           "balance": "PKQL",
-          "greenPid": 88
+          "greenPid": 88,
+          "goldPid": 1
         },
         "defaults": {
           "keepQuality": 6,

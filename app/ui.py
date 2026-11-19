@@ -220,6 +220,8 @@ class AppUI:
         self.slot_hint = tk.StringVar(value="")
         self.gacha_status = tk.StringVar(value="抽卡: 未开始")
         self.card_vars: Dict[str, tk.BooleanVar] = {}
+        self._frag_base: Dict[str, int] = {}
+        self._gold_base = None
 
         self._build()
         self.refresh_slot_list(select=int(self.config.get("selected_slot", 1)) - 1)
@@ -1819,17 +1821,17 @@ class AppUI:
             except tk.TclError:
                 pass
 
-    def _fixed_checked_ids(self) -> Optional[set]:
+    def _fixed_checked_ids(self) -> set:
+        """默认一个都不勾，由用户自己选。"""
         section = self.config.get("gacha_cdp") or {}
         checked = section.get("checked")
+        ids: set = set()
         if isinstance(checked, list):
-            ids = set()
             for item in checked:
                 text = str(item).strip()
                 if text.isdigit():
                     ids.add(int(text))
-            return ids
-        return None
+        return ids
 
     def reload_gacha_heroes(self) -> None:
         fixed = list(DEFAULT_FIXED_HEROES)
@@ -1842,7 +1844,7 @@ class AppUI:
         for index, (hero_id, name) in enumerate(fixed):
             cell = ttk.Frame(self._gacha_hero_inner)
             cell.grid(row=index // 3, column=index % 3, sticky=tk.W, padx=6, pady=1)
-            var = tk.BooleanVar(value=(checked is None or hero_id in checked))
+            var = tk.BooleanVar(value=(hero_id in checked))
             ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
             counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 +0")
             ttk.Label(cell, textvariable=counter, foreground="#6b7280", anchor=tk.W).pack(
@@ -1869,6 +1871,7 @@ class AppUI:
 
     def start_gacha_cdp(self) -> None:
         self._frag_base = {}
+        self._gold_base = None
         targets: List[str] = []
         raw = (self.gacha_cdp_targets_var.get() or "").replace("，", ",").replace("、", ",")
         for part in raw.split(","):
@@ -1998,9 +2001,16 @@ class AppUI:
                 int((info or {}).get("hit") or 0)
                 for info in (counters or {}).values()
             )
+            gold = snap.get("gold")
+            if isinstance(gold, (int, float)) and self._gold_base is None:
+                self._gold_base = int(gold)
+            spent_txt = ""
+            if isinstance(gold, (int, float)) and self._gold_base is not None:
+                spent = max(0, self._gold_base - int(gold))
+                spent_txt = f"，消耗金币 {spent:,}"
             try:
                 self.gacha_hit_total_var.set(
-                    f"共 {total_hit} 张（目标 {target_hit} 张，抽了 {stats.get('draws', 0)} 次）"
+                    f"共 {total_hit} 张（目标 {target_hit} 张，抽了 {stats.get('draws', 0)} 次{spent_txt}）"
                 )
             except tk.TclError:
                 pass
