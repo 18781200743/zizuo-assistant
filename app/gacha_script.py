@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 10
+GACHA_VERSION = 11
 
 GACHA_JS = r"""
 (() => {
@@ -453,7 +453,7 @@ GACHA_JS = r"""
       });
   }
 
-  // 英雄碎片：CPDF 是「英雄编号 -> 英雄数据」的 Map，碎片数量在字段方法里
+  // 英雄碎片：游戏里每个英雄的碎片就是一件道具，编号 = 700000 + 英雄编号
   let fragCache = { at: 0, data: {} };
   function allFragments(g) {
     const nowMs = Date.now();
@@ -461,16 +461,15 @@ GACHA_JS = r"""
     const out = {};
     try {
       const H = holder(g);
-      const svc = H && H[g.hero.service];
-      const t = svc && svc[g.hero.model];
-      const map = t && t[g.hero.list];
-      const fnName = (g.hero && g.hero.fragments) || 'NALI';
-      if (map && typeof map.forEach === 'function') {
-        map.forEach(function (entry, id) {
+      const svc = H && H[g.refresh.balanceService];
+      const readFn = g.refresh.balance;
+      const base = Number((g.hero && g.hero.fragmentItemBase) || 700000);
+      const heroSvc = H && H[g.hero.service];
+      const map = heroSvc && heroSvc[g.hero.model] && heroSvc[g.hero.model][g.hero.list];
+      if (svc && typeof svc[readFn] === 'function' && map && typeof map.forEach === 'function') {
+        map.forEach(function (_entry, id) {
           try {
-            if (!entry) return;
-            const raw = typeof entry[fnName] === 'function' ? entry[fnName]() : entry[fnName];
-            const n = Number(raw);
+            const n = Number(svc[readFn](base + Number(id)));
             if (Number.isFinite(n)) out[id] = n;
           } catch (_) { /* 单个英雄失败就算了 */ }
         });

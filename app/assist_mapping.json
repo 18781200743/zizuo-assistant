@@ -222,7 +222,7 @@
           "i18nModule": "chunks:///_virtual/IUFD.ts",
           "i18nExport": "TPWU",
           "namePrefix": "hero_name_",
-          "fragments": "NALI"
+          "fragmentItemBase": 700000
         },
         "refresh": {
           "call": "BZEV",
