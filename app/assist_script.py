@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 57
+RUNTIME_VERSION = 58
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 57
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 57;
+  const VERSION = 58;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1529,6 +1529,65 @@ RUNTIME_JS = r"""
     });
   }
 
+  /** 手动复活：点一下按钮就按免费极速流程走一遍（不依赖自动开关）。 */
+  async function manualRevive() {
+    const cfg = reviveConfig();
+    const world = window[mapConfig().holder];
+    const core = world[mapConfig().core];
+    const spot = teamLeaderSpot();
+    if (!spot) throw Error('读不到队伍坐标（先进入地图）');
+    const box = state.revive;
+
+    // 全灭：游戏不接受传送，只能放弃回城
+    const panel = findDefeatPanel(cfg);
+    if (panel) {
+      box.reason = '全灭：正在放弃回城…';
+      await reviveByCamp(cfg, panel);
+      box.reason = '已回城复活，等地图就绪…';
+      await waitWorldReady(20000);
+      try { teleportNoFx(spot.x, spot.y); } catch (_) { try { teleportFire(spot.x, spot.y); } catch (_) { /* ignore */ } }
+      await new Promise(r => setTimeout(r, 400));
+      box.count += 1;
+      box.lastResult = '手动复活（全灭回城）';
+      return '全灭：已回城复活并传回原地';
+    }
+
+    const dead0 = deadHeroCount();
+    if (!dead0) return '现在没有英雄倒地，不需要复活';
+
+    const camp = campSpot(core, cfg.campTeleport);
+    if (!camp) throw Error('读不到营地坐标（TCLA/CLAT）');
+
+    box.reason = '手动复活中…';
+    leaveBattle();
+    teleportNoFx(camp.x, camp.y);
+    await new Promise(r => setTimeout(r, 80));
+    try { teleportNoFx(spot.x, spot.y); } catch (_) { /* ignore */ }
+
+    const t = now();
+    while (now() - t < 3000) {
+      await new Promise(r => setTimeout(r, 50));
+      if (deadHeroCount() === 0) {
+        box.count += 1;
+        box.lastResult = '手动复活完成';
+        return '已复活 ' + dead0 + ' 个英雄，已回到原地';
+      }
+    }
+
+    // 兜底：等到真的复活再回来
+    leaveBattle();
+    teleportNoFx(camp.x, camp.y);
+    const t2 = now();
+    while (now() - t2 < 5000) {
+      await new Promise(r => setTimeout(r, 80));
+      if (deadHeroCount() === 0) break;
+    }
+    try { teleportNoFx(spot.x, spot.y); } catch (_) { /* ignore */ }
+    box.count += 1;
+    box.lastResult = '手动复活完成（兜底）';
+    return deadHeroCount() === 0 ? '已复活并回到原地' : '复活没成功（营地坐标可能不对）';
+  }
+
   /** 游戏自带的「立即复活」：RZFJ 发请求 + HVLS 应用服务器返回，原地把倒地英雄拉起来。
    *  只消耗绿币（映射里的 currencyId），不传送、怪不回血。 */
   function instantRevive(cfg) {
@@ -2899,12 +2958,16 @@ RUNTIME_JS = r"""
     }
 
     if (feature === 'reviveNow') {
-      try {
-        if (!startCampFly('手动')) return { ok: false, message: '上一轮回营地复活还没结束' };
-        return { ok: true, message: '已开始：回营地复活并飞回原位' };
-      } catch (cause) {
-        return { ok: false, message: msgOf(cause) };
-      }
+      const box = state.revive;
+      if (box.busy) return { ok: false, message: '上一次复活还没结束' };
+      box.busy = true;
+      box.reason = '手动复活中…';
+      Promise.resolve()
+        .then(() => manualRevive())
+        .then(msg => { box.reason = String(msg || '复活完成'); })
+        .catch(cause => { box.reason = '手动复活失败：' + msgOf(cause); })
+        .then(() => { box.busy = false; });
+      return { ok: true, message: '开始手动复活' };
     }
 
     if (feature === 'heroRevive') {

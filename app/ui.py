@@ -759,6 +759,10 @@ class AppUI:
             box, text="开启", width=10, command=self.toggle_revive
         )
         self.assist_revive_btn.grid(row=11, column=5, padx=8)
+        self.assist_revive_now_btn = ttk.Button(
+            box, text="立即复活", width=10, command=self.revive_now
+        )
+        self.assist_revive_now_btn.grid(row=11, column=6, padx=(0, 8))
         self.assist_revive_status = tk.StringVar(value="尚未开启")
         ttk.Label(
             box, textvariable=self.assist_revive_status, foreground="#666", wraplength=980
@@ -826,7 +830,7 @@ class AppUI:
             side=tk.RIGHT
         )
         ttk.Button(
-            warn, text="立即回营地复活", width=16, command=self.revive_now
+            warn, text="手动复活一次", width=16, command=self.revive_now
         ).pack(side=tk.RIGHT, padx=8)
 
         row = ttk.Frame(parent)
@@ -1134,11 +1138,12 @@ class AppUI:
         self.append_log(f"已发送：{'关闭' if closing else '开启'}{label}")
 
     def revive_now(self) -> None:
-        """手动触发一轮：回营地复活 → 飞回原位。"""
+        """手动复活一次（免费：瞬移营地 → 拉起倒地的 → 瞬移回原地）。"""
         if not self.assist.running:
             self.start_assist()
         self.assist.set_feature("reviveNow", 1)
-        self.append_log("已发送：立即回营地复活（营地满血 → 飞回原位）")
+        self.assist_revive_status.set("手动复活中…")
+        self.append_log("已发送：立即复活（免费，瞬移营地复活后回到原地）")
 
     def toggle_revive(self) -> None:
         """快速复活：开启时把「方式 + 延迟」一起发过去，再点一次就是关闭。"""
