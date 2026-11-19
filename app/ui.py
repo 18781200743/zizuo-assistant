@@ -731,69 +731,29 @@ class AppUI:
             box, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560
         ).grid(row=9, column=4, columnspan=2, sticky=tk.W)
 
-        # ---- 快速复活：全灭后自动复活（道具 / 广告 / 回营地） ----
+        # ---- 快速复活：免费·原地·0.1 秒（固定这一种，不给选） ----
         ttk.Separator(box, orient=tk.HORIZONTAL).grid(
             row=10, column=0, columnspan=6, sticky=tk.EW, pady=8
         )
 
         ttk.Label(box, text="快速复活").grid(row=11, column=0, sticky=tk.W, pady=4)
-        self.assist_revive_mode_var = tk.StringVar(
-            value=_revive_text(assist.get("revive_mode", "item"))
-        )
-        ttk.Combobox(
+        ttk.Label(
             box,
-            textvariable=self.assist_revive_mode_var,
-            values=REVIVE_CHOICES,
-            width=26,
-            state="readonly",
-        ).grid(row=11, column=1, sticky=tk.W, padx=6)
-        ttk.Label(box, text="延迟").grid(row=11, column=2, sticky=tk.W)
-        self.assist_revive_delay_var = tk.StringVar(
-            value=_seconds_text(assist.get("revive_delay", 0.5))
-        )
-        ttk.Entry(
-            box, textvariable=self.assist_revive_delay_var, width=6, justify="center"
-        ).grid(row=11, column=3, sticky=tk.W, padx=4)
-        ttk.Label(box, text="秒").grid(row=11, column=4, sticky=tk.W)
+            text="免费 · 原地复活 · 0.1 秒 · 怪不回血",
+            foreground="#0a7d2c",
+        ).grid(row=11, column=1, columnspan=3, sticky=tk.W, padx=6)
         self.assist_revive_btn = ttk.Button(
             box, text="开启", width=10, command=self.toggle_revive
         )
-        self.assist_revive_btn.grid(row=11, column=5, padx=8)
+        self.assist_revive_btn.grid(row=11, column=4, padx=8)
         self.assist_revive_now_btn = ttk.Button(
             box, text="立即复活", width=10, command=self.revive_now
         )
-        self.assist_revive_now_btn.grid(row=11, column=6, padx=(0, 8))
+        self.assist_revive_now_btn.grid(row=11, column=5, padx=(0, 8))
         self.assist_revive_status = tk.StringVar(value="尚未开启")
         ttk.Label(
             box, textvariable=self.assist_revive_status, foreground="#666", wraplength=980
         ).grid(row=12, column=0, columnspan=6, sticky=tk.W)
-
-        ttk.Label(box, text="英雄复活").grid(row=13, column=0, sticky=tk.W, pady=4)
-        self.assist_hero_revive_var = tk.StringVar(
-            value=_seconds_text(assist.get("hero_revive_seconds", 1))
-        )
-        ttk.Entry(
-            box, textvariable=self.assist_hero_revive_var, width=8, justify="center"
-        ).grid(row=13, column=1, sticky=tk.W, padx=6)
-        ttk.Label(box, text="秒后").grid(row=13, column=2, sticky=tk.W)
-        self.assist_hero_revive_mode_var = tk.StringVar(
-            value=_hero_revive_text(assist.get("hero_revive_mode", "item"))
-        )
-        ttk.Combobox(
-            box,
-            textvariable=self.assist_hero_revive_mode_var,
-            values=HERO_REVIVE_CHOICES,
-            width=28,
-            state="readonly",
-        ).grid(row=13, column=3, sticky=tk.W, padx=6)
-        self.assist_hero_revive_btn = ttk.Button(
-            box, text="开启", width=10, command=self.toggle_hero_revive
-        )
-        self.assist_hero_revive_btn.grid(row=13, column=4, padx=8)
-        self.assist_hero_revive_status = tk.StringVar(value="尚未开启")
-        ttk.Label(
-            box, textvariable=self.assist_hero_revive_status, foreground="#666", wraplength=980
-        ).grid(row=14, column=0, columnspan=6, sticky=tk.W)
 
         # ---- 闪现寻怪：传送到最近的怪 / 指定怪 ----
         ttk.Label(box, text="闪现寻怪").grid(row=15, column=0, sticky=tk.W, pady=4)
@@ -889,20 +849,8 @@ class AppUI:
                 assist["revive_delay"] = max(0.0, min(10.0, float(revive_delay_var.get().strip())))
             except (ValueError, AttributeError, TypeError):
                 pass
-        revive_mode_var = getattr(self, "assist_revive_mode_var", None)
-        if revive_mode_var is not None:
-            assist["revive_mode"] = _revive_mode(revive_mode_var.get())
-        hero_revive_var = getattr(self, "assist_hero_revive_var", None)
-        if hero_revive_var is not None:
-            try:
-                assist["hero_revive_seconds"] = max(
-                    1.0, min(60.0, float(hero_revive_var.get().strip()))
-                )
-            except (ValueError, AttributeError, TypeError):
-                pass
-        hero_revive_mode = getattr(self, "assist_hero_revive_mode_var", None)
-        if hero_revive_mode is not None:
-            assist["hero_revive_mode"] = _hero_revive_mode(hero_revive_mode.get())
+        assist["revive_mode"] = "tp"
+        assist["revive_delay"] = 0
         self.config["assist"] = assist
 
     def start_assist(self) -> None:
@@ -1157,21 +1105,11 @@ class AppUI:
             self.assist_revive_status.set("正在关闭…")
             self.append_log("已发送：关闭快速复活")
             return
-        try:
-            delay = float(self.assist_revive_delay_var.get().strip())
-        except (ValueError, AttributeError):
-            messagebox.showerror("参数错误", "复活延迟需要是数字")
-            return
-        if not 0 <= delay <= 10:
-            messagebox.showerror("参数错误", "复活延迟需要在 0 - 10 秒之间")
-            return
-        mode = _revive_mode(self.assist_revive_mode_var.get())
         self._read_assist_into_config()
-        self.assist.set_feature("revive", {"mode": mode, "delay": delay})
+        self.assist.set_feature("revive", {"mode": "tp", "delay": 0})
         self.assist_revive_btn.configure(text="关闭")
         self.assist_revive_status.set("正在开启…")
-        label = {"instant": "立即复活", "tp": "传送回营地复活", "free": "免费回营地复活", "item": "道具复活", "ad": "广告复活", "camp": "回营地复活"}.get(mode, mode)
-        self.append_log(f"已发送：开启快速复活（{label}，延迟 {delay:g} 秒）")
+        self.append_log("已发送：开启快速复活（免费·原地·0.1 秒）")
 
     def blink_assist(self) -> None:
         """闪现到最近的怪（输入框填名字/编号就传送到指定怪）。"""
@@ -1184,44 +1122,6 @@ class AppUI:
         self.append_log(
             "已发送：闪现到" + (f"「{target}」" if target else "最近的怪")
         )
-
-    def toggle_hero_revive(self) -> None:
-        """单英雄复活时间：死一个多久原地站起来。开着再点 = 关闭。"""
-        if not self.assist.running:
-            self.start_assist()
-        hero = (self.assist.state or {}).get("heroRevive") or {}
-        if hero.get("enabled"):
-            self.assist.set_feature("heroRevive", 0)
-            self.assist_hero_revive_btn.configure(text="开启")
-            self.assist_hero_revive_status.set("正在关闭…")
-            self.append_log("已发送：关闭英雄复活时间（恢复游戏原值）")
-            return
-        try:
-            seconds = float(self.assist_hero_revive_var.get().strip())
-        except (ValueError, AttributeError):
-            messagebox.showerror("参数错误", "复活时间需要是数字")
-            return
-        if not 1 <= seconds <= 60:
-            messagebox.showerror("参数错误", "复活时间需要在 1 - 60 秒之间")
-            return
-        mode = _hero_revive_mode(self.assist_hero_revive_mode_var.get())
-        self._read_assist_into_config()
-        self.assist.set_feature(
-            "heroRevive",
-            {
-                "seconds": seconds,
-                "ad": mode == "ad",
-                "campfly": mode == "campfly",
-                "timer": mode == "timer",
-            },
-        )
-        self.assist_hero_revive_btn.configure(text="关闭")
-        self.assist_hero_revive_status.set("正在开启…")
-        label = {
-                "ad": "向服务器申请广告复活",
-            "campfly": "回营地复活并飞回原位",
-        }.get(mode, "向服务器申请道具复活")
-        self.append_log(f"已发送：我方英雄倒地 {seconds:g} 秒后{label}")
 
     def _update_assist_labels(self) -> None:
         state = self.assist.state or {}
@@ -1250,7 +1150,6 @@ class AppUI:
         cooldown = combat.get("cooldown") or {}
 
         revive = state.get("revive") or {}
-        hero_revive = state.get("heroRevive") or {}
 
         blink = state.get("blink") or {}
         self.assist_blink_btn.configure(
@@ -1262,8 +1161,7 @@ class AppUI:
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
                        self.assist_damage_btn, self.assist_vision_btn,
-                       self.assist_cooldown_btn, self.assist_revive_btn,
-                       self.assist_hero_revive_btn):
+                       self.assist_cooldown_btn, self.assist_revive_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
         self.assist_mob_btn.configure(text="关闭" if mob.get("enabled") else "开启")
@@ -1274,9 +1172,6 @@ class AppUI:
         self.assist_vision_btn.configure(text="恢复" if vision.get("enabled") else "应用")
         self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
         self.assist_revive_btn.configure(text="关闭" if revive.get("enabled") else "开启")
-        self.assist_hero_revive_btn.configure(
-            text="关闭" if hero_revive.get("enabled") else "开启"
-        )
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
@@ -1289,9 +1184,6 @@ class AppUI:
         if revive.get("count"):
             revive_reason += f" · 今日复活 {int(revive.get('count') or 0)} 次"
         self.assist_revive_status.set(revive_reason)
-        self.assist_hero_revive_status.set(
-            str(hero_revive.get("reason") or ("需要版本映射" if gap else "尚未开启"))
-        )
 
         green, gold = self.assist.display_stats()
         self.assist_green_var.set(f"已领 {green} 个红包")
@@ -1369,19 +1261,6 @@ class AppUI:
                         % (
                             "可用" if revive.get("reviveMethod") else "缺失",
                             "正在显示" if revive.get("panelFound") else "未显示",
-                        )
-                    )
-            hero_revive = info.get("heroRevive")
-            if isinstance(hero_revive, dict):
-                if hero_revive.get("error"):
-                    self.append_log(f"  单英雄复活：{hero_revive['error']}")
-                else:
-                    self.append_log(
-                        "  单英雄复活：接口 %s，当前我方英雄 %s 个（倒地 %s 个）"
-                        % (
-                            "可用" if hero_revive.get("reviveMethod") else "缺失",
-                            hero_revive.get("heroes", 0),
-                            hero_revive.get("dead", 0),
                         )
                     )
             for error in info.get("errors") or []:
