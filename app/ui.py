@@ -113,7 +113,7 @@ def _vision_mode(text: Any) -> int:
 
 # 快速复活方式
 REVIVE_INSTANT = "立即复活（原地秒起，20 绿币/次）"
-REVIVE_TP = "传送回营地复活（免费，0.2 秒，怪会回满血，推荐）"
+REVIVE_TP = "快速复活（免费，0.1 秒，原地，怪不回血，推荐）"
 REVIVE_FREE = "免费回营地复活（不花道具/广告）"
 REVIVE_ITEM = "道具复活（消耗复活道具）"
 REVIVE_AD = "广告复活（看广告，不花道具）"

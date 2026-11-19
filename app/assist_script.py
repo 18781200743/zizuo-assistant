@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 58
+RUNTIME_VERSION = 59
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 58
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 58;
+  const VERSION = 59;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1555,10 +1555,22 @@ RUNTIME_JS = r"""
     const dead0 = deadHeroCount();
     if (!dead0) return '现在没有英雄倒地，不需要复活';
 
+    // ① 先试只结束战斗（原地复活，0.1 秒，不传送）
+    box.reason = '手动复活中…';
+    leaveBattle();
+    const tMemk = now();
+    while (now() - tMemk < 800) {
+      await new Promise(r => setTimeout(r, 40));
+      if (deadHeroCount() === 0) {
+        box.count += 1;
+        box.lastResult = '手动复活完成（原地）';
+        return '已原地复活 ' + dead0 + ' 个英雄（0.1 秒）';
+      }
+    }
+
+    // ② 没起来就走营地瞬移
     const camp = campSpot(core, cfg.campTeleport);
     if (!camp) throw Error('读不到营地坐标（TCLA/CLAT）');
-
-    box.reason = '手动复活中…';
     leaveBattle();
     teleportNoFx(camp.x, camp.y);
     await new Promise(r => setTimeout(r, 80));
@@ -2209,7 +2221,21 @@ RUNTIME_JS = r"""
           const atCamp = near2(teamLeaderSpot(), camp);
           let revived = false;
 
-          if (!atCamp) {
+          // ① 最快：只调 MEMK（结束战斗）——游戏会原地把倒地的英雄拉起来，
+          //    不传送、不碰怪，实测 0.1 秒。
+          reviveLog('开始：dead=' + (() => { try { return deadHeroCount(); } catch (_) { return -1; } })());
+          box.reason = '正在复活…';
+          leaveBattle();
+          const tMemk = now();
+          while (now() - tMemk < 800) {
+            await new Promise(r => setTimeout(r, 40));
+            let left = 1;
+            try { left = deadHeroCount(); } catch (_) { left = 1; }
+            if (left === 0) { revived = true; break; }
+          }
+          if (revived) reviveLog('MEMK 原地复活');
+
+          if (!revived && !atCamp) {
             // ① 极速模式：传营地 → 80ms → 立刻传回（服务端按顺序处理，位置瞬间回来）
             reviveLog('开始：dead=' + (() => { try { return deadHeroCount(); } catch (_) { return -1; } })());
             box.reason = '快速复活中…';
