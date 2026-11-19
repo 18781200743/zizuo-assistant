@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 80
+RUNTIME_VERSION = 83
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 80
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 80;
+  const VERSION = 83;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1474,6 +1474,52 @@ RUNTIME_JS = r"""
     return bag;
   }
 
+  /**
+   * 找当前弹出的「确认 / 确定」按钮，返回屏幕坐标（CSS 像素）。
+   * 全灭面板点「放弃」后，游戏会再弹一个确认小窗；页内派发的假点击游戏不认，
+   * 所以这里只算坐标，由界面用 CDP 真鼠标点一下。
+   */
+  function findConfirmPoint() {
+    try {
+      const cc = window.cc;
+      const scene = cc && cc.director && typeof cc.director.getScene === 'function'
+        ? cc.director.getScene() : null;
+      if (!scene) return null;
+      let W = 700, H = 1501.6;
+      try {
+        if (cc.view && typeof cc.view.getVisibleSize === 'function') {
+          const vs = cc.view.getVisibleSize();
+          if (vs && vs.width > 0 && vs.height > 0) { W = vs.width; H = vs.height; }
+        }
+      } catch (_) { /* 用默认设计分辨率 */ }
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 6000) {
+        guard += 1;
+        const node = stack.pop();
+        if (!node || node.activeInHierarchy === false) continue;
+        const comps = node._components || [];
+        for (let i = 0; i < comps.length; i += 1) {
+          let cname = '';
+          try { cname = (cc.js && typeof cc.js.getClassName === 'function' && cc.js.getClassName(comps[i])) || ''; } catch (_) { cname = ''; }
+          if (cname !== 'cc.Label') continue;
+          const text = String(comps[i].string || '').trim();
+          if (text !== '确认' && text !== '确定') continue;
+          const wp = node.getWorldPosition ? node.getWorldPosition() : null;
+          if (!wp) continue;
+          return {
+            x: Math.round(wp.x / W * window.innerWidth * 10) / 10,
+            y: Math.round((H - wp.y) / H * window.innerHeight * 10) / 10,
+            text,
+          };
+        }
+        const kids = node.children || [];
+        for (let j = 0; j < kids.length; j += 1) stack.push(kids[j]);
+      }
+    } catch (_) { /* 没有就算了 */ }
+    return null;
+  }
+
   /** 全灭界面：按 cocos 类名找（KYUK），找不到再用「放弃方法 + 放弃按钮」兜底。 */
   function findDefeatPanel(cfg) {
     const cc = window.cc;
@@ -2188,7 +2234,32 @@ RUNTIME_JS = r"""
     }
 
     const nowMs = now();
-    if (box.busy || nowMs < box.nextTryAt) return;
+    // 兜底：复活流程万一卡住（面板没关、确认框没人点），60 秒后强制重置，避免一直卡着
+    if (box.busy) {
+      if (!box.busySince) box.busySince = nowMs;
+      if (nowMs - box.busySince > 60000) {
+        box.busy = false;
+        box.busySince = 0;
+        box.phase = '';
+        box.pendingAt = 0;
+        box.nextTryAt = nowMs + 1500;
+        box.reason = '复活流程超时，已重置重试';
+        reviveLog('超时重置');
+      }
+    } else {
+      box.busySince = 0;
+    }
+    if (box.busy) {
+      // 复活流程进行中：全灭面板的「放弃」会弹确认小窗，这里持续把确认按钮坐标交出去
+      if (nowMs >= (box.confirmScanAt || 0)) {
+        box.confirmScanAt = nowMs + 500;
+        try { box.confirmAt = findConfirmPoint(); } catch (_) { box.confirmAt = null; }
+      }
+      return;
+    }
+    box.confirmAt = null;
+    box.confirmScanAt = 0;
+    if (nowMs < box.nextTryAt) return;
     // 场景遍历比较重，最多每 400ms 找一次面板
     if (nowMs < reviveScanAt) return;
     reviveScanAt = nowMs + 400;
@@ -2236,6 +2307,11 @@ RUNTIME_JS = r"""
         return;
       }
     }
+
+    // 全灭面板点「放弃」后会弹确认小窗：把「确认」按钮的坐标交给界面去点
+    try {
+      box.confirmAt = panel ? findConfirmPoint() : null;
+    } catch (_) { box.confirmAt = null; }
 
     if (!box.pendingAt) {
       // 传送复活是服务端瞬发的，不需要等；立即复活留 0.5 秒把同一波倒地的合在一起
@@ -3101,6 +3177,7 @@ RUNTIME_JS = r"""
         count: state.revive.count,
         reason: state.revive.reason,
         lastResult: state.revive.lastResult,
+        confirmAt: state.revive.confirmAt || null,
       },
       heroRevive: {
         enabled: state.heroRevive.enabled,
@@ -3566,6 +3643,8 @@ RUNTIME_JS = r"""
     refresh: () => { state.nextProbeAt = 0; probe(); },
     // 只给自测用：直接塞一次「刚死亡」事件，下一轮扫描就按真实死亡走
     // 「等待 N 秒 → 重进地图」。不碰游戏数据，可以在任何场景里验证整条链路。
+    // 自测用：算「确认」按钮的屏幕坐标（不点）
+    __findConfirm: () => findConfirmPoint(),
     __fakeDeath: kind => {
       const info = { kind: kind === 'boss' ? 'boss' : 'mob', name: '自测假怪', dead: true };
       state.map.fakeDeaths.push(info);

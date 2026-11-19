@@ -325,6 +325,8 @@ class GameAssist:
         self._last_message = ""
         self._status = ""
         self._stats = _load_stats()
+        # 全灭确认框：页面只给坐标，点击由这里用 CDP 真鼠标发（页面内假事件游戏不认）
+        self._last_confirm_click = 0.0
 
     # ---- 对外 ----
 
@@ -623,6 +625,34 @@ class GameAssist:
                 continue
             self._apply(feature, value)
 
+    def _click_confirm_if_needed(self, snap: Dict[str, Any]) -> None:
+        """全灭面板点「放弃」后弹的确认框：按页面给的坐标点一下「确认」。"""
+        revive = (snap or {}).get("revive") or {}
+        point = revive.get("confirmAt") or {}
+        try:
+            x = float(point.get("x"))
+            y = float(point.get("y"))
+        except (TypeError, ValueError):
+            return
+        if x <= 0 or y <= 0:
+            return
+        now = time.monotonic()
+        if now - self._last_confirm_click < 1.5:
+            return
+        self._last_confirm_click = now
+        try:
+            call = getattr(self.bridge, "_call", None)
+            if call is None:
+                return
+            call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0})
+            time.sleep(0.03)
+            call("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1})
+            time.sleep(0.03)
+            call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1})
+            self._status_log("全灭面板弹出确认框，已自动点「确认」")
+        except Exception as exc:  # noqa: BLE001
+            self._status_log("点确认框失败：%s" % exc)
+
     def _persist(self, snap: Dict[str, Any]) -> None:
         red = snap.get("redPacket") or {}
         gold = snap.get("gold") or {}
@@ -704,6 +734,7 @@ class GameAssist:
             return
         self.state = snap
         self._persist(snap)
+        self._click_confirm_if_needed(snap)
         if snap.get("ready"):
             self._status_log(
                 "辅助：运行时已就绪（版本 %s），点「开启」就生效"

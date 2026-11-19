@@ -101,6 +101,7 @@ class GachaCdp:
         refresh: bool = False,
         max_green: int = 0,
         max_bet: bool = True,
+        always_abandon: bool = False,
     ) -> Dict[str, Any]:
         # targets 里既可以是英雄编号，也可以是英雄名（由页面运行时解析）
         names = [str(x).strip() for x in (targets or []) if str(x).strip()]
@@ -112,6 +113,7 @@ class GachaCdp:
             "refresh": bool(refresh),
             "maxGreen": int(max_green or 0),
             "maxBet": bool(max_bet),
+            "alwaysAbandon": bool(always_abandon),
         }
         expression = (
             "(function(){try{window.__zzGacha.start(%s);return 'ok';}"

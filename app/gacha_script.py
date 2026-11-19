@@ -5,6 +5,7 @@
     * 招募面板模型 zm_mianbanMoxing：zm_dangqianChi=池、zm_beilv=倍率、
       zm_houxuanLieBiao=候选列表（每项 zm_houxuanYingxiong=英雄编号、zm_yizhanyong=是否占用）。
     * 抽到的英雄会被标记为「占用」：是目标就保留结束，不是就放弃并刷新候选再抽。
+    * 勾了「抽中目标也放弃」时，所有候选一律放弃、继续抽（只攒碎片，不停止）。
 
 页面里运行，不依赖截图匹配。映射来自 assist_mapping.json 的 gacha 段。
 """
@@ -12,7 +13,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 11
+GACHA_VERSION = 12
 
 GACHA_JS = r"""
 (() => {
@@ -39,7 +40,7 @@ GACHA_JS = r"""
     poolKey: '',
     opts: {
       targets: [], keepQuality: 6, maxDraws: 0, delayMs: 1200,
-      refresh: false, maxGreen: 0, maxBet: true,
+      refresh: false, maxGreen: 0, maxBet: true, alwaysAbandon: false,
     },
     timer: 0,
     startedAt: 0,
@@ -358,7 +359,7 @@ GACHA_JS = r"""
     if (picked) {
       const hero = heroInfo(picked.heroId, g);
       state.lastHero = hero;
-      if (isTarget(hero, state.opts)) {
+      if (isTarget(hero, state.opts) && !state.opts.alwaysAbandon) {
         state.stats.kept += 1;
         stop('已抽到目标：' + hero.name + '（品级 ' + hero.quality + '）');
         return;
@@ -556,6 +557,7 @@ GACHA_JS = r"""
       refresh: !!o.refresh,
       maxGreen: Math.max(0, Number(o.maxGreen) || 0),
       maxBet: o.maxBet !== false,
+      alwaysAbandon: !!o.alwaysAbandon,
     };
     if (!state.opts.targets.length && !state.opts.keepQuality) {
       throw Error('请至少填目标英雄编号，或勾选「只保留红色」');

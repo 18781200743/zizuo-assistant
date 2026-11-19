@@ -643,6 +643,7 @@ class AppUI:
         self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
         self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
         self.gacha_cdp_maxbet_var = tk.BooleanVar(value=bool(gacha.get("cdp_max_bet", True)))
+        self.gacha_cdp_abandon_var = tk.BooleanVar(value=bool(gacha.get("cdp_always_abandon", False)))
         self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
         self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
 
@@ -668,6 +669,19 @@ class AppUI:
             ttk.Checkbutton(
                 row2, text="有目标就用最大倍率抽", variable=self.gacha_cdp_maxbet_var
             ).pack(side=tk.LEFT, padx=(12, 0))
+
+        opt_row = ttk.Frame(cdp_box)
+        opt_row.pack(fill=tk.X, pady=(2, 4))
+        ttk.Checkbutton(
+            opt_row,
+            text="抽中目标也放弃，一直抽（只攒碎片，不停止）",
+            variable=self.gacha_cdp_abandon_var,
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            opt_row,
+            text="不勾：抽到目标就保留并停止",
+            foreground="#6b7280",
+        ).pack(side=tk.LEFT, padx=10)
 
         btns = ttk.Frame(cdp_box)
         btns.pack(fill=tk.X, pady=(2, 4))
@@ -2265,6 +2279,10 @@ class AppUI:
         # 勾选状态落盘，下次打开还在
         try:
             self._read_form_into_config()
+            try:
+                self.config["gacha"]["cdp_always_abandon"] = bool(self.gacha_cdp_abandon_var.get())
+            except Exception:  # noqa: BLE001
+                pass
             save_config(self.config)
         except Exception:  # noqa: BLE001
             pass
@@ -2283,6 +2301,7 @@ class AppUI:
             refresh=bool(self.gacha_cdp_refresh_var.get()),
             max_green=max_green,
             max_bet=bool(self.gacha_cdp_maxbet_var.get()),
+            always_abandon=bool(self.gacha_cdp_abandon_var.get()),
         )
         if not result.get("ok"):
             self.gacha_cdp_status.set("开始失败：" + str(result.get("message")))
