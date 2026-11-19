@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 86
+RUNTIME_VERSION = 87
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 86
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 86;
+  const VERSION = 87;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1895,7 +1895,8 @@ RUNTIME_JS = r"""
     const before = holder[mapCfg.core];
     const until = now() + 4500;
     const tick = () => {
-      try { dropLoading(); } catch (_) { /* ignore */ }
+      // 只隐藏过场/落地特效，不再强改 MAOP 和调 ANIO()：
+      // 反复强改加载状态会把游戏的切图状态机搞乱，之后就再也切不了图（实测）。
       try { hideLanding(); } catch (_) { /* ignore */ }
       try { hideMapTransition(); } catch (_) { /* ignore */ }
       if (now() < until) setTimeout(tick, 50);
