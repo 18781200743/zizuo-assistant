@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 49
+RUNTIME_VERSION = 51
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 49
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 49;
+  const VERSION = 51;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1811,10 +1811,26 @@ RUNTIME_JS = r"""
     }
     box.busy = true;
     box.reason = '正在闪现到 ' + (pick.name || pick.cfg) + '…';
+    const began = now();
     Promise.resolve()
-      .then(() => teleportTo(pick.x, pick.y))
-      .then(() => {
-        box.last = '已闪现到 ' + (pick.name || pick.cfg);
+      .then(async () => {
+        // 不等游戏的传送加载动画：发请求 → 位置 0.1~0.3 秒就变，落地特效一直按住
+        teleportFire(pick.x, pick.y);
+        let arrived = false;
+        const deadline = now() + 8000;
+        while (now() < deadline) {
+          await new Promise(r => setTimeout(r, 80));
+          hideLanding();
+          dropLoading();
+          let p = null;
+          try { p = teamLeaderSpot(); } catch (_) { p = null; }
+          if (p && Math.abs(p.x - pick.x) < 260 && Math.abs(p.y - pick.y) < 260) { arrived = true; break; }
+        }
+        hideLanding();
+        const cost = ((now() - began) / 1000).toFixed(1);
+        box.last = arrived
+          ? '已闪现到 ' + (pick.name || pick.cfg) + '（' + cost + ' 秒）'
+          : '闪现没到位（' + cost + ' 秒，可以再点一次）';
         box.reason = box.last;
       })
       .catch(cause => {
