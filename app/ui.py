@@ -565,6 +565,18 @@ class AppUI:
             ttk.Label(cdp_box, textvariable=self.gacha_pool_var, wraplength=980, foreground="#1a4d8f").pack(anchor=tk.W)
             ttk.Label(cdp_box, textvariable=self.gacha_records_var, wraplength=980, foreground="#0a7a2f").pack(anchor=tk.W)
 
+        # ---------- 抽中统计 ----------
+        hit_box = ttk.LabelFrame(parent, text="抽中统计", padding=8)
+        hit_box.pack(fill=tk.X, pady=(0, 8))
+        self.gacha_hit_total_var = tk.StringVar(value="共 0 张（目标 0 张）")
+        ttk.Label(
+            hit_box, textvariable=self.gacha_hit_total_var, foreground="#0a7a2f"
+        ).pack(anchor=tk.W)
+        self.gacha_hit_var = tk.StringVar(value="还没有抽中目标英雄")
+        ttk.Label(
+            hit_box, textvariable=self.gacha_hit_var, foreground="#333", wraplength=1020, justify=tk.LEFT
+        ).pack(anchor=tk.W, pady=(4, 0))
+
         # 旧版「截图识别抽卡」参数只保留变量
         self.card_template_labels: Dict[str, tk.Label] = {}
         self.card_vars: Dict[str, tk.BooleanVar] = {
@@ -1896,6 +1908,33 @@ class AppUI:
                     pass
 
             records = snap.get("records") or []
+            total_hit = sum(int(r.get("count") or 0) for r in records)
+            target_hit = sum(
+                int((info or {}).get("hit") or 0)
+                for info in (counters or {}).values()
+            )
+            try:
+                self.gacha_hit_total_var.set(
+                    f"共 {total_hit} 张（目标 {target_hit} 张，抽了 {stats.get('draws', 0)} 次）"
+                )
+            except tk.TclError:
+                pass
+            if records:
+                ordered = sorted(
+                    records,
+                    key=lambda r: (-int(r.get("count") or 0), -int(r.get("quality") or 0)),
+                )
+                try:
+                    self.gacha_hit_var.set(
+                        "，".join(f"{r.get('name')}×{r.get('count')}" for r in ordered)
+                    )
+                except tk.TclError:
+                    pass
+            else:
+                try:
+                    self.gacha_hit_var.set("还没有抽中英雄")
+                except tk.TclError:
+                    pass
             if records:
                 records = sorted(
                     records,
