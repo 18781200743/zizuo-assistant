@@ -42,7 +42,7 @@ COLLECT_KEYWORDS = {
     "幸运草": ("幸运草",),
     "训练石": ("训练石",),
     "肉块": ("肉",),
-    "活动": ("活动", "宝箱", "礼物", "采集", "宝"),
+    "活动": ("*",),
 }
 
 
@@ -233,6 +233,36 @@ def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
 """ % (_js(mapping), _js(str(teleport_id)))
 
 
+def _js_collect_hook(mapping: Dict[str, Any]) -> str:
+    """在采集事件分发器上装一个计数器：采一次 +1，用来判断「到底采到没有」。"""
+    return r"""
+(function () {
+  try {
+    var m = %s;
+    var b = (m.builds || {})[m.current] || {};
+    var cc = b.collect || {};
+    var core = window[((b.map || {}).holder) || 'VKXX'].ZRRU;
+    var events = core[cc.queue || 'EENE']()[cc.dispatch || 'NCHO'];
+    if (!events) return 'no events';
+    if (events.__zzCollectCount) return 'already';
+    var entry = cc.entry || 'OHLC';
+    var orig = events[entry];
+    if (typeof orig !== 'function') return 'no entry';
+    events[entry] = function () {
+      try { window.__zzCollectHits = (window.__zzCollectHits || 0) + 1; } catch (e) {}
+      return orig.apply(this, arguments);
+    };
+    events.__zzCollectCount = true;
+    return 'ok';
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % _js(mapping)
+
+
+def _js_collect_hits() -> str:
+    return "String(window.__zzCollectHits || 0)"
+
+
 def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
     """在当前地图找最近的资源点（按名字关键字），返回坐标（不瞬移）。"""
     words = list(COLLECT_KEYWORDS.get(keyword, (keyword,)))
@@ -267,8 +297,12 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
       if (!name) return false;
       var tag = String(unit[u.tag || 'CLRB'] || '');
       var text = (name + ' ' + tag).toLowerCase();
-      var hit = words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
+      var anyKind = words.indexOf('*') >= 0;
+      var hit = anyKind
+        ? (typeof unit.QATG === 'function' && !!unit.QATG())
+        : words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
       if (!hit) return false;
+      try { if (typeof unit.QATG === 'function' && !unit.QATG()) return false; } catch (e) {}
       for (var i = 0; i < skip.length; i += 1) {
         if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
       }
@@ -316,6 +350,7 @@ class InstructionRunner:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._mapping: Dict[str, Any] = {}
         self.running = False
         self.title = ""
 
@@ -371,6 +406,7 @@ class InstructionRunner:
         ok = False
         message = "已完成"
         total = len(steps)
+        self._mapping = mapping
         try:
             self._log_line("▶ 运行指令：%s（%d 步）" % (title, total))
             self._eval(JS_INSTALL)
@@ -618,9 +654,15 @@ class InstructionRunner:
 
     def _collect(self, args: List[str]) -> None:
         keyword = str(args[0]).strip() if args else "活动"
-        hits = 0
+        mapping = getattr(self, "_mapping", None) or {}
+        if mapping:
+            try:
+                self._eval(_js_collect_hook(mapping))
+            except Exception:  # noqa: BLE001
+                pass
         tried: List[tuple] = []
-        for _ in range(3):
+        got = 0
+        for _ in range(10):
             if self._stop.is_set():
                 raise _Stopped()
             result = self._eval(_js_collect_target(keyword, tried))
@@ -636,16 +678,31 @@ class InstructionRunner:
             tx = float(target.get("x") or 0)
             ty = float(target.get("y") or 0)
             tried.append((tx, ty))
-            hits += 1
-            self._log_line("    采集 %s（%d,%d）" % (target.get("name"), int(tx), int(ty)))
-            if not self._teleport_to(tx, ty):
-                self._log_line("    瞬移没过去（可能刚切图），这次跳过")
+            self._log_line("    去采 %s（%d,%d）" % (target.get("name"), int(tx), int(ty)))
+            before = int(str(self._eval(_js_collect_hits()) or 0))
+            # 站到资源旁边（不踩正中间，游戏是靠近就开始采）
+            if not self._teleport_to(tx + 28, ty):
+                self._log_line("    瞬移没过去，换下一个")
                 continue
-            # 贴上去再往前走一点：游戏是「站到资源上才采」
-            self._nudge_towards(target)
-            self._sleep(2.6)
-        if not hits:
-            self._log_line("    附近没有「%s」资源，跳过" % keyword)
+            self._sleep(3.2)
+            after = int(str(self._eval(_js_collect_hits()) or 0))
+            if after <= before:
+                self._nudge_towards(target)
+                self._sleep(2.2)
+                after = int(str(self._eval(_js_collect_hits()) or 0))
+            if after <= before and self._teleport_to(tx, ty):
+                # 还是没采到：干脆站到资源点上再等
+                self._sleep(2.6)
+                after = int(str(self._eval(_js_collect_hits()) or 0))
+            if after > before:
+                got += after - before
+                self._log_line("    采到 %d 次" % (after - before))
+            else:
+                self._log_line("    这个点没采到，换下一个")
+        if got:
+            self._log_line("    共采到 %d 次" % got)
+        else:
+            self._log_line("    附近没有可采的「%s」" % keyword)
 
     def _pos(self) -> Optional[tuple]:
         try:
