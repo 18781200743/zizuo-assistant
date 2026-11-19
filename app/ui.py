@@ -643,7 +643,7 @@ class AppUI:
         self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
         self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
         self.gacha_cdp_maxbet_var = tk.BooleanVar(value=bool(gacha.get("cdp_max_bet", True)))
-        self.gacha_cdp_abandon_var = tk.BooleanVar(value=bool(gacha.get("cdp_always_abandon", False)))
+        self.gacha_cdp_abandon_var = tk.BooleanVar(value=bool(gacha.get("cdp_always_abandon", True)))
         self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
         self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
 
