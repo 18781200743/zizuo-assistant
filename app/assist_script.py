@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 75
+RUNTIME_VERSION = 77
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 75
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 75;
+  const VERSION = 77;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2917,6 +2917,46 @@ RUNTIME_JS = r"""
     }
   }
 
+  /** 游戏里目前拥有的英雄列表（编号 / 名字 / 品质），按品质从高到低。 */
+  function heroList() {
+    try {
+      let g = (mapping() || {}).gacha;
+      if (!g) {
+        try {
+          const builds = (MAPPING && MAPPING.builds) || {};
+          const key = Object.keys(builds)[0];
+          g = key ? builds[key].gacha : null;
+        } catch (_) { g = null; }
+      }
+      if (!g || !g.hero || !g.holderModule) return [];
+      const system = window.System;
+      const mod = system && typeof system.get === 'function' ? system.get(g.holderModule) : null;
+      const holder = mod && mod[g.holder];
+      const svc = holder && holder[g.hero.service];
+      const t = svc && svc[g.hero.model];
+      const map = t && t[g.hero.list];
+      if (!map || typeof map.forEach !== 'function') return [];
+      let i18n = {};
+      try {
+        const m2 = system.get(g.hero.i18nModule);
+        i18n = (m2 && m2[g.hero.i18nExport]) || {};
+      } catch (_) { i18n = {}; }
+      const out = [];
+      map.forEach(function (entry, id) {
+        let name = '';
+        try { name = String(i18n[(g.hero.namePrefix || 'hero_name_') + id] || ''); } catch (_) { name = ''; }
+        if (!name && entry) name = String(entry.UIUX || entry.ECSB || '') || String(id);
+        let quality = 0;
+        try { quality = Number(entry && entry[g.hero.quality]) || 0; } catch (_) { quality = 0; }
+        out.push({ id: Number(id), name: name || String(id), quality });
+      });
+      out.sort((a, b) => (b.quality - a.quality) || (a.id - b.id));
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
   function snapshot() {
     const red = state.red;
     return {
@@ -3404,6 +3444,7 @@ RUNTIME_JS = r"""
   window.__zzAssist = {
     version: VERSION,
     snapshot,
+    heroes: heroList,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

@@ -856,6 +856,7 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log(f"游戏辅助自动连接失败：{exc}")
         self.root.after(600, self._auto_open_game_window)
+        self.root.after(4000, self.reload_gacha_heroes)
 
     def _game_open_mode(self) -> str:
         mode = str(self.config.get("game_open_mode") or "ask").strip().lower()
@@ -1834,7 +1835,22 @@ class AppUI:
         return ids
 
     def reload_gacha_heroes(self) -> None:
-        fixed = list(DEFAULT_FIXED_HEROES)
+        heroes = []
+        try:
+            heroes = self.assist.list_heroes() or []
+        except Exception:  # noqa: BLE001
+            heroes = []
+        fixed = []
+        for item in heroes:
+            try:
+                hid = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if hid > 0:
+                fixed.append((hid, str(item.get("name") or hid)))
+        from_game = bool(fixed)
+        if not fixed:
+            fixed = list(DEFAULT_FIXED_HEROES)
         checked = self._fixed_checked_ids()
         for widget in self._gacha_hero_inner.winfo_children():
             widget.destroy()
@@ -1853,7 +1869,8 @@ class AppUI:
             self._gacha_hero_vars[hero_id] = var
             self._gacha_hero_counter_vars[hero_id] = counter
         self.gacha_hero_count.set(
-            f"固定名单 {len(fixed)} 个（已勾 {sum(1 for v in self._gacha_hero_vars.values() if v.get())}）"
+            f"{'游戏英雄' if from_game else '内置名单'} {len(fixed)} 个"
+            f"（已勾 {sum(1 for v in self._gacha_hero_vars.values() if v.get())}）"
         )
 
     def list_gacha_heroes(self) -> None:

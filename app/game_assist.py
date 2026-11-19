@@ -557,6 +557,18 @@ class GameAssist:
         self._safe_log(f"自测：已假装击杀{label}，{seconds:g} 秒后应重进地图")
         return {"ok": True, "id": text, "feature": feature}
 
+    def list_heroes(self) -> list:
+        """读游戏里拥有的英雄列表（编号/名字/品质）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.heroes "
+                "? window.__zzAssist.heroes() : [])"
+            )
+            data = json.loads(raw or "[]")
+            return data if isinstance(data, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
     def diagnose(self) -> Dict[str, Any]:
         """同步诊断（UI 点按钮时调用一次，最多等 6 秒）。"""
         if not self.running:
