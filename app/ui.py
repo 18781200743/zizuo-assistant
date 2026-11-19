@@ -1772,7 +1772,7 @@ class AppUI:
             cell.grid(row=index // 3, column=index % 3, sticky=tk.W, padx=6, pady=1)
             var = tk.BooleanVar(value=(checked is None or hero_id in checked))
             ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
-            counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 —")
+            counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 +0")
             ttk.Label(cell, textvariable=counter, foreground="#777", width=12).pack(
                 side=tk.LEFT, padx=(6, 0)
             )
@@ -1796,6 +1796,7 @@ class AppUI:
         self.append_log("可选英雄（红/橙，名字=编号）：" + "，".join(rows))
 
     def start_gacha_cdp(self) -> None:
+        self._frag_base = {}
         targets: List[str] = []
         raw = (self.gacha_cdp_targets_var.get() or "").replace("，", ",").replace("、", ",")
         for part in raw.split(","):
@@ -1899,14 +1900,21 @@ class AppUI:
 
             counters = snap.get("counters") or {}
             frag_map = snap.get("fragments") or {}
+            # 第一次拿到碎片数据时记基准，之后算「本次抽中多少」
+            if isinstance(frag_map, dict) and frag_map:
+                if not self._frag_base:
+                    self._frag_base = {str(k): int(v) for k, v in frag_map.items()}
             for hero_id, var in getattr(self, "_gacha_hero_counter_vars", {}).items():
                 info = counters.get(str(hero_id)) or counters.get(hero_id) or {}
                 appear = int(info.get("appear") or 0)
                 hit = int(info.get("hit") or 0)
-                frag = None
+                gained = None
                 if isinstance(frag_map, dict):
-                    frag = frag_map.get(str(hero_id), frag_map.get(hero_id))
-                frag_txt = "—" if frag is None else str(int(frag))
+                    cur = frag_map.get(str(hero_id), frag_map.get(hero_id))
+                    if cur is not None:
+                        base = self._frag_base.get(str(hero_id))
+                        gained = max(0, int(cur) - int(base or 0))
+                frag_txt = "+0" if gained is None else f"+{gained}"
                 try:
                     var.set(f"出现 {appear} 次 · 中 {hit} 次 · 碎片 {frag_txt}")
                 except tk.TclError:
