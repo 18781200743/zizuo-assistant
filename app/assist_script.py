@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 45
+RUNTIME_VERSION = 47
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 45
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 45;
+  const VERSION = 47;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1654,6 +1654,66 @@ RUNTIME_JS = r"""
     return false;
   }
 
+  /** 快速复活日志（最近 12 条，方便排查） */
+  function reviveLog(msg) {
+    try {
+      const box = state.revive;
+      if (!box.log) box.log = [];
+      let pos = null;
+      try { pos = teamLeaderSpot(); } catch (_) { pos = null; }
+      box.log.push({
+        t: new Date().toTimeString().slice(0, 8),
+        dead: (() => { try { return deadHeroCount(); } catch (_) { return -1; } })(),
+        pos: pos ? [Math.round(pos.x), Math.round(pos.y)] : null,
+        msg: String(msg || '').slice(0, 40),
+      });
+      if (box.log.length > 12) box.log.splice(0, box.log.length - 12);
+    } catch (_) { /* ignore */ }
+  }
+
+  /** 和游戏自己的「回城」一样：先调 MEMK（结束战斗状态），再传送到营地。 */
+  function campTeleport(camp) {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    try {
+      const jnxz = world && world.JNXZ;
+      if (jnxz && typeof jnxz.JBHX === 'function' && !(world.UMID && world.UMID.MAOP)) {
+        // 游戏原生回城（内部就是 MEMK + ZAVH 到 TCLA/CLAT）
+        jnxz.JBHX();
+        reviveLog('游戏原生回城 JBHX');
+        return true;
+      }
+    } catch (cause) {
+      reviveLog('JBHX 失败：' + msgOf(cause));
+    }
+    try {
+      if (world && typeof world.MEMK === 'function') world.MEMK();
+      reviveLog('MEMK + ZAVH 营地');
+    } catch (_) { reviveLog('MEMK 跳过'); }
+    teleportFire(camp.x, camp.y);
+    return true;
+  }
+
+  /** 隐藏传送时的「落地动画」：每个英雄脚下那个转圈特效（TransitionSprite）。 */
+  function hideLanding() {
+    try {
+      const cc = window.cc;
+      const scene = cc && cc.director && typeof cc.director.getScene === 'function'
+        ? cc.director.getScene() : null;
+      if (!scene) return;
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 4000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        if (n.active && String(n.name || '').indexOf('TransitionSprite') >= 0) n.active = false;
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* 没有就算了 */ }
+  }
+
   /** 关掉传送的加载遮罩：不关的话游戏会忽略下一跳，要干等 5 秒。 */
   function dropLoading() {
     const mapCfg = mapConfig();
@@ -1667,6 +1727,7 @@ RUNTIME_JS = r"""
       }
     } catch (_) { /* 没有就算了 */ }
     try { if (world[mapCfg.state]) world[mapCfg.state].MAOP = false; } catch (_) {}
+    hideLanding();
   }
 
   /** 当前地图里活着的怪：按到队长的距离排序。 */
@@ -1936,7 +1997,8 @@ RUNTIME_JS = r"""
           let atCamp = near2(teamLeaderSpot(), camp);
           if (!atCamp) {
             box.reason = '正在传送到营地…';
-            teleportFire(camp.x, camp.y);
+            reviveLog('开始：dead=' + (() => { try { return deadHeroCount(); } catch (_) { return -1; } })());
+            campTeleport(camp);
           } else {
             box.reason = '已在营地，等英雄复活…';
           }
@@ -1949,6 +2011,7 @@ RUNTIME_JS = r"""
             let left = 1;
             try { left = deadHeroCount(); } catch (_) { left = 1; }
             if (left === 0) { revived = true; break; }
+            hideLanding();
             let p = null;
             try { p = teamLeaderSpot(); } catch (_) { p = null; }
             if (!atCamp && near2(p, camp)) {
@@ -1957,9 +2020,11 @@ RUNTIME_JS = r"""
             }
           }
           if (!revived) {
+            reviveLog('等复活超时');
             dropLoading();
             throw Error('到营地后英雄没有复活（这张图的复活点可能和其它图不一样）');
           }
+          reviveLog('已复活');
 
           // 第二跳：回原地，最多重试 8 秒
           box.reason = '已复活，正在回原地…';
@@ -1971,6 +2036,7 @@ RUNTIME_JS = r"""
             const t3 = now();
             while (now() - t3 < 1200) {
               await new Promise(r => setTimeout(r, 100));
+              hideLanding();
               let p = null;
               try { p = teamLeaderSpot(); } catch (_) { p = null; }
               if (near2(p, spot)) { back = true; break; }
@@ -1979,6 +2045,7 @@ RUNTIME_JS = r"""
             await new Promise(r => setTimeout(r, 200));
           }
           dropLoading();
+          reviveLog(back ? '已回到原地' : '回原地失败，转补传');
           if (back) box.returnTo = null;
 
           box.count += 1;
@@ -2567,6 +2634,7 @@ RUNTIME_JS = r"""
       },
       gold: { today: state.gold.today, date: state.gold.date },
       revive: {
+        log: (state.revive.log || []).slice(-8),
         enabled: state.revive.enabled,
         mode: state.revive.mode,
         delayMs: state.revive.delayMs,
