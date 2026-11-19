@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 89
+RUNTIME_VERSION = 90
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 89
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 89;
+  const VERSION = 90;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -831,6 +831,13 @@ RUNTIME_JS = r"""
 
     state.map.entering = true;
     state.map.lastEnterAt = now();
+    if (!state.map.handled) state.map.handled = Object.create(null);
+    try {
+      const seen = state.map.seen || {};
+      for (const id of Object.keys(seen)) {
+        if (seen[id] && seen[id].dead) state.map.handled[id] = true;
+      }
+    } catch (_) { /* ignore */ }
     state.map.seen = Object.create(null);
     const kind = state.map.pendingKind;
     const label = kind === 'boss' ? 'BOSS' : '小怪';
@@ -910,8 +917,11 @@ RUNTIME_JS = r"""
       if (!info.dead) {
         delete state.map.deathSince[entity];
         delete state.map.deadCounted[entity];
+        if (state.map.handled) delete state.map.handled[entity];
         continue;
       }
+      // 已经为这只怪重进过一次、但它还没活过来：别再触发刷新（否则会 9 秒一次无限重进）
+      if (state.map.handled && state.map.handled[entity]) continue;
       // 每只怪只计一次击杀（重进后清空 deathSince 会重试，但不能再加一次击杀）
       if (!state.map.deadCounted[entity]) {
         state.map.deadCounted[entity] = true;
