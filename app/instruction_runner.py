@@ -306,6 +306,36 @@ def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
 """ % (_js_chest_service(), _js(str(cfg)), _js(str(uid)), int(mult))
 
 
+def _js_teleport_unlocked(pairs: List[List[int]]) -> str:
+    """查每个传送点是否已解锁（csd_fuwu.csd_moxingBiao 里的 csd_yijiesuo）。"""
+    return r"""
+(function () {
+  try {
+    var gen = null;
+    for (var pair of window.System.entries()) {
+      var ex = pair[1];
+      if (ex && typeof ex === 'object' && ex.HQQD && ex.HQQD.VKXX) { gen = ex.HQQD; break; }
+    }
+    if (!gen || !gen.OXIA) return '{}';
+    var table = gen.OXIA.OTWF;
+    if (!table || typeof table.get !== 'function') return '{}';
+    var out = {};
+    var list = %s;
+    for (var i = 0; i < list.length; i += 1) {
+      var mapId = list[i][0], pointId = list[i][1];
+      var key = mapId + '.' + pointId;
+      try {
+        var points = table.get(mapId);
+        var point = points && points.get ? points.get(pointId) : null;
+        out[key] = point ? !!point.KFUG : null;
+      } catch (e) { out[key] = null; }
+    }
+    return JSON.stringify(out);
+  } catch (e) { return '{}'; }
+})()
+""" % _js(pairs)
+
+
 def _js_collect_hook(mapping: Dict[str, Any]) -> str:
     """在采集事件分发器上装一个计数器：采一次 +1，用来判断「到底采到没有」。"""
     return r"""
@@ -689,16 +719,35 @@ class InstructionRunner:
                 raise RuntimeError("传送 的大陆必须是数字") from exc
         cfg = load_automation_config()
         table = cfg.get("teleport_mappings") or {}
-        key = "%d.%d.%d" % (chapter, section, continent)
-        spot = table.get(key)
-        if not spot:
-            # 没写大陆时，取这张地图的第一个传送点
-            for k, v in table.items():
-                if k.startswith("%d.%d." % (chapter, section)):
-                    spot = v
-                    break
-        if not spot:
+        candidates = [
+            (k, v) for k, v in table.items()
+            if k.startswith("%d.%d." % (chapter, section))
+        ]
+        candidates.sort(key=lambda kv: kv[0])
+        if not candidates:
             raise RuntimeError("地图 %d-%d 还没收录传送点" % (chapter, section))
+        if len(args) > 2 and str(args[2]).strip() != "":
+            key = "%d.%d.%d" % (chapter, section, continent)
+            candidates = [kv for kv in candidates if kv[0] == key] or candidates
+            candidates = candidates[:1]
+        else:
+            # 没写大陆：优先挑「已解锁」的那个（和参考工具一致，锁住的点不能传）
+            try:
+                pairs = [
+                    [int(v.get("map_id")), int(v.get("teleport_id") or 0)]
+                    for _k, v in candidates
+                ]
+                unlocked = json.loads(str(self._eval(_js_teleport_unlocked(pairs)) or "{}"))
+            except Exception:  # noqa: BLE001
+                unlocked = {}
+            if isinstance(unlocked, dict) and unlocked:
+                usable = [
+                    kv for kv in candidates
+                    if unlocked.get("%s.%s" % (int(kv[1].get("map_id")), int(kv[1].get("teleport_id") or 0))) is True
+                ]
+                if usable:
+                    candidates = usable
+        key, spot = candidates[0]
         map_id = int(spot.get("map_id"))
         teleport_id = int(spot.get("teleport_id") or 0)
         self._log_line("    传送 → %s（地图 %d，传送点 %d）" % (spot.get("name") or "", map_id, teleport_id))
