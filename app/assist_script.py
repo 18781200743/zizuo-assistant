@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 79
+RUNTIME_VERSION = 80
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 79
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 79;
+  const VERSION = 80;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1989,6 +1989,16 @@ RUNTIME_JS = r"""
       const leader = ids.length ? core[mapCfg.read](ids[0]) : null;
       const lx = leader ? leader.ADUX : 0;
       const ly = leader ? leader.WUZI : 0;
+      const matchers = bossMatchers(mapCfg);
+      const bossOf = (unit) => {
+        const u = ctx.cfg.unit;
+        const tag = typeof unit[u.tag] === 'string' ? unit[u.tag] : '';
+        const point = unit[u.point] || {};
+        const text = (tag + ' ' + String(point.name || '') + ' ' + String(point.pointID || '')).toLowerCase();
+        if (matchers.keywords.some(w => text.indexOf(String(w).toLowerCase()) >= 0)) return true;
+        const template = unit[u.template];
+        return matchers.ids.some(id => String(template) === String(id));
+      };
       const out = [];
       ctx.units[ctx.cfg.each](function (_index, unit) {
         if (!unit) return false;
@@ -2001,11 +2011,13 @@ RUNTIME_JS = r"""
           y: Math.round(unit.WUZI),
           name: String(point.name || ''),
           cfg: unit[u.id],
+          boss: bossOf(unit),
           d: Math.round(Math.hypot(unit.ADUX - lx, unit.WUZI - ly)),
         });
         return false;
       });
-      out.sort((a, b) => a.d - b.d);
+      // BOSS 排前面，同类按距离
+      out.sort((a, b) => (b.boss - a.boss) || (a.d - b.d));
       return out;
     } catch (_) {
       return [];

@@ -1155,15 +1155,25 @@ class AppUI:
         self._monster_rows = rows
         lb = self.assist_monster_list
         lb.delete(0, tk.END)
+        bosses = 0
         for item in rows[:400]:
             name = str(item.get("name") or "怪")
             dist = int(item.get("d") or 0)
-            lb.insert(tk.END, f"{name}    距离 {dist}")
-        self.assist_blink_status.set(
-            f"当前地图 {len(rows)} 只活怪：选一只，点「过去」或双击"
-            if rows
-            else "没读到怪（先进地图、等辅助连上再刷新）"
-        )
+            if item.get("boss"):
+                bosses += 1
+                lb.insert(tk.END, f"★ {name}    距离 {dist}")
+                try:
+                    lb.itemconfig(tk.END, foreground="#c62828")
+                except tk.TclError:
+                    pass
+            else:
+                lb.insert(tk.END, f"{name}    距离 {dist}")
+        if rows:
+            self.assist_blink_status.set(
+                f"当前地图 {len(rows)} 只活怪（BOSS {bosses} 只）：选一只点「过去」或双击"
+            )
+        else:
+            self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
 
     def blink_assist(self) -> None:
         """过去：瞬移或飞过去（选列表里那只怪）。"""
