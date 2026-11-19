@@ -112,14 +112,14 @@ def _vision_mode(text: Any) -> int:
 
 
 # 快速复活方式
-REVIVE_INSTANT = "立即复活（原地秒起，20 绿币/次，推荐）"
-REVIVE_TP = "传送回营地复活（免费，怪会回满血）"
+REVIVE_INSTANT = "立即复活（原地秒起，20 绿币/次）"
+REVIVE_TP = "传送回营地复活（免费，0.2 秒，怪会回满血，推荐）"
 REVIVE_FREE = "免费回营地复活（不花道具/广告）"
 REVIVE_ITEM = "道具复活（消耗复活道具）"
 REVIVE_AD = "广告复活（看广告，不花道具）"
 REVIVE_CAMP = "回营地复活（放弃战斗，回营地满血）"
 REVIVE_CAMPFLY = "回营地复活（队伍留在营地，不飞回）"
-REVIVE_CHOICES = [REVIVE_INSTANT, REVIVE_TP, REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
+REVIVE_CHOICES = [REVIVE_TP, REVIVE_INSTANT, REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
 
 
 def _revive_text(mode: Any) -> str:
