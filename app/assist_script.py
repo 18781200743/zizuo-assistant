@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 73
+RUNTIME_VERSION = 75
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 73
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 73;
+  const VERSION = 75;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1793,21 +1793,62 @@ RUNTIME_JS = r"""
     } catch (_) { /* ignore */ }
   }
 
-  /** 重进地图时反复压掉加载页：XIPH 一调用就开始清 MAOP / 动画。 */
+  /** 隐藏重进地图时的过场加载页（UICanvas/Transition/MapTransitionView）。 */
+  function hideMapTransition() {
+    try {
+      const cc = window.cc;
+      const scene = cc && cc.director && typeof cc.director.getScene === 'function'
+        ? cc.director.getScene() : null;
+      if (!scene) return;
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 5000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        const nm = String(n.name || '');
+        if (n.active && (nm === 'MapTransitionView' || nm === 'Transition')) n.active = false;
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  /** 重进地图：隐藏加载页，并在新地图数据就绪时立刻返回（不等过场动画）。 */
   function fastEnterMap(holder, cfg, mapId) {
     const name = (cfg && cfg.enter) || 'XIPH';
     if (!holder || typeof holder[name] !== 'function') {
       throw Error('游戏里没有地图重进接口，需要更新映射');
     }
-    const until = now() + 3500;
+    const mapCfg = mapConfig();
+    const before = holder[mapCfg.core];
+    const until = now() + 4500;
     const tick = () => {
       try { dropLoading(); } catch (_) { /* ignore */ }
       try { hideLanding(); } catch (_) { /* ignore */ }
-      if (now() < until) setTimeout(tick, 60);
+      try { hideMapTransition(); } catch (_) { /* ignore */ }
+      if (now() < until) setTimeout(tick, 50);
     };
-    const result = holder[name](mapId);
+    let raw = null;
+    try { raw = holder[name](mapId); } catch (cause) { throw cause; }
     tick();
-    return result;
+    try { Promise.resolve(raw).catch(() => {}); } catch (_) { /* 忽略游戏自己的拒绝 */ }
+    return new Promise(resolve => {
+      const t0 = now();
+      const check = () => {
+        let world = null;
+        try { world = holder[mapCfg.core]; } catch (_) { world = null; }
+        const changed = world && world !== before;
+        if (changed || now() - t0 > 2500) {
+          // 再压 600ms，避免加载页在这一瞬间又闪一下
+          setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
+          resolve(true);
+          return;
+        }
+        setTimeout(check, 80);
+      };
+      setTimeout(check, 100);
+    });
   }
 
   /** 和游戏自己的「回城」一样：先调 MEMK（结束战斗状态），再传送到营地。 */
