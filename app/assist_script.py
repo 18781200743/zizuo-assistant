@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 51
+RUNTIME_VERSION = 56
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 51
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 51;
+  const VERSION = 56;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1655,6 +1655,24 @@ RUNTIME_JS = r"""
   }
 
 
+  /** 真·瞬移：ZAVH 的 t=false 分支——不发加载动画、直接改位置，服务端请求照样会发。 */
+  function teleportNoFx(x, y) {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    if (!world || typeof world.ZAVH !== 'function') throw Error('游戏没有传送入口（VKXX.ZAVH）');
+    dropLoading();
+    world.ZAVH(x, y, false, function () { /* 回调是同步的 */ });
+  }
+
+  /** 结束当前战斗状态（游戏自己的回城第一步，缺了它营地不会复活）。 */
+  function leaveBattle() {
+    try {
+      const world = window[mapConfig().holder];
+      if (world && typeof world.MEMK === 'function') world.MEMK();
+      return true;
+    } catch (_) { return false; }
+  }
+
   /** 发传送请求但不等加载结束：服务端收到就生效，位置通常 0.1~0.3 秒就变。 */
   function teleportFire(x, y) {
     const mapCfg = mapConfig();
@@ -1706,24 +1724,9 @@ RUNTIME_JS = r"""
 
   /** 和游戏自己的「回城」一样：先调 MEMK（结束战斗状态），再传送到营地。 */
   function campTeleport(camp) {
-    const mapCfg = mapConfig();
-    const world = window[mapCfg.holder];
-    try {
-      const jnxz = world && world.JNXZ;
-      if (jnxz && typeof jnxz.JBHX === 'function' && !(world.UMID && world.UMID.MAOP)) {
-        // 游戏原生回城（内部就是 MEMK + ZAVH 到 TCLA/CLAT）
-        jnxz.JBHX();
-        reviveLog('游戏原生回城 JBHX');
-        return true;
-      }
-    } catch (cause) {
-      reviveLog('JBHX 失败：' + msgOf(cause));
-    }
-    try {
-      if (world && typeof world.MEMK === 'function') world.MEMK();
-      reviveLog('MEMK + ZAVH 营地');
-    } catch (_) { reviveLog('MEMK 跳过'); }
-    teleportFire(camp.x, camp.y);
+    leaveBattle();
+    reviveLog('MEMK + 瞬移营地');
+    teleportNoFx(camp.x, camp.y);
     return true;
   }
 
@@ -1745,6 +1748,55 @@ RUNTIME_JS = r"""
         for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
       }
     } catch (_) { /* 没有就算了 */ }
+  }
+
+  /** 传送落地时游戏把英雄淡出/藏起来，把它们的颜色和显示拉回来。 */
+  function forceHeroVisible() {
+    try {
+      const cc = window.cc;
+      const scene = cc && cc.director && typeof cc.director.getScene === 'function'
+        ? cc.director.getScene() : null;
+      if (!scene) return;
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 4000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        if (/^HeroUnit/.test(String(n.name || ''))) {
+          if (!n.active) n.active = true;
+          try {
+            const sp = n.getComponent ? n.getComponent(cc.Sprite) : null;
+            if (sp && sp.color && sp.color.a !== 255) sp.color = cc.color(255, 255, 255, 255);
+          } catch (_) { /* ignore */ }
+          try {
+            const op = n.getComponent ? n.getComponent(cc.UIOpacity) : null;
+            if (op && op.opacity !== 255) op.opacity = 255;
+          } catch (_) { /* ignore */ }
+        }
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  /** 传送的落地特效是延迟 0.5~1 秒才冒出来的，要持续按住 3 秒。 */
+  function suppressLanding(ms) {
+    const until = now() + (ms || 3000);
+    const tick = () => {
+      try { hideLanding(); } catch (_) { /* ignore */ }
+      try { forceHeroVisible(); } catch (_) { /* ignore */ }
+      try {
+        const world = window[mapConfig().holder];
+        if (world) {
+          if (world.UMID) world.UMID.MAOP = false;
+          const st = world[mapConfig().state];
+          if (st) st.MAOP = false;
+        }
+      } catch (_) { /* ignore */ }
+      if (now() < until) setTimeout(tick, 60);
+    };
+    tick();
   }
 
   /** 关掉传送的加载遮罩：不关的话游戏会忽略下一跳，要干等 5 秒。 */
@@ -1815,7 +1867,8 @@ RUNTIME_JS = r"""
     Promise.resolve()
       .then(async () => {
         // 不等游戏的传送加载动画：发请求 → 位置 0.1~0.3 秒就变，落地特效一直按住
-        teleportFire(pick.x, pick.y);
+        teleportNoFx(pick.x, pick.y);
+        suppressLanding(1500);
         let arrived = false;
         const deadline = now() + 8000;
         while (now() < deadline) {
@@ -1825,7 +1878,12 @@ RUNTIME_JS = r"""
           let p = null;
           try { p = teamLeaderSpot(); } catch (_) { p = null; }
           if (p && Math.abs(p.x - pick.x) < 260 && Math.abs(p.y - pick.y) < 260) { arrived = true; break; }
+          if (now() - began > 700 && !arrived && !box.__retried) {
+            box.__retried = true;
+            try { teleportFire(pick.x, pick.y); } catch (_) { /* ignore */ }
+          }
         }
+        box.__retried = false;
         hideLanding();
         const cost = ((now() - began) / 1000).toFixed(1);
         box.last = arrived
@@ -2057,6 +2115,7 @@ RUNTIME_JS = r"""
                 await waitWorldReady(6000);
               }
               try { dropLoading(); } catch (_) { /* ignore */ }
+              suppressLanding(3500);
             }
             box.count += 1;
             const cost = ((now() - began2) / 1000).toFixed(1);
@@ -2093,6 +2152,17 @@ RUNTIME_JS = r"""
             box.reason = '正在传送到营地…';
             reviveLog('开始：dead=' + (() => { try { return deadHeroCount(); } catch (_) { return -1; } })());
             campTeleport(camp);
+            // 无动画传送偶尔会被游戏忽略（正在加载等），0.7 秒没动就用带加载的那条
+            const tMove = now();
+            while (now() - tMove < 1600) {
+              await new Promise(r => setTimeout(r, 80));
+              let p0 = null;
+              try { p0 = teamLeaderSpot(); } catch (_) { p0 = null; }
+              if (near2(p0, camp)) break;
+              let left0 = 1;
+              try { left0 = deadHeroCount(); } catch (_) { left0 = 1; }
+              if (left0 === 0) break;
+            }
           } else {
             box.reason = '已在营地，等英雄复活…';
           }
@@ -2126,11 +2196,20 @@ RUNTIME_JS = r"""
           let back = false;
           const t2 = now();
           while (now() - t2 < 8000) {
-            teleportFire(spot.x, spot.y);
+            try { teleportNoFx(spot.x, spot.y); } catch (_) { teleportFire(spot.x, spot.y); }
             const t3 = now();
-            while (now() - t3 < 1200) {
+            while (now() - t3 < 700) {
+              await new Promise(r => setTimeout(r, 80));
+              let p = null;
+              try { p = teamLeaderSpot(); } catch (_) { p = null; }
+              if (near2(p, spot)) { back = true; break; }
+            }
+            if (back) break;
+            // 瞬移没动就退回带加载的传送
+            try { teleportFire(spot.x, spot.y); } catch (_) { /* ignore */ }
+            const t4 = now();
+            while (now() - t4 < 1200) {
               await new Promise(r => setTimeout(r, 100));
-              hideLanding();
               let p = null;
               try { p = teamLeaderSpot(); } catch (_) { p = null; }
               if (near2(p, spot)) { back = true; break; }
@@ -2139,6 +2218,7 @@ RUNTIME_JS = r"""
             await new Promise(r => setTimeout(r, 200));
           }
           dropLoading();
+          suppressLanding(3500);
           reviveLog(back ? '已回到原地' : '回原地失败，转补传');
           if (back) box.returnTo = null;
 
