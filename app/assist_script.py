@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 59
+RUNTIME_VERSION = 73
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 59
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 59;
+  const VERSION = 73;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -834,7 +834,7 @@ RUNTIME_JS = r"""
     const kind = state.map.pendingKind;
     const label = kind === 'boss' ? 'BOSS' : '小怪';
 
-    return Promise.resolve(world[cfg.enter](mapId)).then(result => {
+    return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
       if (result !== true) throw Error('地图重进没有成功（游戏返回 ' + result + '）');
       // 和参考工具一致：重进成功后清空这轮死亡计时；怪若还没活，下一轮会重新计时再重进
       state.map.deathSince = Object.create(null);
@@ -1652,7 +1652,7 @@ RUNTIME_JS = r"""
           if (!holder || typeof holder[mapCfg.enter] !== 'function') {
             throw Error('游戏里没有地图重进接口，无法回到地图 ' + state.revive.savedMapId);
           }
-          const result = holder[mapCfg.enter](state.revive.savedMapId);
+          const result = fastEnterMap(holder, mapCfg, state.revive.savedMapId);
           if (result === false) throw Error('回营地后返回地图失败（游戏返回 false）');
           resolve({ ok: true, how: '已放弃回营地复活并返回地图 ' + state.revive.savedMapId });
         } catch (cause) {
@@ -1791,6 +1791,23 @@ RUNTIME_JS = r"""
       });
       if (box.log.length > 12) box.log.splice(0, box.log.length - 12);
     } catch (_) { /* ignore */ }
+  }
+
+  /** 重进地图时反复压掉加载页：XIPH 一调用就开始清 MAOP / 动画。 */
+  function fastEnterMap(holder, cfg, mapId) {
+    const name = (cfg && cfg.enter) || 'XIPH';
+    if (!holder || typeof holder[name] !== 'function') {
+      throw Error('游戏里没有地图重进接口，需要更新映射');
+    }
+    const until = now() + 3500;
+    const tick = () => {
+      try { dropLoading(); } catch (_) { /* ignore */ }
+      try { hideLanding(); } catch (_) { /* ignore */ }
+      if (now() < until) setTimeout(tick, 60);
+    };
+    const result = holder[name](mapId);
+    tick();
+    return result;
   }
 
   /** 和游戏自己的「回城」一样：先调 MEMK（结束战斗状态），再传送到营地。 */
