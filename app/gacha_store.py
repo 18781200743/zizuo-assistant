@@ -22,10 +22,17 @@ def project_root() -> Path:
 
 def resolve_hero_images_dir() -> Path:
     """便携查找顺序：程序旁 人物图片 → 旧路径 → templates。"""
+    import sys as _sys
+
     candidates = [
+        # 单文件 exe：资源解压在 _MEIPASS 里
+        Path(getattr(_sys, "_MEIPASS", "")) / "人物图片"
+        if getattr(_sys, "_MEIPASS", None)
+        else None,
         project_root() / "人物图片",
         Path(r"F:\F\game\人物图片"),  # 兼容本机旧目录
     ]
+    candidates = [p for p in candidates if p is not None]
     for path in candidates:
         if path.exists():
             return path

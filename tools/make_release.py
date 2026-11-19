@@ -103,7 +103,7 @@ def make_exe() -> Path | None:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onedir",
+        "--onefile",
         "--windowed",
         "--name",
         "Zizuo助手",
@@ -139,45 +139,25 @@ def make_exe() -> Path | None:
     print("运行:", " ".join(cmd))
     subprocess.check_call(cmd, cwd=str(ROOT))
 
-    app_dir = out / "Zizuo助手"
-    if not app_dir.exists():
-        # 个别版本直接输出到 out
-        app_dir = out
-    # 把人物图片/模板拷到 exe 旁
-    for folder in ("人物图片", "templates"):
-        src = ROOT / folder
-        if src.exists():
-            _copy_tree(src, app_dir / folder, set())
-    # 字段映射也放一份到 exe 旁：游戏更新后直接改这个文件即可，不用重新打包
-    mapping = ROOT / "app" / "assist_mapping.json"
-    if mapping.exists():
-        shutil.copy2(mapping, app_dir / "assist_mapping.json")
-    (app_dir / "saves").mkdir(exist_ok=True)
-    readme = ROOT / "分享给别人.txt"
-    if readme.exists():
-        shutil.copy2(readme, app_dir / "分享给别人.txt")
-    # 启动说明
-    (app_dir / "使用说明.txt").write_text(
-        "双击 Zizuo助手.exe 启动。\n"
-        "人物图片、templates 必须和 exe 放在同一文件夹。\n"
-        "首次打开游戏窗口需登录；登录态保存在 saves\\webview。\n",
-        encoding="utf-8",
-    )
+    # 单文件模式：exe 直接在 out 目录里
+    exe_path = out / "Zizuo助手.exe"
+    if not exe_path.exists():
+        found = list(out.rglob("Zizuo助手.exe"))
+        if not found:
+            raise SystemExit("没找到打包好的 exe")
+        exe_path = found[0]
+
+    app_dir = out / "单文件版"
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+    app_dir.mkdir(parents=True)
+    shutil.copy2(exe_path, app_dir / "Zizuo助手.exe")
 
     zip_path = DIST / f"{RELEASE_NAME}_exe.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        base = app_dir.parent if app_dir.name == "Zizuo助手" else app_dir
-        root_for_zip = app_dir if app_dir.name == "Zizuo助手" else app_dir
-        for path in root_for_zip.rglob("*"):
-            if path.is_file():
-                # zip 内保持 Zizuo助手/... 结构
-                if app_dir.name == "Zizuo助手":
-                    arc = path.relative_to(app_dir.parent).as_posix()
-                else:
-                    arc = Path("Zizuo助手", path.relative_to(app_dir)).as_posix()
-                zf.write(path, arc)
+        zf.write(app_dir / "Zizuo助手.exe", "Zizuo助手.exe")
     print(f"[OK] exe 目录: {app_dir}")
     print(f"[OK] exe 压缩包: {zip_path}")
     return zip_path
