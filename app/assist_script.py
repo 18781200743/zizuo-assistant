@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 87
+RUNTIME_VERSION = 89
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 87
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 87;
+  const VERSION = 89;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -835,7 +835,7 @@ RUNTIME_JS = r"""
     const kind = state.map.pendingKind;
     const label = kind === 'boss' ? 'BOSS' : '小怪';
 
-    return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
+    return Promise.resolve(reloadByTeleport(world, cfg, mapId)).then(result => {
       if (result !== true) {
         // 游戏没开始切图：保留这轮死亡计时，5 秒后自动重试（不再假装成功）
         state.map.entering = false;
@@ -1886,6 +1886,100 @@ RUNTIME_JS = r"""
   }
 
   /** 重进地图：隐藏加载页，并在新地图数据就绪时立刻返回（不等过场动画）。 */
+  /** 取服务容器（模块导出里的 HQQD，里面有 OXIA 等 900 多个服务）。 */
+  function servicesBag() {
+    try {
+      const system = window.System;
+      if (!system || typeof system.entries !== 'function') return null;
+      for (const pair of system.entries()) {
+        const ex = pair[1];
+        if (ex && typeof ex === 'object' && ex.HQQD && ex.HQQD.VKXX) return ex.HQQD;
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** 当前地图里第一个「已解锁」的传送点编号（用于 LUSS 重载地图）。 */
+  function pickTeleportPoint(mapId) {
+    const rl = (mapping().map && mapping().map.reload) || {};
+    try {
+      const bag = servicesBag();
+      const svc = bag && bag[rl.service || 'OXIA'];
+      const table = svc && svc[rl.table || 'OTWF'];
+      const points = table && typeof table.get === 'function' ? table.get(mapId) : null;
+      let pick = 0;
+      if (points && typeof points.forEach === 'function') {
+        points.forEach(function (point, id) {
+          if (!pick && point && point[rl.unlocked || 'KFUG'] === true) pick = Number(id);
+        });
+      }
+      return pick;
+    } catch (_) { return 0; }
+  }
+
+  /**
+   * 重进地图（主世界）：XIPH(当前地图) 是空操作，改用 LUSS(当前地图, 传送点)，
+   * 这个会真正触发场景重载。回调 6 秒左右返回；拿不到传送点就退回 XIPH。
+   */
+  function reloadByTeleport(holder, cfg, mapId) {
+    const rl = (mapping().map && mapping().map.reload) || {};
+    const api = holder[rl.api || 'LUSS'];
+    const pointId = pickTeleportPoint(mapId);
+    if (typeof api !== 'function' || !pointId) {
+      return Promise.resolve(fastEnterMap(holder, cfg, mapId));
+    }
+    let saved = null;
+    try { saved = teamLeaderSpot(); } catch (_) { saved = null; }
+    return new Promise(resolve => {
+      let finished = false;
+      const finish = value => { if (!finished) { finished = true; resolve(value); } };
+      try {
+        api.call(holder, mapId, pointId, () => finish(true));
+      } catch (_) {
+        finish(false);
+        return;
+      }
+      const t0 = now();
+      let sawLoading = false;
+      const check = () => {
+        if (finished) return;
+        try {
+          const st = holder[cfg.state];
+          if (st && st.MAOP === true) sawLoading = true;
+        } catch (_) { /* ignore */ }
+        if (sawLoading && now() - t0 > 1200 && !(holder[cfg.state] || {}).MAOP) finish(true);
+        if (now() - t0 > 20000) finish(sawLoading);
+        setTimeout(check, 150);
+      };
+      setTimeout(check, 200);
+    }).then(ok => {
+      // 重载后落在传送点，把队伍分段瞬移回原来刷怪的位置
+      if (!ok || !saved) return ok;
+      return new Promise(resolve => {
+        const t0 = now();
+        const hop = () => {
+          let here = null;
+          try { here = teamLeaderSpot(); } catch (_) { here = null; }
+          if (!here) {
+            if (now() - t0 > 6000) { resolve(true); return; }
+            setTimeout(hop, 300);
+            return;
+          }
+          const dx = saved.x - here.x;
+          const dy = saved.y - here.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 380 || now() - t0 > 12000) { resolve(true); return; }
+          const step = Math.min(dist, 2600);
+          try {
+            teleportNoFx(here.x + dx / dist * step, here.y + dy / dist * step);
+          } catch (_) { /* ignore */ }
+          setTimeout(hop, 260);
+        };
+        setTimeout(hop, 900);
+      });
+    });
+  }
+
   function fastEnterMap(holder, cfg, mapId) {
     const name = (cfg && cfg.enter) || 'XIPH';
     if (!holder || typeof holder[name] !== 'function') {

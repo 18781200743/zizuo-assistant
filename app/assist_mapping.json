@@ -159,7 +159,14 @@
     },
     "teleport": "LUSS",
     "loading": "MAOP",
-    "_teleportComment": "传送原生接口：VKXX.LUSS(地图ID, 传送点ID, 回调)，能落到指定传送点；MAOP 是地图加载中标记"
+    "_teleportComment": "传送原生接口：VKXX.LUSS(地图ID, 传送点ID, 回调)，能落到指定传送点；MAOP 是地图加载中标记",
+    "reload": {
+     "api": "LUSS",
+     "service": "OXIA",
+     "table": "OTWF",
+     "unlocked": "KFUG"
+    },
+    "_reloadComment": "主世界重进地图：XIPH(当前地图) 是空操作，改用 LUSS(当前地图, 已解锁传送点) 触发真正的重载"
    },
    "_gachaComment": [
     "抽卡（英雄招募）= 直连游戏的酒馆招募服务，和参考工具同一套别名：",
