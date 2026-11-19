@@ -361,7 +361,20 @@
         "revive": "RZFJ",
         "holderModule": "chunks:///_virtual/DOTT.ts",
         "holder": "HQQD",
-        "heroService": "APRU"
+        "heroService": "APRU",
+        "campTeleport": {
+          "api": "ZAVH",
+          "campCoords": [
+            "TCLA",
+            "CLAT"
+          ],
+          "waitMs": 1200
+        },
+        "local": {
+          "opts": {
+            "CTXT": true
+          }
+        }
       },
       "_heroReviveComment": [
         "单英雄复活：我方英雄倒地后等 N 秒，向服务器申请复活（服务端认这条）。",

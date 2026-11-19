@@ -25,7 +25,7 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     "vision_mode": -1,
     "cooldown_seconds": 3,
     # 快速复活：mode = item 道具 / ad 广告 / camp 放弃回城；delay 秒
-    "revive_mode": "free",
+    "revive_mode": "tp",
     "revive_delay": 0.5,
     # 单英雄复活：倒地多少秒后动手；hero_revive_mode = item / ad / campfly
     "hero_revive_seconds": 1,
@@ -95,11 +95,20 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
                     continue
             elif key == "hero_revive_mode":
                 text = str(item or "").strip().lower()
-                if text in ("timer", "item", "ad", "campfly"):
+                # timer = 本地改复活倒计时，实测会被服务端抓，直接迁到服务器复活
+                if text == "timer":
+                    text = "item"
+                if text in ("item", "ad", "campfly"):
                     data[key] = text
+            elif key == "blink_target":
+                if isinstance(item, str):
+                    data[key] = item.strip()[:40]
             elif key == "revive_mode":
                 text = str(item or "").strip().lower()
-                if text in ("free", "item", "ad", "camp", "campfly"):
+                # 旧的「放弃回城」(camp/free) 统一迁成更快、同样免费的「传送回营地」
+                if text in ("camp", "free"):
+                    text = "tp"
+                if text in ("tp", "item", "ad", "campfly"):
                     data[key] = text
             elif key == "vision_mode":
                 try:

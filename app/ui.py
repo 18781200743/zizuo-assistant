@@ -112,16 +112,18 @@ def _vision_mode(text: Any) -> int:
 
 
 # 快速复活方式
+REVIVE_TP = "快速复活（0.3 秒，不花道具/广告，推荐）"
 REVIVE_FREE = "免费回营地复活（不花道具/广告）"
 REVIVE_ITEM = "道具复活（消耗复活道具）"
 REVIVE_AD = "广告复活（看广告，不花道具）"
 REVIVE_CAMP = "回营地复活（放弃战斗，回营地满血）"
 REVIVE_CAMPFLY = "回营地复活（队伍留在营地，不飞回）"
-REVIVE_CHOICES = [REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
+REVIVE_CHOICES = [REVIVE_TP, REVIVE_FREE, REVIVE_ITEM, REVIVE_AD, REVIVE_CAMP, REVIVE_CAMPFLY]
 
 
 def _revive_text(mode: Any) -> str:
     return {
+        "tp": REVIVE_TP,
         "free": REVIVE_FREE,
         "ad": REVIVE_AD,
         "camp": REVIVE_CAMP,
@@ -131,6 +133,8 @@ def _revive_text(mode: Any) -> str:
 
 def _revive_mode(text: Any) -> str:
     value = str(text or "")
+    if value == REVIVE_TP:
+        return "tp"
     if value == REVIVE_FREE:
         return "free"
     if value == REVIVE_AD:
@@ -783,16 +787,31 @@ class AppUI:
             box, textvariable=self.assist_hero_revive_status, foreground="#666", wraplength=980
         ).grid(row=14, column=0, columnspan=6, sticky=tk.W)
 
+        # ---- 闪现寻怪：传送到最近的怪 / 指定怪 ----
+        ttk.Label(box, text="闪现寻怪").grid(row=15, column=0, sticky=tk.W, pady=4)
+        self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
+        ttk.Entry(box, textvariable=self.assist_blink_var, width=22).grid(
+            row=15, column=1, columnspan=2, sticky=tk.W, padx=6
+        )
+        self.assist_blink_btn = ttk.Button(
+            box, text="闪现", width=10, command=self.blink_assist
+        )
+        self.assist_blink_btn.grid(row=15, column=3, padx=8)
+        self.assist_blink_status = tk.StringVar(value="留空 = 最近的怪；填名字/编号 = 指定怪")
+        ttk.Label(
+            box, textvariable=self.assist_blink_status, foreground="#666", wraplength=560
+        ).grid(row=15, column=4, columnspan=2, sticky=tk.W)
+
         ttk.Label(
             box,
             text=(
-                "倍伤 / 视野 / 冷却 / 复活都会改动游戏战斗数值，存在被判定异常的风险，默认关闭；「飞回原位」会触发战斗哈希不一致（战斗数据与服务器不一致），已默认关闭；"
+                "倍伤 / 视野 / 冷却会改动游戏战斗数值，存在被判定异常的风险，默认关闭；快速复活走游戏自己的传送接口（服务端认可），不花道具/广告；"
                 "开着倍伤 / 视野 / 冷却时不能开小怪 / BOSS 地图刷新（参考工具也是这个规则）。"
             ),
             foreground="#c62828",
             wraplength=980,
             justify=tk.LEFT,
-        ).grid(row=15, column=0, columnspan=6, sticky=tk.W, pady=(6, 0))
+        ).grid(row=16, column=0, columnspan=6, sticky=tk.W, pady=(6, 0))
 
         warn = ttk.Frame(parent)
         warn.pack(fill=tk.X, pady=10)
@@ -850,6 +869,9 @@ class AppUI:
                 assist[key] = max(low, min(high, float(var.get().strip())))
             except (ValueError, AttributeError, TypeError):
                 continue
+        blink_var = getattr(self, "assist_blink_var", None)
+        if blink_var is not None:
+            assist["blink_target"] = blink_var.get().strip()
         vision_var = getattr(self, "assist_vision_var", None)
         if vision_var is not None:
             assist["vision_mode"] = _vision_mode(vision_var.get())
@@ -1139,8 +1161,20 @@ class AppUI:
         self.assist.set_feature("revive", {"mode": mode, "delay": delay})
         self.assist_revive_btn.configure(text="关闭")
         self.assist_revive_status.set("正在开启…")
-        label = {"free": "免费回营地复活", "item": "道具复活", "ad": "广告复活", "camp": "回营地复活"}.get(mode, mode)
+        label = {"tp": "传送回营地复活", "free": "免费回营地复活", "item": "道具复活", "ad": "广告复活", "camp": "回营地复活"}.get(mode, mode)
         self.append_log(f"已发送：开启快速复活（{label}，延迟 {delay:g} 秒）")
+
+    def blink_assist(self) -> None:
+        """闪现到最近的怪（输入框填名字/编号就传送到指定怪）。"""
+        if not self.assist.running:
+            self.start_assist()
+        target = self.assist_blink_var.get().strip()
+        self._read_assist_into_config()
+        self.assist.set_feature("blink", target)
+        self.assist_blink_status.set("正在闪现…" if not target else f"正在找「{target}」…")
+        self.append_log(
+            "已发送：闪现到" + (f"「{target}」" if target else "最近的怪")
+        )
 
     def toggle_hero_revive(self) -> None:
         """单英雄复活时间：死一个多久原地站起来。开着再点 = 关闭。"""
@@ -1208,6 +1242,13 @@ class AppUI:
 
         revive = state.get("revive") or {}
         hero_revive = state.get("heroRevive") or {}
+
+        blink = state.get("blink") or {}
+        self.assist_blink_btn.configure(
+            state=tk.DISABLED if gap else tk.NORMAL,
+            text="闪现中…" if blink.get("busy") else "闪现",
+        )
+        self.assist_blink_status.set(str(blink.get("reason") or "留空 = 最近的怪；填名字/编号 = 指定怪"))
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,

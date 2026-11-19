@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 30
+RUNTIME_VERSION = 41
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 30
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 30;
+  const VERSION = 41;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -101,6 +101,8 @@ RUNTIME_JS = r"""
       savedMapId: 0,
       lastResult: '',
     },
+    // 闪现寻怪：传送到最近的怪（或指定名字/编号的怪）
+    blink: { busy: false, last: '', reason: '尚未使用' },
     // 回营地复活 + 飞回原位（参考脚本 gohome → goto → fly）
     campFly: {
       running: false,
@@ -1562,10 +1564,213 @@ RUNTIME_JS = r"""
     box.busy = false;
   }
 
+
+  /** 营地坐标：游戏自己的返回点（TCLA / CLAT，返回按钮用的就是它）。 */
+  function campSpot(core, cfg) {
+    const names = (cfg && cfg.campCoords) || ['TCLA', 'CLAT'];
+    for (const name of names) {
+      try {
+        if (!core || typeof core[name] !== 'function') continue;
+        const p = core[name]();
+        if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) return p;
+      } catch (_) { /* 换下一个 */ }
+    }
+    return null;
+  }
+
+  /** 游戏传送请求：VKXX.ZAVH(x, y, true, cb)（服务端认可，不会哈希不一致）。 */
+  function teleportTo(x, y) {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    const api = 'ZAVH';
+    if (!world || typeof world[api] !== 'function') {
+      throw Error('游戏没有传送入口（VKXX.' + api + '）');
+    }
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        reject(Error('传送请求超时（游戏可能还在加载）'));
+      }, 8000);
+      try {
+        world[api](x, y, true, function () {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(1);
+        });
+      } catch (cause) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(cause);
+      }
+    });
+  }
+
+
+  /** 发传送请求但不等加载结束：服务端收到就生效，位置通常 0.1~0.3 秒就变。 */
+  function teleportFire(x, y) {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    if (!world || typeof world.ZAVH !== 'function') throw Error('游戏没有传送入口（VKXX.ZAVH）');
+    world.ZAVH(x, y, true, function () { /* 不等它 */ });
+  }
+
+  /** 等地图真正加载完（core 就绪 + 不在加载/切图），连续 3 次才算稳。 */
+  async function waitWorldReady(limitMs) {
+    const began = now();
+    let ok = 0;
+    while (now() - began < limitMs) {
+      await new Promise(r => setTimeout(r, 150));
+      let ready = false;
+      try {
+        const mapCfg2 = mapConfig();
+        const w = window[mapCfg2.holder];
+        const st = w && mapCfg2.state ? w[mapCfg2.state] : null;
+        const c = w && w[mapCfg2.core];
+        ready = !!(c && typeof c[mapCfg2.manager] === 'function' && c[mapCfg2.manager]())
+          && !(st && st.MAOP)
+          && !(st && mapCfg2.changing && st[mapCfg2.changing]);
+      } catch (_) { ready = false; }
+      ok = ready ? ok + 1 : 0;
+      if (ok >= 3) return true;
+    }
+    return false;
+  }
+
+  /** 关掉传送的加载遮罩：不关的话游戏会忽略下一跳，要干等 5 秒。 */
+  function dropLoading() {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    if (!world) return;
+    try {
+      const um = world.UMID;
+      if (um) {
+        um.MAOP = false;
+        if (typeof um.ANIO === 'function') um.ANIO();
+      }
+    } catch (_) { /* 没有就算了 */ }
+    try { if (world[mapCfg.state]) world[mapCfg.state].MAOP = false; } catch (_) {}
+  }
+
+  /** 当前地图里活着的怪：按到队长的距离排序。 */
+  function blinkTargets() {
+    const mapCfg = mapConfig();
+    const ctx = mapContext();
+    const core = ctx.core;
+    const world = ctx.holder;
+    const mgr = core[mapCfg.manager]();
+    const team = core[mapCfg.team](world[mapCfg.player]);
+    const ids = mgr[mapCfg.members](team) || [];
+    const leader = ids.length ? core[mapCfg.read](ids[0]) : null;
+    const lx = leader ? leader.ADUX : 0;
+    const ly = leader ? leader.WUZI : 0;
+    const out = [];
+    ctx.units[ctx.cfg.each](function (_index, unit) {
+      if (!unit) return false;
+      const u = ctx.cfg.unit;
+      if (u.monster && typeof unit[u.monster] === 'function' && unit[u.monster]() !== true) return false;
+      if (u.dead && typeof unit[u.dead] === 'function' && unit[u.dead]()) return false;
+      const point = unit[u.point] || {};
+      out.push({
+        x: unit.ADUX,
+        y: unit.WUZI,
+        name: String(point.name || ''),
+        cfg: unit[u.id],
+        d: Math.hypot(unit.ADUX - lx, unit.WUZI - ly),
+      });
+      return false;
+    });
+    out.sort((a, b) => a.d - b.d);
+    return out;
+  }
+
+  /** 闪现到最近的怪；filter 为空=最近，否则按名字包含 / 编号相等。 */
+  function doBlink(filter) {
+    const box = state.blink;
+    if (box.busy) throw Error('上一次闪现还没结束');
+    const targets = blinkTargets();
+    if (!targets.length) throw Error('当前地图没找到活着的怪');
+    const text = String(filter === undefined || filter === null ? '' : filter).trim();
+    let pick = null;
+    if (text) {
+      pick = targets.find(t => t.name.indexOf(text) >= 0 || String(t.cfg) === text);
+      if (!pick) throw Error('没找到名字/编号是「' + text + '」的活怪');
+    } else {
+      pick = targets[0];
+    }
+    box.busy = true;
+    box.reason = '正在闪现到 ' + (pick.name || pick.cfg) + '…';
+    Promise.resolve()
+      .then(() => teleportTo(pick.x, pick.y))
+      .then(() => {
+        box.last = '已闪现到 ' + (pick.name || pick.cfg);
+        box.reason = box.last;
+      })
+      .catch(cause => {
+        box.reason = '闪现失败：' + msgOf(cause);
+      })
+      .then(() => { box.busy = false; });
+    return { ok: true, message: '正在闪现到 ' + (pick.name || pick.cfg) };
+  }
+
+  function teamLeaderSpot() {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    const core = world[mapCfg.core];
+    const mgr = core[mapCfg.manager]();
+    const team = core[mapCfg.team](world[mapCfg.player]);
+    const ids = mgr[mapCfg.members](team) || [];
+    const unit = ids.length ? core[mapCfg.read](ids[0]) : null;
+    if (!unit) return null;
+    return { x: unit.ADUX, y: unit.WUZI };
+  }
+
+
+  /** 原地复活：调用游戏重生系统 LBUD，把所有倒地英雄拉起来（不移动、不花资源）。 */
+  function localReviveAll(cfg) {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    const core = world[mapCfg.core];
+    if (!core || typeof core.UDWZ !== 'function') throw Error('实体世界还没就绪');
+    const noyr = core.UDWZ() && core.UDWZ().NOYR;
+    if (!noyr || typeof noyr.LBUD !== 'function') throw Error('重生系统还没就绪');
+    const opts = (cfg && cfg.opts) || { CTXT: true };
+    return noyr.LBUD(world[mapCfg.player], null, opts) || 0;
+  }
+
+  /** 数一下当前队伍里倒地的英雄。 */
+  function deadHeroCount() {
+    const mapCfg = mapConfig();
+    const world = window[mapCfg.holder];
+    const core = world[mapCfg.core];
+    const mgr = core[mapCfg.manager]();
+    const team = core[mapCfg.team](world[mapCfg.player]);
+    const ids = mgr[mapCfg.members](team) || [];
+    let dead = 0;
+    for (const id of ids) {
+      const unit = core[mapCfg.read](id);
+      if (unit && mapCfg.unit.dead && typeof unit[mapCfg.unit.dead] === 'function' && unit[mapCfg.unit.dead]()) {
+        dead += 1;
+      }
+    }
+    return dead;
+  }
+
+  let reviveLocalAt = 0;
+
   function tickRevive() {
     const box = state.revive;
     if (!box.enabled) return;
     if (!mapping()) return;
+
+    // 客户端原地复活（LBUD）已被服务端哈希校验抓到，永久停用
+    if (box.mode === 'local') {
+      box.reason = '「原地复活」会被服务端判为数据不一致，已停用；请用「传送回营地复活」';
+      return;
+    }
     const nowMs = now();
     if (box.busy || nowMs < box.nextTryAt) return;
     // 场景遍历比较重，最多每 400ms 找一次面板
@@ -1583,25 +1788,160 @@ RUNTIME_JS = r"""
     }
 
     if (!panel) {
-      if (state.campFly.running) {
-        box.reason = state.campFly.reason;
+      // 没有全灭面板时：传送/道具/广告这几种也按「有英雄倒地」触发
+      let dead = 0;
+      if (box.mode === 'tp' || box.mode === 'item' || box.mode === 'ad') {
+        try {
+          const hcfg = (mapping() && mapping().heroRevive) || {};
+          const ctx = mapContext();
+          ctx.units[ctx.cfg.each](function (_index, unit) {
+            if (!unit) return false;
+            if (typeof unit[hcfg.heroFlag] !== 'function' || unit[hcfg.heroFlag]() !== true) return false;
+            if (typeof unit[hcfg.deadFlag] === 'function' && unit[hcfg.deadFlag]() === true) dead += 1;
+            return false;
+          });
+        } catch (_) { dead = 0; }
+      }
+      box.deadCount = dead;
+      if (!dead) {
+        if (state.campFly.running) {
+          box.reason = state.campFly.reason;
+          return;
+        }
+        if (box.phase === 'waiting') {
+          reviveReset();
+          box.reason = box.mode === 'tp'
+            ? '监控中：英雄倒地就传营地复活，约 0.3 秒回原位（全灭约 11 秒）'
+            : '监控中：英雄倒地或全灭后 ' + (box.delayMs / 1000) + ' 秒自动'
+              + (box.mode === 'campfly' ? '回营地复活并飞回原位' : '复活');
+        }
         return;
       }
-      if (box.phase === 'waiting') {
-        reviveReset();
-        box.reason = '监控中：全灭后 ' + (box.delayMs / 1000) + ' 秒自动'
-          + (box.mode === 'campfly' ? '回营地复活并飞回原位' : '复活');
-      }
-      return;
     }
 
     if (!box.pendingAt) {
-      box.pendingAt = nowMs + box.delayMs;
+      // 传送复活是服务端瞬发的，不需要等，延迟只对道具/广告复活有意义
+      box.pendingAt = nowMs + (box.mode === 'tp' ? 0 : box.delayMs);
       box.phase = 'waiting';
-      box.reason = '检测到全灭，' + (box.delayMs / 1000) + ' 秒后复活…';
+      const deadNow = box.deadCount || 0;
+      box.reason = (panel ? '检测到全灭' : '检测到 ' + deadNow + ' 个英雄倒地')
+        + '，' + (box.delayMs / 1000) + ' 秒后复活…';
       return;
     }
     if (nowMs < box.pendingAt) return;
+
+    // 传送回营地复活：传到营地（TCLA/CLAT）→ 等复活 → 传回原位
+    if (box.mode === 'tp') {
+      if (box.busy) return;
+      box.busy = true;
+      box.pendingAt = 0;
+      box.phase = 'tp';
+      const reviveCfg = mapping().revive || {};
+      const began = now();
+
+      // 全灭（失败面板已弹）时游戏不接受传送：位置不动、还会卡在加载。
+      // 这种情况只能点面板的「放弃」回城复活（免费），回城后再自动回图。
+      if (panel) {
+        let spot = null;
+        try { spot = teamLeaderSpot(); } catch (_) { spot = null; }
+        const began2 = now();
+        Promise.resolve()
+          .then(() => reviveByCamp(cfg, panel))
+          .then(async info => {
+            if (spot) {
+              box.reason = '已回城复活，等地图就绪…';
+              await waitWorldReady(20000);
+              box.reason = '已回城复活，正在传回原地…';
+              for (let attempt = 0; attempt < 2; attempt += 1) {
+                try { dropLoading(); } catch (_) { /* ignore */ }
+                try { teleportFire(spot.x, spot.y); } catch (_) { break; }
+                let arrived = false;
+                const t = now();
+                while (now() - t < 4000) {
+                  await new Promise(r => setTimeout(r, 100));
+                  let p = null;
+                  try { p = teamLeaderSpot(); } catch (_) { p = null; }
+                  if (p && Math.abs(p.x - spot.x) < 300 && Math.abs(p.y - spot.y) < 300) { arrived = true; break; }
+                }
+                if (arrived) break;
+                await waitWorldReady(6000);
+              }
+              try { dropLoading(); } catch (_) { /* ignore */ }
+            }
+            box.count += 1;
+            const cost = ((now() - began2) / 1000).toFixed(1);
+            box.lastResult = '全灭回城复活完成（' + cost + ' 秒）';
+            box.reason = box.lastResult + ' · 今日 ' + box.count + ' 次';
+          })
+          .catch(cause => {
+            box.reason = '全灭回城失败：' + msgOf(cause);
+          })
+          .then(() => {
+            box.busy = false;
+            box.phase = '';
+            box.nextTryAt = now() + 4000;
+          });
+        return;
+      }
+
+      Promise.resolve()
+        .then(async () => {
+          const spot = teamLeaderSpot();
+          if (!spot) throw Error('读不到队伍坐标');
+          const core = window[mapConfig().holder][mapConfig().core];
+          const camp = campSpot(core, reviveCfg.campTeleport);
+          if (!camp) throw Error('读不到营地坐标（TCLA/CLAT）');
+
+          // 第一跳：传营地（不等加载）
+          box.reason = '正在传送到营地…';
+          teleportFire(camp.x, camp.y);
+
+          // 服务端接受传送的瞬间就把倒地的英雄拉起来，一般 0.1~0.5 秒
+          box.reason = '已到营地，等英雄复活…';
+          let left = -1;
+          const t1 = now();
+          while (now() - t1 < 4000) {
+            await new Promise(r => setTimeout(r, 80));
+            try { left = deadHeroCount(); } catch (_) { left = 1; }
+            if (left === 0) break;
+          }
+          if (left !== 0) {
+            dropLoading();
+            throw Error('到营地后英雄没有复活（怪可能已经回血）');
+          }
+
+          // 关加载遮罩，否则下一跳会被游戏忽略
+          dropLoading();
+
+          // 第二跳：立刻传回原位
+          box.reason = '已复活，正在回原地…';
+          teleportFire(spot.x, spot.y);
+          let back = false;
+          const t2 = now();
+          while (now() - t2 < 4000) {
+            await new Promise(r => setTimeout(r, 80));
+            const p = teamLeaderSpot();
+            if (p && Math.abs(p.x - spot.x) < 300 && Math.abs(p.y - spot.y) < 300) { back = true; break; }
+          }
+          dropLoading();
+
+          box.count += 1;
+          const cost = ((now() - began) / 1000).toFixed(1);
+          box.lastResult = back
+            ? '快速复活完成（' + cost + ' 秒）'
+            : '复活成功，但没传回原地（' + cost + ' 秒，可能被怪打断）';
+          box.reason = box.lastResult + ' · 今日 ' + box.count + ' 次';
+        })
+        .catch(cause => {
+          box.reason = '传送复活失败：' + msgOf(cause);
+        })
+        .then(() => {
+          box.busy = false;
+          box.phase = '';
+          box.nextTryAt = now() + 3000;
+        });
+      return;
+    }
 
     // 免费回营地：和参考脚本一样，面板一出现就点「返回」，队伍回营地复活
     if (box.mode === 'free') {
@@ -2184,6 +2524,11 @@ RUNTIME_JS = r"""
         count: state.heroRevive.count,
         reason: state.heroRevive.reason,
       },
+      blink: {
+        busy: state.blink.busy,
+        last: state.blink.last,
+        reason: state.blink.reason,
+      },
       campFly: {
         running: state.campFly.running,
         phase: state.campFly.phase,
@@ -2245,6 +2590,15 @@ RUNTIME_JS = r"""
       heroTimerRestore();
       try { stopCampFly('已关闭'); } catch (_) { /* ignore */ }
       return { ok: true, message: '已全部关闭（战斗数值已恢复）' };
+    }
+
+    if (feature === 'blink') {
+      try {
+        return doBlink(value);
+      } catch (cause) {
+        state.blink.reason = '闪现失败：' + msgOf(cause);
+        return { ok: false, message: msgOf(cause) };
+      }
     }
 
     if (feature === 'reviveNow') {
@@ -2319,7 +2673,7 @@ RUNTIME_JS = r"""
         return { ok: true, message: '快速复活已关闭' };
       }
       const box = state.revive;
-      const mode = ['item', 'ad', 'camp', 'campfly', 'free'].indexOf(raw.mode) >= 0 ? raw.mode : 'item';
+      const mode = ['local', 'item', 'ad', 'camp', 'campfly', 'free', 'tp'].indexOf(raw.mode) >= 0 ? raw.mode : 'item';
       let seconds = Number(raw.delay);
       if (!Number.isFinite(seconds) || seconds < 0) seconds = 0.5;
       seconds = Math.min(10, seconds);
@@ -2342,12 +2696,17 @@ RUNTIME_JS = r"""
       box.pendingAt = 0;
       box.phase = '';
       box.nextTryAt = 0;
-      box.reason = '监控中：全灭后 ' + seconds + ' 秒自动' + (
-        mode === 'free' ? '免费回营地复活'
+      box.reason = '监控中：' + (
+        mode === 'local' ? '英雄倒地就立刻原地复活'
+          : '全灭后 ' + seconds + ' 秒自动' + (
+        mode === 'tp' ? '传送回营地复活'
+          : mode === 'free' ? '免费回营地复活'
           : mode === 'campfly' ? '回营地复活并飞回原位'
             : mode === 'camp' ? '放弃回营地复活并返回地图'
-              : (mode === 'ad' ? '看广告复活' : '用道具复活'));
-      const label = mode === 'free' ? '免费回营地复活'
+              : (mode === 'ad' ? '看广告复活' : '用道具复活')));
+      const label = mode === 'local' ? '原地秒复活'
+        : mode === 'tp' ? '传送回营地复活'
+        : mode === 'free' ? '免费回营地复活'
         : mode === 'campfly' ? '回营地复活 + 飞回原位'
           : mode === 'camp' ? '回营地复活' : (mode === 'ad' ? '广告复活' : '道具复活');
       return { ok: true, message: '快速复活已开启（' + label + '，延迟 ' + seconds + ' 秒）' };
