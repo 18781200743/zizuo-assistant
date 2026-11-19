@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 8
+GACHA_VERSION = 9
 
 GACHA_JS = r"""
 (() => {
@@ -453,6 +453,33 @@ GACHA_JS = r"""
       });
   }
 
+  // 英雄碎片：CPDF 是「英雄编号 -> 英雄数据」的 Map，碎片数量在字段方法里
+  let fragCache = { at: 0, data: {} };
+  function allFragments(g) {
+    const nowMs = Date.now();
+    if (nowMs - fragCache.at < 3000) return fragCache.data;
+    const out = {};
+    try {
+      const H = holder(g);
+      const svc = H && H[g.hero.service];
+      const t = svc && svc[g.hero.model];
+      const map = t && t[g.hero.list];
+      const fnName = (g.hero && g.hero.fragments) || 'NALI';
+      if (map && typeof map.forEach === 'function') {
+        map.forEach(function (entry, id) {
+          try {
+            if (!entry) return;
+            const raw = typeof entry[fnName] === 'function' ? entry[fnName]() : entry[fnName];
+            const n = Number(raw);
+            if (Number.isFinite(n)) out[id] = n;
+          } catch (_) { /* 单个英雄失败就算了 */ }
+        });
+      }
+    } catch (_) { /* 没进游戏就读不到 */ }
+    fragCache = { at: nowMs, data: out };
+    return out;
+  }
+
   function snapshot() {
     let ready = false;
     let stateReason = '';
@@ -460,6 +487,7 @@ GACHA_JS = r"""
     let contextId = null;
     let bet = null;
     let drawCount = null;
+    let fragments = {};
     try {
       const g = cfg();
       const view = findView(g);
@@ -475,6 +503,7 @@ GACHA_JS = r"""
         selected: item[g.model.selected] === true,
       }));
       ready = true;
+      try { fragments = allFragments(g); } catch (_) { fragments = {}; }
     } catch (cause) {
       stateReason = msgOf(cause);
     }
@@ -497,6 +526,7 @@ GACHA_JS = r"""
       candidates,
       records: Object.keys(state.records).map(id => state.records[id]),
       counters: state.counters,
+      fragments,
       contextId,
       bet,
       drawCount,

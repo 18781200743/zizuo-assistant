@@ -1772,7 +1772,7 @@ class AppUI:
             cell.grid(row=index // 3, column=index % 3, sticky=tk.W, padx=6, pady=1)
             var = tk.BooleanVar(value=(checked is None or hero_id in checked))
             ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
-            counter = tk.StringVar(value="出现 0 / 中 0")
+            counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 —")
             ttk.Label(cell, textvariable=counter, foreground="#777", width=12).pack(
                 side=tk.LEFT, padx=(6, 0)
             )
@@ -1898,12 +1898,17 @@ class AppUI:
                     pass
 
             counters = snap.get("counters") or {}
+            frag_map = snap.get("fragments") or {}
             for hero_id, var in getattr(self, "_gacha_hero_counter_vars", {}).items():
                 info = counters.get(str(hero_id)) or counters.get(hero_id) or {}
                 appear = int(info.get("appear") or 0)
                 hit = int(info.get("hit") or 0)
+                frag = None
+                if isinstance(frag_map, dict):
+                    frag = frag_map.get(str(hero_id), frag_map.get(hero_id))
+                frag_txt = "—" if frag is None else str(int(frag))
                 try:
-                    var.set(f"出现 {appear} / 中 {hit}")
+                    var.set(f"出现 {appear} 次 · 中 {hit} 次 · 碎片 {frag_txt}")
                 except tk.TclError:
                     pass
 
