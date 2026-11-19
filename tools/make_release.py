@@ -94,7 +94,8 @@ def make_exe() -> Path | None:
     work = DIST / "_pyi_work"
     out = DIST / f"{RELEASE_NAME}_exe"
     if out.exists():
-        shutil.rmtree(out)
+        # 旧版本可能还在跑，锁住里面的 webview 缓存：删不掉就算了，后面会覆盖
+        shutil.rmtree(out, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
 
     cmd = [
