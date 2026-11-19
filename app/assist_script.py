@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 84
+RUNTIME_VERSION = 85
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 84
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 84;
+  const VERSION = 85;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -821,6 +821,7 @@ RUNTIME_JS = r"""
    * 服务端只回 WCHC=0、不带场景数据（连续 100 秒重试也一样）。
    */
   function mapEnter(ctx) {
+    try {
     const cfg = ctx.cfg;
     const world = ctx.holder;
     if (typeof world[cfg.enter] !== 'function') throw Error('游戏里没有地图重进接口，需要更新映射');
@@ -849,6 +850,12 @@ RUNTIME_JS = r"""
       state.map.pendingKind = '';
       throw cause;
     });
+    } catch (cause) {
+      // 同步抛错（接口缺失/游戏拒绝）也必须解除 entering，不然刷新会永久停住
+      state.map.entering = false;
+      state.map.pendingKind = '';
+      return Promise.reject(cause);
+    }
   }
 
   function runMapReport(text) {
@@ -937,6 +944,14 @@ RUNTIME_JS = r"""
         + Math.max(0, Math.ceil((mobAt - nowMs) / 1000)) + ' 秒后重进地图';
     }
 
+    if (state.map.entering && now() - (state.map.lastEnterAt || 0) > 20000) {
+      // 重进卡住（游戏没回调/被拒绝）时恢复监控，不然界面会一直停在「0 秒后重进地图」
+      state.map.entering = false;
+      state.map.pendingKind = '';
+      state.map.bossAt = 0;
+      state.map.mobAt = 0;
+      runMapReport('重进地图超时，已恢复监控');
+    }
     if (!state.map.entering) {
       const bossDue = bossOn && state.map.bossAt && now() >= state.map.bossAt;
       const mobDue = mobOn && state.map.mobAt && now() >= state.map.mobAt;
@@ -947,7 +962,9 @@ RUNTIME_JS = r"""
           state.map.pendingKind = '';
         } else {
           if (!state.map.pendingKind) state.map.pendingKind = bossDue ? 'boss' : 'mob';
-          void mapEnter(ctx).catch(cause => {
+          void Promise.resolve().then(() => mapEnter(ctx)).catch(cause => {
+            state.map.entering = false;
+            state.map.pendingKind = '';
             const text = '重新进图失败：' + msgOf(cause);
             state.mob.reason = text;
             state.boss.reason = text;
