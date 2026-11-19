@@ -220,11 +220,11 @@ def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
       }
       return false;
     };
-    var units = core[mc.container || 'UFYI'];
+    var mgr = core[mc.manager || 'PFTN']();
+    var units = mgr[mc.container || 'UFYI']();
     if (units && typeof units[mc.each || 'OOIV'] === 'function') {
       units[mc.each || 'OOIV'](collect);
-    }
-    if (!best) return 'none';
+    }    if (!best) return 'none';
     if (typeof world.ZAVH !== 'function') return 'ERR 游戏没有传送入口';
     world.ZAVH(best.x, best.y, false, function () {});
     return 'ok ' + best.name;
@@ -247,10 +247,11 @@ def _js_collect_target(keyword: str, radius: int = 3) -> str:
     var world = window[mc.holder || 'VKXX'];
     var core = world[mc.core || 'ZRRU'];
     var holder = core;
-    var units = core[mc.container || 'UFYI'];
+    var units = null;
     var ids = [];
     try {
       var mgr = core[mc.manager || 'PFTN']();
+      units = mgr[mc.container || 'UFYI']();
       var team = core[mc.team || 'PMMA'](world[mc.player || 'KBVD']);
       ids = mgr[mc.members || 'YUWW'](team) || [];
     } catch (e) { /* ignore */ }
@@ -439,11 +440,57 @@ class InstructionRunner:
         except ValueError as exc:
             raise RuntimeError("%s 不是数字：%s" % (label, args[index])) from exc
 
+    def _viewport(self) -> Dict[str, float]:
+        try:
+            raw = self._eval("JSON.stringify({w: innerWidth, h: innerHeight})")
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            w = float(data.get("w") or 0)
+            h = float(data.get("h") or 0)
+            if w > 0 and h > 0:
+                return {"w": w, "h": h}
+        except Exception:  # noqa: BLE001
+            pass
+        return {"w": 372.0, "h": 798.0}
+
+    def _point(self, x: float, y: float, view: Optional[Dict[str, float]] = None) -> tuple:
+        """指令里的坐标是「百分比」（参考工具显示坐标也是百分比），超过 100 当像素。"""
+        view = view or self._viewport()
+        if -1.0 <= x <= 100.0 and -1.0 <= y <= 100.0:
+            return x / 100.0 * view["w"], y / 100.0 * view["h"]
+        return x, y
+
     def _click(self, x: float, y: float) -> None:
-        result = self._eval("window.__zzCmd.click(%s,%s)" % (_js(x), _js(y)))
-        if str(result) != "ok":
-            raise RuntimeError("点击失败：%s" % result)
+        """真鼠标点击：走 CDP Input（游戏只认可信事件，DOM 派发点不动按钮）。"""
+        cx, cy = self._point(x, y)
+        self._cdp_click(cx, cy)
         self._sleep(0.15)
+
+    def _cdp(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        bridge = self._bridge_provider()
+        if bridge is None:
+            raise RuntimeError("还没连上游戏窗口")
+        call = getattr(bridge, "_call", None)
+        if call is None:
+            raise RuntimeError("当前连接不支持 CDP 输入")
+        return call(method, params)
+
+    def _cdp_click(self, x: float, y: float) -> None:
+        self._cdp("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0})
+        self._cdp(
+            "Input.dispatchMouseEvent",
+            {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
+        )
+        self._sleep(0.05)
+        self._cdp(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
+        )
+
+    def _cdp_wheel(self, amount: float, x: float, y: float) -> None:
+        self._cdp(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": amount, "button": "none", "buttons": 0},
+        )
 
     def _wheel(self, args: List[str]) -> None:
         if not args:
@@ -453,14 +500,13 @@ class InstructionRunner:
         x = self._number(args, 2, "X") if len(args) > 2 else None
         y = self._number(args, 3, "Y") if len(args) > 3 else None
         sign = -1 if direction in ("上", "up") else 1
+        view = self._viewport()
         if x is None or y is None:
-            js = (
-                "(function(){var s=window.__zzCmd.size();"
-                "window.__zzCmd.wheel(0,%s,s.w/2,s.h/2);return 'ok'})()" % _js(sign * amount)
-            )
+            x = view["w"] / 2.0
+            y = view["h"] / 2.0
         else:
-            js = "window.__zzCmd.wheel(0,%s,%s,%s)" % (_js(sign * amount), _js(x), _js(y))
-        self._eval(js)
+            x, y = self._point(float(x), float(y), view)
+        self._cdp_wheel(sign * amount * 120, float(x), float(y))
         self._sleep(0.2)
 
     def _move(self, args: List[str]) -> None:
