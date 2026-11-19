@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 83
+RUNTIME_VERSION = 84
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 83
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 83;
+  const VERSION = 84;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2234,21 +2234,6 @@ RUNTIME_JS = r"""
     }
 
     const nowMs = now();
-    // 兜底：复活流程万一卡住（面板没关、确认框没人点），60 秒后强制重置，避免一直卡着
-    if (box.busy) {
-      if (!box.busySince) box.busySince = nowMs;
-      if (nowMs - box.busySince > 60000) {
-        box.busy = false;
-        box.busySince = 0;
-        box.phase = '';
-        box.pendingAt = 0;
-        box.nextTryAt = nowMs + 1500;
-        box.reason = '复活流程超时，已重置重试';
-        reviveLog('超时重置');
-      }
-    } else {
-      box.busySince = 0;
-    }
     if (box.busy) {
       // 复活流程进行中：全灭面板的「放弃」会弹确认小窗，这里持续把确认按钮坐标交出去
       if (nowMs >= (box.confirmScanAt || 0)) {
