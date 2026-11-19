@@ -229,40 +229,103 @@ class AppUI:
         # 开界面就自动接上游戏窗（参考工具那样：不用点「启动辅助」）
         self.root.after(1200, self._auto_connect_assist)
 
+    def _setup_style(self) -> None:
+        """统一配色和控件风格（白底 + 浅灰分隔 + 蓝色主按钮）。"""
+        self.colors = {
+            "page": "#ffffff",
+            "card": "#ffffff",
+            "line": "#e5e7eb",
+            "text": "#111827",
+            "sub": "#6b7280",
+            "accent": "#2563eb",
+            "soft": "#f3f4f6",
+            "green": "#059669",
+            "red": "#dc2626",
+        }
+        c = self.colors
+        self.root.configure(bg=c["page"])
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(".", font=("Microsoft YaHei UI", 9), background=c["page"], foreground=c["text"])
+        style.configure("TFrame", background=c["page"])
+        style.configure("TLabelframe", background=c["card"], bordercolor=c["line"], relief="solid", borderwidth=1)
+        style.configure(
+            "TLabelframe.Label",
+            background=c["card"],
+            foreground="#4b5563",
+            font=("Microsoft YaHei UI", 9, "bold"),
+        )
+        style.configure("TLabel", background=c["card"], foreground=c["text"])
+        style.configure("TButton", padding=(10, 4))
+        style.configure("Accent.TButton", background=c["accent"], foreground="#ffffff", padding=(14, 6))
+        style.map(
+            "Accent.TButton",
+            background=[("active", "#1d4ed8"), ("pressed", "#1e40af"), ("disabled", "#93b4f5")],
+            foreground=[("disabled", "#f3f4f6")],
+        )
+        style.configure("TEntry", padding=4)
+        style.configure("TCheckbutton", background=c["card"])
+        style.configure("TCombobox", padding=2)
+        style.configure("TSeparator", background=c["line"])
+        style.configure("Treeview", background=c["card"], fieldbackground=c["card"], rowheight=24)
+
     def _build(self) -> None:
-        # 最上方：模式选择（一眼可见、中间隔开）
-        mode_bar = ttk.Frame(self.root, padding=(12, 10, 12, 6))
-        mode_bar.pack(fill=tk.X)
+        self._setup_style()
+        c = self.colors
+        # 顶部标题
+        head = tk.Frame(self.root, bg=c["page"])
+        head.pack(fill=tk.X, padx=18, pady=(16, 4))
+        tk.Label(
+            head,
+            text="百炼英雄 · 助手",
+            bg=c["page"],
+            fg=c["text"],
+            font=("Microsoft YaHei UI", 15, "bold"),
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            head,
+            text=("打开游戏（选内置/浏览器）" if ENABLE_BROWSER_OPEN else "打开游戏窗口"),
+            command=self.ask_open_game,
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=6,
+            bg=c["soft"],
+            fg=c["text"],
+            activebackground="#e5e7eb",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.RIGHT)
+
+        # 模式切换（胶囊样式）
+        mode_bar = tk.Frame(self.root, bg=c["page"])
+        mode_bar.pack(fill=tk.X, padx=18, pady=(4, 0))
         self.mode_var = tk.StringVar(value="gacha")
         self._mode_btn_gacha = tk.Button(
             mode_bar,
             text="抽卡",
-            width=14,
-            height=2,
-            font=("", 12, "bold"),
-            relief=tk.SUNKEN,
-            bg="#dceafc",
-            activebackground="#c5dbf7",
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=8,
+            font=("Microsoft YaHei UI", 10, "bold"),
             command=lambda: self._switch_mode("gacha"),
         )
-        self._mode_btn_gacha.pack(side=tk.LEFT, padx=(0, 36))
+        self._mode_btn_gacha.pack(side=tk.LEFT)
         self._mode_btn_assist = tk.Button(
             mode_bar,
             text="游戏辅助",
-            width=14,
-            height=2,
-            font=("", 12, "bold"),
-            relief=tk.RAISED,
-            activebackground="#c5dbf7",
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=8,
+            font=("Microsoft YaHei UI", 10, "bold"),
             command=lambda: self._switch_mode("assist"),
         )
-        self._mode_btn_assist.pack(side=tk.LEFT, padx=(36, 0))
-        ttk.Label(mode_bar, text="← 点这边切换功能").pack(side=tk.LEFT, padx=24)
-        ttk.Button(
-            mode_bar,
-            text=("打开游戏（选内置/浏览器）" if ENABLE_BROWSER_OPEN else "打开游戏窗口"),
-            command=self.ask_open_game,
-        ).pack(side=tk.RIGHT, padx=6)
+        self._mode_btn_assist.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Separator(self.root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=18, pady=(8, 0))
 
         # 窗口参数：变量始终创建（保存/读取要用），控件只在开发模式显示
         self.window_var = tk.StringVar(
@@ -320,6 +383,7 @@ class AppUI:
         self._build_assist_tab(self._make_scroll(self._page_assist, "assist"))
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self._page_gacha.pack(fill=tk.BOTH, expand=True)
+        self._switch_mode("gacha")
 
         if self.dev_mode:
             log_frame = ttk.LabelFrame(self.root, text="日志", padding=4)
@@ -346,11 +410,15 @@ class AppUI:
                 page.pack(fill=tk.BOTH, expand=True)
             else:
                 page.pack_forget()
+        c = getattr(self, "colors", {}) or {}
+        accent = c.get("accent", "#2563eb")
+        soft = c.get("soft", "#f3f4f6")
+        text = c.get("text", "#111827")
         for name, button in buttons.items():
             if name == mode:
-                button.configure(relief=tk.SUNKEN, bg="#dceafc")
+                button.configure(bg=accent, fg="#ffffff", activebackground=accent, activeforeground="#ffffff")
             else:
-                button.configure(relief=tk.RAISED, bg="SystemButtonFace")
+                button.configure(bg=soft, fg=text, activebackground="#e5e7eb", activeforeground=text)
         if mode == "gacha":
             pass
         elif mode == "assist":
@@ -440,7 +508,7 @@ class AppUI:
 
     def _make_scroll(self, parent: ttk.Frame, key: str) -> ttk.Frame:
         """给页面套一个可滚动容器，返回里面真正放内容的 frame。"""
-        canvas = tk.Canvas(parent, highlightthickness=0, bd=0)
+        canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg="#ffffff")
         sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
         inner = ttk.Frame(canvas)
         inner.bind(
@@ -499,7 +567,7 @@ class AppUI:
 
         holder = ttk.Frame(hero_box)
         holder.pack(fill=tk.BOTH, expand=True)
-        self._gacha_hero_canvas = tk.Canvas(holder, height=200, highlightthickness=0, bg="#ffffff")
+        self._gacha_hero_canvas = tk.Canvas(holder, height=172, highlightthickness=0, bg="#ffffff")
         hero_sb = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=self._gacha_hero_canvas.yview)
         self._gacha_hero_inner = ttk.Frame(self._gacha_hero_canvas)
         self._gacha_hero_inner.bind(
@@ -555,7 +623,9 @@ class AppUI:
 
         btns = ttk.Frame(cdp_box)
         btns.pack(fill=tk.X, pady=(2, 4))
-        self.gacha_cdp_btn = ttk.Button(btns, text="开始直连抽卡", width=14, command=self.start_gacha_cdp)
+        self.gacha_cdp_btn = ttk.Button(
+            btns, text="开始直连抽卡", width=14, command=self.start_gacha_cdp, style="Accent.TButton"
+        )
         self.gacha_cdp_btn.pack(side=tk.LEFT)
         ttk.Button(btns, text="停止", width=10, command=self.stop_gacha_cdp).pack(side=tk.LEFT, padx=8)
         self.gacha_cdp_status = tk.StringVar(value="需要先打开游戏里的酒馆/招募界面")
@@ -658,7 +728,9 @@ class AppUI:
         ttk.Label(tools, text="快速复活").grid(row=0, column=0, sticky=tk.W)
         ttk.Label(tools, text="免费 · 原地 · 0.1 秒 · 怪不回血", foreground="#0a7d2c").grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=8)
         self._revive_click_job = None
-        self.assist_revive_btn = ttk.Button(tools, text="快速复活", width=14, command=self.revive_click)
+        self.assist_revive_btn = ttk.Button(
+            tools, text="快速复活", width=14, command=self.revive_click, style="Accent.TButton"
+        )
         self.assist_revive_btn.grid(row=0, column=3, padx=(14, 10))
         ttk.Label(tools, text="点 1 次=复活一次；点 2 次=一直开着", foreground="#666").grid(row=0, column=4, sticky=tk.W)
         self.assist_revive_status = tk.StringVar(value="尚未开启")
@@ -1773,8 +1845,8 @@ class AppUI:
             var = tk.BooleanVar(value=(checked is None or hero_id in checked))
             ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
             counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 +0")
-            ttk.Label(cell, textvariable=counter, foreground="#777", width=12).pack(
-                side=tk.LEFT, padx=(6, 0)
+            ttk.Label(cell, textvariable=counter, foreground="#6b7280", anchor=tk.W).pack(
+                side=tk.LEFT, padx=(8, 0)
             )
             self._gacha_hero_vars[hero_id] = var
             self._gacha_hero_counter_vars[hero_id] = counter
