@@ -742,10 +742,14 @@ class AppUI:
             text="免费 · 原地复活 · 0.1 秒 · 怪不回血",
             foreground="#0a7d2c",
         ).grid(row=11, column=1, columnspan=3, sticky=tk.W, padx=6)
+        self._revive_click_job = None
         self.assist_revive_btn = ttk.Button(
-            box, text="复活", width=12, command=self.revive_now
+            box, text="快速复活", width=16, command=self.revive_click
         )
-        self.assist_revive_btn.grid(row=11, column=4, columnspan=2, padx=8)
+        self.assist_revive_btn.grid(row=11, column=4, padx=8)
+        ttk.Label(
+            box, text="点 1 次=复活一次；点 2 次=一直开着", foreground="#666"
+        ).grid(row=11, column=5, sticky=tk.W)
         self.assist_revive_status = tk.StringVar(value="尚未开启")
         ttk.Label(
             box, textvariable=self.assist_revive_status, foreground="#666", wraplength=980
@@ -1082,6 +1086,37 @@ class AppUI:
         status.set("正在关闭…" if closing else "正在应用…")
         self.append_log(f"已发送：{'关闭' if closing else '开启'}{label}")
 
+    def revive_click(self) -> None:
+        """单击=复活一次；双击（320ms 内点两下）=切换「一直开着」。"""
+        job = getattr(self, "_revive_click_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:  # noqa: BLE001
+                pass
+            self._revive_click_job = None
+            self.toggle_revive_auto()
+            return
+        self._revive_click_job = self.root.after(320, self._revive_single)
+
+    def _revive_single(self) -> None:
+        self._revive_click_job = None
+        self.revive_now()
+
+    def toggle_revive_auto(self) -> None:
+        """切换「一直开着」：有人倒地就自动复活。"""
+        if not self.assist.running:
+            self.start_assist()
+        revive = (self.assist.state or {}).get("revive") or {}
+        if revive.get("enabled"):
+            self.assist.set_feature("revive", 0)
+            self.assist_revive_status.set("自动已关闭（点 2 次可再开）")
+            self.append_log("已发送：关闭自动复活")
+            return
+        self.assist.set_feature("revive", {"mode": "tp", "delay": 0})
+        self.assist_revive_status.set("一直开着：有人倒地就自动复活")
+        self.append_log("已发送：开启自动复活（一直开着）")
+
     def revive_now(self) -> None:
         """手动复活一次（免费：0.1 秒原地拉起倒地的英雄，不传送、不花货币）。"""
         if not self.assist.running:
@@ -1162,6 +1197,9 @@ class AppUI:
         if revive.get("count"):
             revive_reason += f" · 今日复活 {int(revive.get('count') or 0)} 次"
         self.assist_revive_status.set(revive_reason)
+        self.assist_revive_btn.configure(
+            text="快速复活 · 自动开" if revive.get("enabled") else "快速复活"
+        )
 
         green, gold = self.assist.display_stats()
         self.assist_green_var.set(f"已领 {green} 个红包")
