@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 77
+RUNTIME_VERSION = 78
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 77
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 77;
+  const VERSION = 78;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2917,16 +2917,14 @@ RUNTIME_JS = r"""
     }
   }
 
-  /** 游戏里目前拥有的英雄列表（编号 / 名字 / 品质），按品质从高到低。 */
+  /** 英雄列表：拥有的（带品质）+ 未拥有的（从名字表补），名字取「·」后面的短名。 */
   function heroList() {
     try {
+      const MAPPINGALL = (MAPPING && MAPPING.builds) || {};
       let g = (mapping() || {}).gacha;
       if (!g) {
-        try {
-          const builds = (MAPPING && MAPPING.builds) || {};
-          const key = Object.keys(builds)[0];
-          g = key ? builds[key].gacha : null;
-        } catch (_) { g = null; }
+        const key = Object.keys(MAPPINGALL)[0];
+        g = key ? MAPPINGALL[key].gacha : null;
       }
       if (!g || !g.hero || !g.holderModule) return [];
       const system = window.System;
@@ -2934,23 +2932,47 @@ RUNTIME_JS = r"""
       const holder = mod && mod[g.holder];
       const svc = holder && holder[g.hero.service];
       const t = svc && svc[g.hero.model];
-      const map = t && t[g.hero.list];
-      if (!map || typeof map.forEach !== 'function') return [];
+      const owned = t && t[g.hero.list];
       let i18n = {};
       try {
         const m2 = system.get(g.hero.i18nModule);
         i18n = (m2 && m2[g.hero.i18nExport]) || {};
       } catch (_) { i18n = {}; }
+      const prefix = g.hero.namePrefix || 'hero_name_';
+      const shortOf = full => {
+        const parts = String(full || '').split(/[·・－\-]/);
+        return String(parts[parts.length - 1] || full || '').trim();
+      };
+      const qualityOf = id => {
+        try {
+          const e = owned && owned.get ? owned.get(id) : null;
+          return e ? Number(e[g.hero.quality]) || 0 : 0;
+        } catch (_) { return 0; }
+      };
       const out = [];
-      map.forEach(function (entry, id) {
-        let name = '';
-        try { name = String(i18n[(g.hero.namePrefix || 'hero_name_') + id] || ''); } catch (_) { name = ''; }
-        if (!name && entry) name = String(entry.UIUX || entry.ECSB || '') || String(id);
-        let quality = 0;
-        try { quality = Number(entry && entry[g.hero.quality]) || 0; } catch (_) { quality = 0; }
-        out.push({ id: Number(id), name: name || String(id), quality });
-      });
-      out.sort((a, b) => (b.quality - a.quality) || (a.id - b.id));
+      const seen = Object.create(null);
+      if (owned && typeof owned.forEach === 'function') {
+        owned.forEach(function (_entry, id) {
+          const hid = Number(id);
+          if (!Number.isSafeInteger(hid) || hid <= 0) return;
+          const full = String(i18n[prefix + hid] || '');
+          seen[hid] = true;
+          out.push({ id: hid, name: shortOf(full) || String(hid), quality: qualityOf(hid), owned: true });
+        });
+      }
+      // 未拥有的英雄：从名字表里补（皮肤编号一般 7 位以上，排除掉）
+      try {
+        for (const key of Object.keys(i18n)) {
+          if (key.indexOf(prefix) !== 0) continue;
+          const hid = Number(key.slice(prefix.length));
+          if (!Number.isSafeInteger(hid) || hid <= 0 || seen[hid]) continue;
+          if (String(hid).length > 6) continue;
+          const full = String(i18n[key] || '');
+          if (!full) continue;
+          out.push({ id: hid, name: shortOf(full), quality: 0, owned: false });
+        }
+      } catch (_) { /* ignore */ }
+      out.sort((a, b) => (b.owned - a.owned) || (b.quality - a.quality) || (a.id - b.id));
       return out;
     } catch (_) {
       return [];

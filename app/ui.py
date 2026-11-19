@@ -43,6 +43,13 @@ from .gacha_cdp import GachaCdp
 ENABLE_BROWSER_OPEN = False
 
 # 抽卡固定目标名单（要保留的英雄）；界面可勾选，保存在 config 的 gacha_cdp.checked
+# 参考工具「最大倍数招募」页面上的英雄（顺序和它一致）
+GACHA_POOL_NAMES = [
+    "敖丙", "雅丽娜", "乌瑟尔", "卡卡西", "达斯坦", "杜康", "李白", "玛法里奥",
+    "莱特宁", "王昭君", "史矛革", "卡尔", "吉尔", "亚瑟", "缘壹", "拉斐尔",
+    "谢必安", "莉娜", "甘道夫",
+]
+
 DEFAULT_FIXED_HEROES = [
     (84007, "敖丙"),
     (84008, "雅丽娜"),
@@ -1835,42 +1842,64 @@ class AppUI:
         return ids
 
     def reload_gacha_heroes(self) -> None:
+        # 连上游戏后按名字解析编号；没连上就先只显示名字
         heroes = []
         try:
             heroes = self.assist.list_heroes() or []
         except Exception:  # noqa: BLE001
             heroes = []
-        fixed = []
+        by_short = {}
+        for item in heroes:
+            if not item.get("owned"):
+                continue
+            try:
+                hid = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            short = str(item.get("name") or "")
+            if hid > 0 and short:
+                by_short.setdefault(short, hid)
         for item in heroes:
             try:
                 hid = int(item.get("id") or 0)
             except (TypeError, ValueError):
                 continue
-            if hid > 0:
-                fixed.append((hid, str(item.get("name") or hid)))
-        from_game = bool(fixed)
-        if not fixed:
-            fixed = list(DEFAULT_FIXED_HEROES)
-        checked = self._fixed_checked_ids()
+            short = str(item.get("name") or "")
+            if hid > 0 and short:
+                by_short.setdefault(short, hid)
+        fallback = {name: hid for hid, name in DEFAULT_FIXED_HEROES}
+
+        rows = []
+        for name in GACHA_POOL_NAMES:
+            hid = by_short.get(name) or fallback.get(name) or 0
+            rows.append((hid, name))
+
         for widget in self._gacha_hero_inner.winfo_children():
             widget.destroy()
         self._gacha_hero_vars.clear()
         self._gacha_hero_counter_vars.clear()
-        self._hero_name_cache = {hero_id: name for hero_id, name in fixed}
-        for index, (hero_id, name) in enumerate(fixed):
+        self._hero_name_cache = {hid: name for hid, name in rows if hid}
+        checked = self._fixed_checked_ids()
+        for index, (hero_id, name) in enumerate(rows):
             cell = ttk.Frame(self._gacha_hero_inner)
             cell.grid(row=index // 3, column=index % 3, sticky=tk.W, padx=6, pady=1)
-            var = tk.BooleanVar(value=(hero_id in checked))
-            ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
+            var = tk.BooleanVar(value=(hero_id > 0 and hero_id in checked))
+            cb = ttk.Checkbutton(cell, text=name, variable=var)
+            if hero_id <= 0:
+                cb.configure(state=tk.DISABLED)
+            cb.pack(side=tk.LEFT)
             counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 +0")
             ttk.Label(cell, textvariable=counter, foreground="#6b7280", anchor=tk.W).pack(
                 side=tk.LEFT, padx=(8, 0)
             )
-            self._gacha_hero_vars[hero_id] = var
-            self._gacha_hero_counter_vars[hero_id] = counter
+            if hero_id > 0:
+                self._gacha_hero_vars[hero_id] = var
+                self._gacha_hero_counter_vars[hero_id] = counter
+        missing = sum(1 for hid, _n in rows if hid <= 0)
+        extra = "，有 %d 个未识别（进游戏后点「重载名单」）" % missing if missing else ""
         self.gacha_hero_count.set(
-            f"{'游戏英雄' if from_game else '内置名单'} {len(fixed)} 个"
-            f"（已勾 {sum(1 for v in self._gacha_hero_vars.values() if v.get())}）"
+            f"参考名单 {len(rows)} 个"
+            f"（已勾 {sum(1 for v in self._gacha_hero_vars.values() if v.get())}）{extra}"
         )
 
     def list_gacha_heroes(self) -> None:
