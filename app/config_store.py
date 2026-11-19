@@ -13,6 +13,9 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     # 小怪 / BOSS 死亡后各等多少秒再重进地图
     "mob_seconds": 1,
     "boss_seconds": 3,
+    # 开关状态：重启工具后自动恢复（以前重启就变「已关闭」）
+    "mob_enabled": False,
+    "boss_enabled": False,
     # 界面启动时没有游戏窗就自动开一个（关掉后仍可手动点「打开游戏窗口」）
     "auto_open_window": True,
     # 游戏窗 CDP 调试端口，与 game_window 里的 --remote-debugging-port 保持一致
@@ -67,7 +70,9 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
             if key not in value:
                 continue
             item = value[key]
-            if key in ("mob_seconds", "boss_seconds"):
+            if key in ("mob_enabled", "boss_enabled"):
+                data[key] = bool(item)
+            elif key in ("mob_seconds", "boss_seconds"):
                 try:
                     seconds = float(item)
                 except (TypeError, ValueError):

@@ -1175,6 +1175,32 @@ class AppUI:
         if not self.assist.running:
             self.assist.start()
             self.append_log("游戏辅助已自动连接：打开游戏窗口后会自己注入运行时")
+        self._restore_assist_features()
+
+    def _restore_assist_features(self) -> None:
+        """重启工具后恢复上次开着的「小怪 / BOSS 地图刷新」。"""
+        cfg = normalize_assist(self.config.get("assist"))
+        rows = (
+            ("mob", "mob_enabled", getattr(self, "assist_mob_var", None),
+             getattr(self, "assist_mob_btn", None), getattr(self, "assist_mob_status", None)),
+            ("boss", "boss_enabled", getattr(self, "assist_boss_var", None),
+             getattr(self, "assist_boss_btn", None), getattr(self, "assist_boss_status", None)),
+        )
+        for feature, key, var, btn, status in rows:
+            if not cfg.get(key) or var is None or btn is None:
+                continue
+            try:
+                seconds = max(1.0, float(str(var.get()).strip() or "1"))
+            except (tk.TclError, ValueError):
+                seconds = 1.0
+            try:
+                self.assist.set_feature(feature, seconds)
+                btn.configure(text="关闭")
+                if status is not None:
+                    status.set("正在恢复上次的开启状态…")
+                self.append_log("已恢复%s地图刷新：等 %g 秒" % ("小怪" if feature == "mob" else "BOSS", seconds))
+            except Exception:  # noqa: BLE001
+                pass
 
     def _auto_connect_assist(self) -> None:
         """界面一打开就连上（和参考工具一样，不需要「启动辅助」这一步）。"""
@@ -1316,6 +1342,13 @@ class AppUI:
                 messagebox.showerror("参数错误", "等待秒数需要在 0-600 之间")
                 return
             enabled = bool((state.get(feature) or {}).get("enabled"))
+            try:
+                assist_cfg = normalize_assist(self.config.get("assist"))
+                assist_cfg["mob_enabled" if feature == "mob" else "boss_enabled"] = not enabled and seconds > 0
+                self.config["assist"] = assist_cfg
+                save_config(self.config)
+            except Exception:  # noqa: BLE001
+                pass
             if enabled or seconds <= 0:
                 self.assist.set_feature(feature, 0)
                 # 先把按钮/状态改过来，别等 0.6 秒后的快照，看起来像没生效
