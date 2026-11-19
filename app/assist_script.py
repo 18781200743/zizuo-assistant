@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 56
+RUNTIME_VERSION = 57
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 56
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 56;
+  const VERSION = 57;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2147,48 +2147,45 @@ RUNTIME_JS = r"""
 
           // 第一跳：传营地。
           // 注意：海底这类图「人已经在营地」时再传营地会被当成传送门，会飞到别处
-          let atCamp = near2(teamLeaderSpot(), camp);
+          const atCamp = near2(teamLeaderSpot(), camp);
+          let revived = false;
+
           if (!atCamp) {
-            box.reason = '正在传送到营地…';
+            // ① 极速模式：传营地 → 80ms → 立刻传回（服务端按顺序处理，位置瞬间回来）
             reviveLog('开始：dead=' + (() => { try { return deadHeroCount(); } catch (_) { return -1; } })());
+            box.reason = '快速复活中…';
             campTeleport(camp);
-            // 无动画传送偶尔会被游戏忽略（正在加载等），0.7 秒没动就用带加载的那条
-            const tMove = now();
-            while (now() - tMove < 1600) {
-              await new Promise(r => setTimeout(r, 80));
-              let p0 = null;
-              try { p0 = teamLeaderSpot(); } catch (_) { p0 = null; }
-              if (near2(p0, camp)) break;
-              let left0 = 1;
-              try { left0 = deadHeroCount(); } catch (_) { left0 = 1; }
-              if (left0 === 0) break;
+            await new Promise(r => setTimeout(r, 80));
+            try { teleportNoFx(spot.x, spot.y); } catch (_) { /* ignore */ }
+            const tFast = now();
+            while (now() - tFast < 420) {
+              await new Promise(r => setTimeout(r, 40));
+              let left = 1;
+              try { left = deadHeroCount(); } catch (_) { left = 1; }
+              if (left === 0) { revived = true; break; }
             }
-          } else {
-            box.reason = '已在营地，等英雄复活…';
+            if (revived) reviveLog('极速复活成功');
           }
 
-          // 等复活：不同地图落地时间不一样（海底要 2~3 秒），最多等 10 秒
-          let revived = false;
-          const t1 = now();
-          while (now() - t1 < 10000) {
-            await new Promise(r => setTimeout(r, 100));
-            let left = 1;
-            try { left = deadHeroCount(); } catch (_) { left = 1; }
-            if (left === 0) { revived = true; break; }
-            hideLanding();
-            let p = null;
-            try { p = teamLeaderSpot(); } catch (_) { p = null; }
-            if (!atCamp && near2(p, camp)) {
-              atCamp = true;
-              box.reason = '已到营地，等英雄复活…';
-            }
-          }
           if (!revived) {
-            reviveLog('等复活超时');
-            dropLoading();
-            throw Error('到营地后英雄没有复活（这张图的复活点可能和其它图不一样）');
+            // ② 稳妥模式：等真的复活了再回来（最多 10 秒）
+            box.reason = '正在传送到营地…';
+            campTeleport(camp);
+            const t1 = now();
+            while (now() - t1 < 10000) {
+              await new Promise(r => setTimeout(r, 50));
+              let left = 1;
+              try { left = deadHeroCount(); } catch (_) { left = 1; }
+              if (left === 0) { revived = true; break; }
+              hideLanding();
+            }
+            if (!revived) {
+              reviveLog('等复活超时');
+              dropLoading();
+              throw Error('到营地后英雄没有复活（这张图的复活点可能和其它图不一样）');
+            }
+            reviveLog('已复活');
           }
-          reviveLog('已复活');
 
           // 第二跳：回原地，最多重试 8 秒
           box.reason = '已复活，正在回原地…';
@@ -2198,8 +2195,8 @@ RUNTIME_JS = r"""
           while (now() - t2 < 8000) {
             try { teleportNoFx(spot.x, spot.y); } catch (_) { teleportFire(spot.x, spot.y); }
             const t3 = now();
-            while (now() - t3 < 700) {
-              await new Promise(r => setTimeout(r, 80));
+            while (now() - t3 < 600) {
+              await new Promise(r => setTimeout(r, 40));
               let p = null;
               try { p = teamLeaderSpot(); } catch (_) { p = null; }
               if (near2(p, spot)) { back = true; break; }
