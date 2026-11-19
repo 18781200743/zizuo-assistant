@@ -1083,7 +1083,7 @@ class AppUI:
         self.append_log(f"已发送：{'关闭' if closing else '开启'}{label}")
 
     def revive_now(self) -> None:
-        """手动复活一次（免费：瞬移营地 → 拉起倒地的 → 瞬移回原地）。"""
+        """手动复活一次（免费：0.1 秒原地拉起倒地的英雄，不传送、不花货币）。"""
         if not self.assist.running:
             self.start_assist()
         self.assist.set_feature("reviveNow", 1)
