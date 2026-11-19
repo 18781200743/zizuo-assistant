@@ -181,21 +181,23 @@ def _js_home(mapping: Dict[str, Any]) -> str:
 
 
 def _js_enter_map(mapping: Dict[str, Any], map_id: int, teleport_id: int) -> str:
-    """传送：先重进地图，再瞬移到对应传送点（传送点的 pointID 就是 teleport_id）。"""
+    """传送：走游戏原生传送接口（VKXX.LUSS(地图, 传送点, 回调)），能落到指定传送点。"""
     return r"""
 (function () {
   try {
     var m = %s;
     var b = (m.builds || {})[m.current] || {};
-    var world = window[(b.map || {}).holder || 'VKXX'];
+    var mc = b.map || {};
+    var world = window[mc.holder || 'VKXX'];
     if (!world) return 'ERR 游戏还没进地图';
-    if (typeof world.XIPH !== 'function') return 'ERR 游戏没有切图入口';
-    window.__zzCmdMapWait = { map: %d, at: Date.now() };
-    world.XIPH(%d);
+    var api = world[mc.teleport || 'LUSS'];
+    if (typeof api !== 'function') return 'ERR 游戏没有传送入口';
+    window.__zzTp = { done: false, at: Date.now(), map: %d, point: %d };
+    api.call(world, %d, %d, function () { window.__zzTp.done = true; });
     return 'ok';
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % (_js(mapping), int(map_id), int(map_id))
+""" % (_js(mapping), int(map_id), int(teleport_id), int(map_id), int(teleport_id))
 
 
 def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
@@ -700,29 +702,60 @@ class InstructionRunner:
         map_id = int(spot.get("map_id"))
         teleport_id = int(spot.get("teleport_id") or 0)
         self._log_line("    传送 → %s（地图 %d，传送点 %d）" % (spot.get("name") or "", map_id, teleport_id))
-        result = self._eval(_js_enter_map(mapping, map_id, teleport_id))
-        if str(result).startswith("ERR"):
-            raise RuntimeError("传送失败：%s" % str(result)[4:])
-        state_js = _js_map_state(mapping)
-        deadline = time.monotonic() + 12.0
+        state_js = (
+            "(function(){try{var m=%s;var b=(m.builds||{})[m.current]||{};var mc=b.map||{};"
+            "var w=window[mc.holder||'VKXX'];var st=w[mc.state||'AGDA']||{};"
+            "return JSON.stringify({map:String(st[mc.mapId||'POMD']),loading:!!st[mc.loading||'MAOP'],"
+            "done:!!(window.__zzTp&&window.__zzTp.done)})}catch(e){return '{}'}})()" % _js(mapping)
+        )
+
+        def _state() -> Dict[str, Any]:
+            try:
+                return json.loads(str(self._eval(state_js) or "{}"))
+            except ValueError:
+                return {}
+
+        before = _state()
+        before_map = str(before.get("map") or "")
+
+        def _send() -> None:
+            result = self._eval(_js_enter_map(mapping, map_id, teleport_id))
+            if str(result).startswith("ERR"):
+                raise RuntimeError("传送失败：%s" % str(result)[4:])
+
+        started = False
+        for attempt in range(4):
+            _send()
+            start_deadline = time.monotonic() + 5.0
+            while time.monotonic() < start_deadline:
+                if self._stop.is_set():
+                    raise _Stopped()
+                time.sleep(0.3)
+                state = _state()
+                if state.get("loading") or state.get("done") or str(state.get("map")) != before_map:
+                    started = True
+                    break
+            if started:
+                break
+            # 游戏传送有冷却：连续切图会被静默拒绝，隔几秒再发
+            if attempt < 3:
+                self._log_line("    传送还没响应，等 3 秒重试（%d/4）" % (attempt + 1))
+                time.sleep(3.0)
+        if not started:
+            raise RuntimeError("传送失败：游戏没开始传送（可能正在战斗或过场）")
+
+        deadline = time.monotonic() + 35.0
+        landed = False
         while time.monotonic() < deadline:
             if self._stop.is_set():
                 raise _Stopped()
-            time.sleep(0.4)
-            current = str(self._eval(state_js) or "")
-            if current == str(map_id):
+            time.sleep(0.5)
+            state = _state()
+            if not state.get("loading") and (str(state.get("map")) == str(map_id) or state.get("done")):
+                landed = True
                 break
-        else:
-            raise RuntimeError("进地图超时（地图 %d）" % map_id)
-        time.sleep(1.0)
-        if teleport_id:
-            picked = self._eval(_js_teleport_point(mapping, teleport_id))
-            if str(picked).startswith("ok"):
-                self._log_line("    已到传送点 %s" % str(picked)[3:])
-            elif str(picked) == "none":
-                self._log_line("    地图里没找到传送点 %d，留在入口" % teleport_id)
-            else:
-                self._log_line("    传送点定位失败：%s" % str(picked))
+        if not landed:
+            raise RuntimeError("传送失败：地图加载超时（地图 %d）" % map_id)
         time.sleep(0.8)
 
     def _jump(self, args: List[str]) -> None:
