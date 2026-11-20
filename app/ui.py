@@ -748,29 +748,35 @@ class AppUI:
 
     # ---------------- 游戏辅助 ----------------
     def _build_home_tab(self, parent: ttk.Frame) -> None:
-        """首页：只有 标题 / 打开游戏 / 辅助工具 / 说明。"""
+        """首页：标题 / 本机游戏状态 / 辅助工具入口 / 说明。"""
         top = ttk.Frame(parent)
         top.pack(fill=tk.X, pady=(6, 0))
         ttk.Label(top, text="百炼英雄 · 助手", font=("Microsoft YaHei UI", 15, "bold")).pack(side=tk.LEFT)
         ttk.Button(top, text="关于", command=self._show_about).pack(side=tk.RIGHT)
 
-        body = ttk.Frame(parent)
-        body.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Button(body, text="打开游戏", style="Home.TButton", command=self.ask_open_game).pack(
-            fill=tk.X, pady=(70, 0)
-        )
-        ttk.Button(
-            body, text="辅助工具", style="Home.TButton",
-            command=lambda: self._switch_mode("assist"),
-        ).pack(fill=tk.X, pady=(36, 0))
-
-        self.home_status_var = tk.StringVar(value="")
-        ttk.Label(body, textvariable=self.home_status_var, foreground="#667085", wraplength=400).pack(
-            pady=(18, 0)
-        )
+        card = ttk.LabelFrame(parent, text="本机游戏", padding=10)
+        card.pack(fill=tk.X, pady=(16, 0))
+        self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
         ttk.Label(
-            body,
+            card, textvariable=self.home_status_var, foreground="#333",
+            wraplength=400, justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        row = ttk.Frame(card)
+        row.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(row, text="打开游戏窗口", command=self.ask_open_game).pack(
+            side=tk.LEFT, expand=True, fill=tk.X
+        )
+        ttk.Button(row, text="重新连接", command=self.reconnect_assist).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0)
+        )
+
+        ttk.Button(
+            parent, text="辅助工具", style="Home.TButton",
+            command=lambda: self._switch_mode("assist"),
+        ).pack(fill=tk.X, pady=(28, 0))
+
+        ttk.Label(
+            parent,
             text="说明：使用脚本，封号自己负责",
             foreground="#c0392b",
             wraplength=400,
