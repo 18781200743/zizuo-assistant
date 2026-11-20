@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 97
+RUNTIME_VERSION = 98
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 97
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 97;
+  const VERSION = 98;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1913,16 +1913,65 @@ RUNTIME_JS = r"""
   }
 
   /**
-   * 重进地图时只加速过场动画（进出场骨骼动画），不动节点、不动回调。
+   * 重进地图时把过场加载页压成透明 + 动画加速：玩家只看到黑屏，看不到加载页。
+   *
+   * 两条红线（11-19 踩过）：
+   *   1. 绝不能把 MapTransitionView / Transition 设 active=false —— 过场完成回调会被掐掉，
+   *      XIPH 的 Promise 永远 pending，之后所有切图卡死，只能重开窗口。
+   *   2. 必须等游戏自己的进图 Promise 结束再还原，中途还原/打断同样会卡住流程。
+   * 所以这里只改两样「纯表现」的东西：节点上的 UIOpacity（透明度）、sp.Skeleton.timeScale。
+   * 节点始终 active、动画始终播完、回调始终触发，只是画面上看不见。
    *
    * 实测进图总耗时 4.6 秒，其中「真在加载」的是：
    *   XIMY 地图地块图加载 1.6s + VSMO 等地块图就绪 0.6s
    * 纯动画只有 IQIP 退场 0.56s（外加开场的出场动画）。
-   * 11-19 试过把 MapTransitionView / Transition 设 active=false，结果过场完成回调
-   * 永远不触发、XIPH 的 Promise 一直 pending、之后所有切图卡死（只能重开窗口）。
-   * 这里只把 sp.Skeleton 的 timeScale 调高：动画播得快，完成回调照常触发。
    */
   const TRANSITION_SPEED = 4;
+  let transitionOpacityClass = null;
+
+  /** 这个版本 cc.UIOpacity 没挂到 cc 上，从预制体里已有的 UIOpacity 组件反查类。 */
+  function opacityClassOf(root) {
+    if (transitionOpacityClass) return transitionOpacityClass;
+    try {
+      const cc = window.cc;
+      if (cc && cc.UIOpacity) { transitionOpacityClass = cc.UIOpacity; return transitionOpacityClass; }
+    } catch (_) { /* 继续反查 */ }
+    try {
+      const stack = [root];
+      let guard = 0;
+      while (stack.length && guard < 400) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        const comps = n._components || [];
+        for (let i = 0; i < comps.length; i += 1) {
+          let name = '';
+          try { name = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { name = ''; }
+          if (name === 'cc.UIOpacity') {
+            transitionOpacityClass = comps[i].constructor;
+            return transitionOpacityClass;
+          }
+        }
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function setTransitionVisible(visible) {
+    try {
+      const root = transitionRootNode();
+      if (!root) return false;
+      const cls = opacityClassOf(root);
+      if (!cls) return false;
+      const op = root.getComponent(cls) || root.addComponent(cls);
+      if (!op) return false;
+      const target = visible ? 255 : 0;
+      if (op.opacity !== target) op.opacity = target;
+      return true;
+    } catch (_) { return false; }
+  }
 
   function transitionRootNode() {
     try {
@@ -1967,11 +2016,12 @@ RUNTIME_JS = r"""
     return out;
   }
 
-  /** 重进地图期间把过场动画调快；游戏进图 Promise 结束（动画播完）后还原。 */
+  /** 重进地图期间隐藏加载页 + 动画加速；游戏进图 Promise 结束（动画播完）后还原。 */
   function fastTransitionWhile(running) {
     const touched = [];
     const tick = () => {
       try {
+        setTransitionVisible(false);
         for (const skel of transitionSkeletons()) {
           if (skel.timeScale === TRANSITION_SPEED) continue;
           if (touched.indexOf(skel) < 0) touched.push(skel);
@@ -1980,7 +2030,7 @@ RUNTIME_JS = r"""
       } catch (_) { /* ignore */ }
     };
     tick();
-    const timer = setInterval(tick, 60);
+    const timer = setInterval(tick, 50);
     let stopped = false;
     const restore = () => {
       if (stopped) return;
@@ -1990,6 +2040,8 @@ RUNTIME_JS = r"""
         for (const skel of touched) {
           try { if (skel && skel.isValid !== false && skel.timeScale !== 1) skel.timeScale = 1; } catch (_) { /* ignore */ }
         }
+        // 动画收完再把加载页恢复不透明：下次手动切图、报错弹窗照常显示
+        setTransitionVisible(true);
       }, 200);
     };
     let settled = false;
@@ -2105,9 +2157,10 @@ RUNTIME_JS = r"""
     const before = holder[mapCfg.core];
     let raw = null;
     try { raw = holder[name](mapId); } catch (cause) { throw cause; }
-    // 只把过场动画调快（节点保持 active、回调照常），真在加载的地图资源没法跳过。
+    // 重进期间把加载页压透明（黑屏）+ 过场动画 4 倍速，玩家看不到加载页。
+    // 节点保持 active、动画照常播完，真在加载的地图资源没法跳过。
     // 注意：绝对不能像 11-19 那样把过场节点 active=false —— 会掐掉完成回调、之后再也切不了图。
-    try { fastTransitionWhile(raw); } catch (_) { /* 动画加速失败不影响进图 */ }
+    try { fastTransitionWhile(raw); } catch (_) { /* 隐藏/加速失败不影响进图 */ }
     // 旧版说明：XIPH 返回 Promise，成功 resolve true，并且 VKXX.ZRRU 会换成新对象。
     // 两个信号谁先到都算成功；Promise 明确返回 false 才算失败，且等它结束再决定，避免重复调用。
     let promiseResult = null;
