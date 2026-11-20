@@ -852,18 +852,29 @@ class AppUI:
             width=8,
             state="readonly",
         ).grid(row=2, column=1, sticky=tk.W, padx=8, pady=(10, 0))
+        self.assist_monster_filter_var = tk.StringVar(value="全部")
+        filter_box = ttk.Combobox(
+            tools,
+            textvariable=self.assist_monster_filter_var,
+            values=["全部", "BOSS", "小怪"],
+            width=8,
+            state="readonly",
+        )
+        filter_box.grid(row=2, column=2, sticky=tk.W, padx=8, pady=(10, 0))
+        filter_box.bind("<<ComboboxSelected>>", lambda _e: self.render_monster_list())
         ttk.Button(tools, text="刷新怪物", width=10, command=self.refresh_blink_list).grid(
-            row=2, column=2, sticky=tk.W, pady=(10, 0)
+            row=2, column=3, sticky=tk.W, pady=(10, 0)
         )
         self.assist_blink_btn = ttk.Button(tools, text="过去", width=10, command=self.blink_assist)
-        self.assist_blink_btn.grid(row=2, column=3, padx=(14, 10), pady=(10, 0))
+        self.assist_blink_btn.grid(row=2, column=4, padx=(14, 10), pady=(10, 0))
         self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
         ttk.Label(
-            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=560
-        ).grid(row=2, column=4, sticky=tk.W, pady=(10, 0))
+            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=520
+        ).grid(row=2, column=5, sticky=tk.W, pady=(10, 0))
+        tools.columnconfigure(5, weight=1)
 
         list_frame = ttk.Frame(tools)
-        list_frame.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(6, 0))
+        list_frame.grid(row=3, column=0, columnspan=6, sticky=tk.EW, pady=(6, 0))
         self.assist_monster_list = tk.Listbox(list_frame, height=7, activestyle="none")
         list_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.assist_monster_list.yview)
         self.assist_monster_list.configure(yscrollcommand=list_sb.set)
@@ -1668,7 +1679,7 @@ class AppUI:
         self.append_log("已发送：立即复活（免费，瞬移营地复活后回到原地）")
 
     def refresh_blink_list(self) -> None:
-        """读当前地图的怪，填到列表里。"""
+        """读当前地图的怪（客户端已加载的全部），按筛选条件显示。"""
         if not self.assist.running:
             self.start_assist()
         rows = []
@@ -1677,10 +1688,23 @@ class AppUI:
         except Exception:  # noqa: BLE001
             rows = []
         self._monster_rows = rows
+        self.render_monster_list()
+
+    def render_monster_list(self) -> None:
+        """按「全部 / BOSS / 小怪」筛选后填到列表。"""
+        rows = getattr(self, "_monster_rows", []) or []
+        mode = str(self.assist_monster_filter_var.get() or "全部")
+        if mode == "BOSS":
+            view = [r for r in rows if r.get("boss")]
+        elif mode == "小怪":
+            view = [r for r in rows if not r.get("boss")]
+        else:
+            view = list(rows)
+        self._monster_view = view
+
         lb = self.assist_monster_list
         lb.delete(0, tk.END)
-        bosses = 0
-        for item in rows[:400]:
+        for item in view[:400]:
             name = str(item.get("name") or "怪")
             dist = int(item.get("d") or 0)
             hp = item.get("hp")
@@ -1693,7 +1717,6 @@ class AppUI:
                 hp_text = ""
             tail = ("    " + hp_text if hp_text else "") + "    距离 %d" % dist
             if item.get("boss"):
-                bosses += 1
                 lb.insert(tk.END, "★ %s%s" % (name, tail))
                 try:
                     lb.itemconfig(tk.END, foreground="#c62828")
@@ -1701,12 +1724,16 @@ class AppUI:
                     pass
             else:
                 lb.insert(tk.END, "%s%s" % (name, tail))
-        if rows:
-            self.assist_blink_status.set(
-                f"当前地图 {len(rows)} 只活怪（BOSS {bosses} 只）：选一只点「过去」或双击"
-            )
-        else:
+
+        if not rows:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
+            return
+        bosses = sum(1 for r in rows if r.get("boss"))
+        label = {"BOSS": "BOSS", "小怪": "小怪"}.get(mode, "全部")
+        self.assist_blink_status.set(
+            "当前地图 %d 只（BOSS %d / 小怪 %d）· %s：显示 %d 只"
+            % (len(rows), bosses, len(rows) - bosses, label, len(view))
+        )
 
     def auto_daily(self) -> None:
         """自动去完成任务（传送/战斗/采集），做完自动领取。"""
@@ -1997,7 +2024,9 @@ class AppUI:
         if not self.assist.running:
             self.start_assist()
         mode = "fly" if self.assist_blink_mode_var.get() == "飞过去" else "instant"
-        rows = getattr(self, "_monster_rows", []) or []
+        rows = getattr(self, "_monster_view", None)
+        if rows is None:
+            rows = getattr(self, "_monster_rows", []) or []
         sel = self.assist_monster_list.curselection()
         if sel and 0 <= int(sel[0]) < len(rows):
             item = rows[int(sel[0])]

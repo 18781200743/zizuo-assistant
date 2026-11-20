@@ -1,46 +1,40 @@
 {
-  "@platforms": [
-    "android"
-  ],
-  "id": "H519A18D3",
-  "name": "百炼助手",
-  "version": {
-    "name": "1.0.0",
-    "code": "1"
-  },
-  "description": "百炼英雄助手（安卓版，验证码登录）",
-  "launch_path": "index.html",
-  "developer": {
-    "name": "zizuo",
-    "email": ""
-  },
-  "permissions": {
-    "Internet": {
-      "description": "访问游戏服务器"
-    }
-  },
-  "plus": {
-    "splashscreen": {
-      "autoclose": true,
-      "waiting": true
+    "@platforms" : [ "android" ],
+    "id" : "H519A18D3",
+    "name" : "百炼助手",
+    "version" : {
+        "name" : "1.0.0",
+        "code" : "1"
     },
-    "popGesture": "none",
-    "runmode": "normal",
-    "distribute": {
-      "google": {
-        "packagename": "com.zizuo.assist",
-        "permissions": [
-          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
-        ]
-      },
-      "apple": {},
-      "orientation": [
-        "portrait-primary"
-      ]
-    }
-  },
-  "screenOrientation": [
-    "portrait"
-  ]
+    "description" : "百炼英雄助手（安卓版，验证码登录）",
+    "launch_path" : "index.html",
+    "developer" : {
+        "name" : "zizuo",
+        "email" : ""
+    },
+    "permissions" : {
+        "Internet" : {
+            "description" : "访问游戏服务器"
+        }
+    },
+    "plus" : {
+        "splashscreen" : {
+            "autoclose" : true,
+            "waiting" : true
+        },
+        "popGesture" : "none",
+        "runmode" : "normal",
+        "distribute" : {
+            "google" : {
+                "packagename" : "com.zizuo.assist",
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
+                ]
+            },
+            "apple" : {},
+            "orientation" : [ "portrait" ]
+        }
+    },
+    "screenOrientation" : [ "landscape-primary" ]
 }
