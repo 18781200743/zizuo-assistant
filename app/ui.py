@@ -244,8 +244,8 @@ class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("桌面找图助手")
-        self.root.geometry("1120x830")
-        self.root.minsize(980, 640)
+        self.root.geometry("780x940")
+        self.root.minsize(680, 720)
 
         self.config: Dict[str, Any] = load_config()
         self.slots: List[List[str]] = load_slots()
@@ -378,9 +378,9 @@ class AppUI:
             text="首页",
             relief=tk.FLAT,
             bd=0,
-            padx=20,
-            pady=8,
-            font=("Microsoft YaHei UI", 10, "bold"),
+            padx=12,
+            pady=6,
+            font=("Microsoft YaHei UI", 9, "bold"),
             command=lambda: self._switch_mode("home"),
         )
         self._mode_btn_home.pack(side=tk.LEFT)
@@ -390,9 +390,9 @@ class AppUI:
             text="抽卡",
             relief=tk.FLAT,
             bd=0,
-            padx=20,
-            pady=8,
-            font=("Microsoft YaHei UI", 10, "bold"),
+            padx=12,
+            pady=6,
+            font=("Microsoft YaHei UI", 9, "bold"),
             command=lambda: self._switch_mode("gacha"),
         )
         self._mode_btn_gacha.pack(side=tk.LEFT)
@@ -401,9 +401,9 @@ class AppUI:
             text="功能",
             relief=tk.FLAT,
             bd=0,
-            padx=20,
-            pady=8,
-            font=("Microsoft YaHei UI", 10, "bold"),
+            padx=12,
+            pady=6,
+            font=("Microsoft YaHei UI", 9, "bold"),
             command=lambda: self._switch_mode("assist"),
         )
         self._mode_btn_assist.pack(side=tk.LEFT, padx=(6, 0))
@@ -412,9 +412,9 @@ class AppUI:
             text="运行指令",
             relief=tk.FLAT,
             bd=0,
-            padx=20,
-            pady=8,
-            font=("Microsoft YaHei UI", 10, "bold"),
+            padx=12,
+            pady=6,
+            font=("Microsoft YaHei UI", 9, "bold"),
             command=lambda: self._switch_mode("commands"),
         )
         self._mode_btn_commands.pack(side=tk.LEFT, padx=(6, 0))
@@ -430,38 +430,9 @@ class AppUI:
         self.threshold_var = tk.StringVar(value=str(self.config.get("match_threshold", 0.85)))
         self.interval_var = tk.StringVar(value=str(self.config.get("loop_interval_ms", 800)))
 
-        if self.dev_mode:
-            top = ttk.Frame(self.root, padding=(8, 0, 8, 4))
-            top.pack(fill=tk.X)
-            ttk.Label(top, text="目标窗口标题").pack(side=tk.LEFT)
-            ttk.Entry(top, textvariable=self.window_var, width=16).pack(side=tk.LEFT, padx=4)
-
-            size_row = ttk.Frame(self.root, padding=(8, 0, 8, 4))
-            size_row.pack(fill=tk.X)
-            ttk.Label(size_row, text="游戏窗宽").pack(side=tk.LEFT)
-            ttk.Entry(size_row, textvariable=self.width_var, width=6).pack(
-                side=tk.LEFT, padx=4
-            )
-            ttk.Label(size_row, text="高").pack(side=tk.LEFT)
-            ttk.Entry(size_row, textvariable=self.height_var, width=6).pack(
-                side=tk.LEFT, padx=4
-            )
-            preset = ttk.Combobox(
-                size_row,
-                textvariable=self.preset_var,
-                values=list(SIZE_PRESETS.keys()),
-                width=14,
-                state="readonly",
-            )
-            preset.pack(side=tk.LEFT, padx=6)
-            preset.bind("<<ComboboxSelected>>", self._on_preset)
-            ttk.Button(size_row, text="打开游戏窗口", command=self.open_game_window).pack(
-                side=tk.LEFT, padx=4
-            )
-            if ENABLE_BROWSER_OPEN:
-                ttk.Button(size_row, text="系统浏览器", command=self.open_game_browser).pack(
-                    side=tk.LEFT, padx=2
-                )
+        # 开发用的窗口标题/尺寸行不再显示（首页已有「打开游戏窗口」）
+        if False:
+            pass
 
         self._content = ttk.Frame(self.root)
         self._content.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
@@ -484,7 +455,7 @@ class AppUI:
         if self.dev_mode:
             log_frame = ttk.LabelFrame(self.root, text="日志", padding=4)
             log_frame.pack(fill=tk.BOTH, expand=False, padx=8, pady=(0, 8))
-            self.log = tk.Text(log_frame, height=10, wrap=tk.WORD)
+            self.log = tk.Text(log_frame, height=6, wrap=tk.WORD)
             self.log.pack(fill=tk.BOTH, expand=True)
         else:
             self.log = None
@@ -746,8 +717,8 @@ class AppUI:
         ttk.Label(btns, textvariable=self.gacha_cdp_status, foreground="#555").pack(side=tk.LEFT, padx=12)
 
         if self.dev_mode:
-            ttk.Label(cdp_box, textvariable=self.gacha_pool_var, wraplength=980, foreground="#1a4d8f").pack(anchor=tk.W)
-            ttk.Label(cdp_box, textvariable=self.gacha_records_var, wraplength=980, foreground="#0a7a2f").pack(anchor=tk.W)
+            ttk.Label(cdp_box, textvariable=self.gacha_pool_var, wraplength=660, foreground="#1a4d8f").pack(anchor=tk.W)
+            ttk.Label(cdp_box, textvariable=self.gacha_records_var, wraplength=660, foreground="#0a7a2f").pack(anchor=tk.W)
 
         # ---------- 抽中统计 ----------
         hit_box = ttk.LabelFrame(parent, text="抽中统计", padding=8)
@@ -758,7 +729,7 @@ class AppUI:
         ).pack(anchor=tk.W)
         self.gacha_hit_var = tk.StringVar(value="还没有抽中目标英雄")
         ttk.Label(
-            hit_box, textvariable=self.gacha_hit_var, foreground="#333", wraplength=1020, justify=tk.LEFT
+            hit_box, textvariable=self.gacha_hit_var, foreground="#333", wraplength=660, justify=tk.LEFT
         ).pack(anchor=tk.W, pady=(4, 0))
 
         # 旧版「截图识别抽卡」参数只保留变量
@@ -781,26 +752,26 @@ class AppUI:
     # ---------------- 游戏辅助 ----------------
     def _build_home_tab(self, parent: ttk.Frame) -> None:
         """首页：只放开游戏/连接说明，具体功能收进「功能」页。"""
-        ttk.Label(parent, text="紫作助手", font=("Microsoft YaHei UI", 22, "bold")).pack(
-            anchor=tk.W, pady=(14, 0)
+        ttk.Label(parent, text="紫作助手", font=("Microsoft YaHei UI", 17, "bold")).pack(
+            anchor=tk.W, pady=(8, 0)
         )
         ttk.Label(parent, text="百炼英雄 · 电脑版", foreground="#666").pack(anchor=tk.W, pady=(2, 0))
 
-        card = ttk.LabelFrame(parent, text="本机游戏", padding=14)
-        card.pack(fill=tk.X, pady=(18, 10))
+        card = ttk.LabelFrame(parent, text="本机游戏", padding=10)
+        card.pack(fill=tk.X, pady=(12, 8))
         self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
-        ttk.Label(card, textvariable=self.home_status_var, foreground="#333", wraplength=920).pack(
+        ttk.Label(card, textvariable=self.home_status_var, foreground="#333", wraplength=660).pack(
             anchor=tk.W
         )
         row = ttk.Frame(card)
-        row.pack(fill=tk.X, pady=(12, 0))
+        row.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(row, text="打开游戏窗口", width=16, command=self.ask_open_game).pack(side=tk.LEFT)
         ttk.Button(row, text="重新连接", width=12, command=self.reconnect_assist).pack(
             side=tk.LEFT, padx=8
         )
 
         entry = ttk.Frame(parent)
-        entry.pack(fill=tk.X, pady=(14, 0))
+        entry.pack(fill=tk.X, pady=(10, 0))
         ttk.Button(entry, text="功能", width=16, command=lambda: self._switch_mode("assist")).pack(
             side=tk.LEFT
         )
@@ -816,9 +787,9 @@ class AppUI:
             text="打开游戏 → 验证码登录 → 进入主界面后自动连接。\n"
             "具体功能（红包 / 复活 / 刷新 / 闪现 / 取坐标）都在「功能」里。",
             foreground="#666",
-            wraplength=920,
+            wraplength=660,
             justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(18, 0))
+        ).pack(anchor=tk.W, pady=(12, 0))
 
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
@@ -827,7 +798,10 @@ class AppUI:
         bar = ttk.Frame(parent)
         bar.pack(fill=tk.X, pady=(0, 8))
         self.assist_message_var = tk.StringVar(value="辅助已自动连接，等待游戏窗口…")
-        ttk.Label(bar, textvariable=self.assist_message_var, foreground="#1a4d8f").pack(side=tk.LEFT)
+        ttk.Label(
+            bar, textvariable=self.assist_message_var, foreground="#1a4d8f",
+            wraplength=500, justify=tk.LEFT,
+        ).pack(side=tk.LEFT)
         ttk.Button(bar, text="全部关闭", width=10, command=self.stop_all_assist).pack(side=tk.RIGHT, padx=(6, 0))
         ttk.Button(bar, text="重新连接", width=10, command=self.reconnect_assist).pack(side=tk.RIGHT, padx=6)
 
@@ -895,9 +869,9 @@ class AppUI:
             tools, text="快速复活", width=14, command=self.revive_click, style="Accent.TButton"
         )
         self.assist_revive_btn.grid(row=0, column=3, padx=(14, 10))
-        ttk.Label(tools, text="点 1 次=复活一次；点 2 次=一直开着", foreground="#666").grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(tools, text="点1次=复活1次；点2次=一直开", foreground="#666").grid(row=0, column=4, sticky=tk.W)
         self.assist_revive_status = tk.StringVar(value="尚未开启")
-        ttk.Label(tools, textvariable=self.assist_revive_status, foreground="#666", wraplength=980).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
+        ttk.Label(tools, textvariable=self.assist_revive_status, foreground="#666", wraplength=660).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
 
         ttk.Label(tools, text="闪现寻怪").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
         self.assist_blink_mode_var = tk.StringVar(value="瞬移")
@@ -925,12 +899,12 @@ class AppUI:
         self.assist_blink_btn.grid(row=2, column=4, padx=(14, 10), pady=(10, 0))
         self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
         ttk.Label(
-            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=520
-        ).grid(row=2, column=5, sticky=tk.W, pady=(10, 0))
-        tools.columnconfigure(5, weight=1)
+            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=720,
+            justify=tk.LEFT,
+        ).grid(row=3, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
 
         list_frame = ttk.Frame(tools)
-        list_frame.grid(row=3, column=0, columnspan=6, sticky=tk.EW, pady=(6, 0))
+        list_frame.grid(row=4, column=0, columnspan=6, sticky=tk.EW, pady=(4, 0))
         self.assist_monster_list = tk.Listbox(list_frame, height=7, activestyle="none")
         list_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.assist_monster_list.yview)
         self.assist_monster_list.configure(yscrollcommand=list_sb.set)
@@ -943,14 +917,14 @@ class AppUI:
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
         coord_row = ttk.Frame(tools)
-        coord_row.grid(row=4, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
+        coord_row.grid(row=5, column=0, columnspan=6, sticky=tk.W, pady=(6, 0))
         ttk.Button(coord_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT)
         ttk.Button(coord_row, text="飞过去", width=8, command=self.fly_to_picked).pack(side=tk.LEFT, padx=(6, 0))
         self.assist_coord_status = tk.StringVar(value="点「取坐标」，再到游戏画面上点一下；取到后点「飞过去」")
         ttk.Label(coord_row, textvariable=self.assist_coord_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
         daily_row = ttk.Frame(tools)
-        daily_row.grid(row=5, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
+        daily_row.grid(row=6, column=0, columnspan=6, sticky=tk.W, pady=(6, 0))
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
         ttk.Button(daily_row, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
@@ -968,7 +942,7 @@ class AppUI:
         self.assist_damage_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("damage"))
         self.assist_damage_btn.grid(row=0, column=3, padx=(14, 10))
         self.assist_damage_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=560).grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=320).grid(row=0, column=4, sticky=tk.W)
 
         ttk.Label(combat, text="英雄免伤").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_shield_var = tk.StringVar(value=_seconds_text(assist.get("shield_percent", 100)))
@@ -977,7 +951,7 @@ class AppUI:
         self.assist_shield_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("shield"))
         self.assist_shield_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
         self.assist_shield_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#666", wraplength=320).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(combat, text="技能冷却").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
@@ -986,7 +960,7 @@ class AppUI:
         self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("cooldown"))
         self.assist_cooldown_btn.grid(row=2, column=3, padx=(14, 10), pady=(6, 0))
         self.assist_cooldown_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=320).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(combat, text="视野").grid(row=3, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_vision_var = tk.StringVar(value=_vision_text(assist.get("vision_mode", -1)))
@@ -995,7 +969,7 @@ class AppUI:
         self.assist_vision_btn = ttk.Button(combat, text="应用", width=10, command=lambda: self.toggle_combat("vision"))
         self.assist_vision_btn.grid(row=3, column=3, padx=(14, 10), pady=(6, 0))
         self.assist_vision_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#666", wraplength=560).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#666", wraplength=320).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(
             parent,
@@ -1004,7 +978,7 @@ class AppUI:
                 " 功能保留在这里，默认关闭；要不要开你自己决定。开着它们时不能开地图刷新。"
             ),
             foreground="#c62828",
-            wraplength=980,
+            wraplength=660,
         ).pack(anchor=tk.W, pady=(2, 6))
 
         if self.dev_mode:
@@ -1104,7 +1078,7 @@ class AppUI:
                 "　内置指令也能直接改：选中后点「编辑」，改完保存；想恢复原版点「还原」。"
             ),
             foreground="#6b7280",
-            wraplength=980,
+            wraplength=660,
         ).pack(anchor=tk.W, pady=(6, 0))
 
         self.refresh_command_list()
