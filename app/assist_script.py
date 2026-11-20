@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 90
+RUNTIME_VERSION = 91
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 90
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 90;
+  const VERSION = 91;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -842,7 +842,7 @@ RUNTIME_JS = r"""
     const kind = state.map.pendingKind;
     const label = kind === 'boss' ? 'BOSS' : '小怪';
 
-    return Promise.resolve(reloadByTeleport(world, cfg, mapId)).then(result => {
+    return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
       if (result !== true) {
         // 游戏没开始切图：保留这轮死亡计时，5 秒后自动重试（不再假装成功）
         state.map.entering = false;
@@ -2011,24 +2011,16 @@ RUNTIME_JS = r"""
     try { Promise.resolve(raw).catch(() => {}); } catch (_) { /* 忽略游戏自己的拒绝 */ }
     return new Promise(resolve => {
       const t0 = now();
-      let sawLoading = false;
       const check = () => {
+        // 旧版实测依据：XIPH 成功后 VKXX.ZRRU（实体世界）会换成新对象，怪跟着重刷
         let world = null;
         try { world = holder[mapCfg.core]; } catch (_) { world = null; }
-        try {
-          const st2 = holder[mapCfg.state];
-          if (st2 && mapCfg.changing && st2[mapCfg.changing]) sawLoading = true;
-          if (st2 && st2.MAOP === true) sawLoading = true;
-        } catch (_) { /* ignore */ }
-        const changed = (world && world !== before) || sawLoading;
-        if (changed) {
-          // 再压 600ms，避免加载页在这一瞬间又闪一下
+        if (world && world !== before) {
           setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
           resolve(true);
           return;
         }
-        if (now() - t0 > 2500) {
-          // 游戏根本没开始切图（拒绝/战斗/过场）：返回 false，别假装成功
+        if (now() - t0 > 9000) {
           resolve(false);
           return;
         }
