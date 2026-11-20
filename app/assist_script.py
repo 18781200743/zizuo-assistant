@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 94
+RUNTIME_VERSION = 97
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 94
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 94;
+  const VERSION = 97;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -945,7 +945,7 @@ RUNTIME_JS = r"""
     // 自测：假死亡直接当「已经死了设定秒数」
     for (const info of state.map.fakeDeaths.splice(0)) {
       mapDayRoll();
-      const due = nowMs + 1;
+      const due = nowMs - 1;   // 用「已过期」而不是 now+1：同一帧里就能触发，避免 1ms 竞态把假死丢掉
       if (info.kind === 'boss') { state.map.kills.boss += 1; bossAt = due; bossName = info.name || '自测怪'; }
       else { state.map.kills.mob += 1; mobAt = due; }
     }
@@ -1912,6 +1912,109 @@ RUNTIME_JS = r"""
     return null;
   }
 
+  /**
+   * 重进地图时只加速过场动画（进出场骨骼动画），不动节点、不动回调。
+   *
+   * 实测进图总耗时 4.6 秒，其中「真在加载」的是：
+   *   XIMY 地图地块图加载 1.6s + VSMO 等地块图就绪 0.6s
+   * 纯动画只有 IQIP 退场 0.56s（外加开场的出场动画）。
+   * 11-19 试过把 MapTransitionView / Transition 设 active=false，结果过场完成回调
+   * 永远不触发、XIPH 的 Promise 一直 pending、之后所有切图卡死（只能重开窗口）。
+   * 这里只把 sp.Skeleton 的 timeScale 调高：动画播得快，完成回调照常触发。
+   */
+  const TRANSITION_SPEED = 4;
+
+  function transitionRootNode() {
+    try {
+      const scene = window.cc && window.cc.director && window.cc.director.getScene();
+      if (!scene) return null;
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 6000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        if (String(n.name || '') === 'Transition') return n;
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** 过场预制体里的骨骼动画组件（出场/退场都是用它们播的）。 */
+  function transitionSkeletons() {
+    const out = [];
+    try {
+      const root = transitionRootNode();
+      if (!root) return out;
+      const stack = [root];
+      let guard = 0;
+      while (stack.length && guard < 3000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        const comps = n._components || [];
+        for (let i = 0; i < comps.length; i += 1) {
+          const c = comps[i];
+          // sp.Skeleton：有 timeScale 也有 setAnimation
+          if (c && typeof c.timeScale === 'number' && typeof c.setAnimation === 'function') out.push(c);
+        }
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return out;
+  }
+
+  /** 重进地图期间把过场动画调快；游戏进图 Promise 结束（动画播完）后还原。 */
+  function fastTransitionWhile(running) {
+    const touched = [];
+    const tick = () => {
+      try {
+        for (const skel of transitionSkeletons()) {
+          if (skel.timeScale === TRANSITION_SPEED) continue;
+          if (touched.indexOf(skel) < 0) touched.push(skel);
+          skel.timeScale = TRANSITION_SPEED;
+        }
+      } catch (_) { /* ignore */ }
+    };
+    tick();
+    const timer = setInterval(tick, 60);
+    let stopped = false;
+    const restore = () => {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      setTimeout(() => {
+        for (const skel of touched) {
+          try { if (skel && skel.isValid !== false && skel.timeScale !== 1) skel.timeScale = 1; } catch (_) { /* ignore */ }
+        }
+      }, 200);
+    };
+    let settled = false;
+    let hasPromise = false;
+    try {
+      if (running && typeof running.then === 'function') {
+        hasPromise = true;
+        running.then(() => { settled = true; restore(); }, () => { settled = true; restore(); });
+      }
+    } catch (_) { /* ignore */ }
+    if (!hasPromise) {
+      // 游戏这次没返回 Promise（或直接拒绝）：别让它一直 4 倍速，3 秒后还原
+      setTimeout(restore, 3000);
+      return restore;
+    }
+    const startedAt = now();
+    const guard = () => {
+      if (stopped) return;
+      if (settled || now() - startedAt > 15000) { restore(); return; }
+      setTimeout(guard, 500);
+    };
+    setTimeout(guard, 1000);
+    return restore;
+  }
+
   /** 当前地图里第一个「已解锁」的传送点编号（用于 LUSS 重载地图）。 */
   function pickTeleportPoint(mapId) {
     const rl = (mapping().map && mapping().map.reload) || {};
@@ -2002,9 +2105,9 @@ RUNTIME_JS = r"""
     const before = holder[mapCfg.core];
     let raw = null;
     try { raw = holder[name](mapId); } catch (cause) { throw cause; }
-    // 注意：这里绝不能去隐藏过场节点（MapTransitionView/Transition）。
-    // 11-19 加的「压掉加载页动画」会把过场动画的完成回调掐掉，
-    // 地图进图 Promise 永远不 resolve，之后就再也切不了图（实测踩坑，已回退）。
+    // 只把过场动画调快（节点保持 active、回调照常），真在加载的地图资源没法跳过。
+    // 注意：绝对不能像 11-19 那样把过场节点 active=false —— 会掐掉完成回调、之后再也切不了图。
+    try { fastTransitionWhile(raw); } catch (_) { /* 动画加速失败不影响进图 */ }
     // 旧版说明：XIPH 返回 Promise，成功 resolve true，并且 VKXX.ZRRU 会换成新对象。
     // 两个信号谁先到都算成功；Promise 明确返回 false 才算失败，且等它结束再决定，避免重复调用。
     let promiseResult = null;
