@@ -1392,6 +1392,67 @@ class AppUI:
 
     ASSIST_TOP_H = 352
 
+    def _sync_assist_status(self) -> None:
+        item = getattr(self, "_assist_status_item", None)
+        c = getattr(self, "_assist_top", None)
+        if item is None or c is None:
+            return
+        try:
+            c.itemconfigure(item, text=self.assist_message_var.get())
+            bbox = c.bbox(item)
+            bottom = bbox[3] if bbox else 0
+            if abs(bottom - getattr(self, "_assist_status_bottom", 0)) > 2:
+                self._assist_status_bottom = bottom
+                self._draw_assist_top()
+        except tk.TclError:
+            pass
+
+    def _click_tool(self, key: str) -> None:
+        self._show_tool(key)
+        self._draw_assist_top()
+
+    def _click_reconnect(self) -> None:
+        try:
+            self.assist_message_var.set("正在重新连接游戏窗口…")
+        except tk.TclError:
+            pass
+        self.reconnect_assist()
+
+    def _click_stopall(self) -> None:
+        try:
+            self.assist_message_var.set("已全部关闭")
+        except tk.TclError:
+            pass
+        self.stop_all_assist()
+
+    def toggle_assist_theme(self) -> None:
+        """夜间（魔法阵）/ 白天（深蓝）背景切换。"""
+        self.assist_theme = "day" if self.assist_theme == "night" else "night"
+        try:
+            self.config["assist_theme"] = self.assist_theme
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        self._apply_assist_theme()
+
+    def _apply_assist_theme(self) -> None:
+        color = "#1D2D4F" if self.assist_theme == "day" else "#231e3d"
+        try:
+            style = ttk.Style(self.root)
+            style.configure("AssistBody.TFrame", background=color)
+            self.DARK_PAGE = color
+            for name in (
+                "Dark.TFrame", "Dark.TLabel", "Dark.TLabelframe",
+                "Dark.TLabelframe.Label", "Dark.TCheckbutton",
+            ):
+                style.configure(name, background=color)
+            canvas = self._scroll_canvases.get("assist")
+            if canvas is not None:
+                canvas.configure(bg=color)
+        except tk.TclError:
+            pass
+        self._draw_assist_top()
+
     def _draw_assist_top(self) -> None:
         """画辅助工具页顶部：背景、返回、状态、两个按钮、图例、分类按钮。"""
         c = getattr(self, "_assist_top", None)
@@ -1408,12 +1469,16 @@ class AppUI:
         c.delete("all")
         ui_font = "Microsoft YaHei UI"
 
-        photo = self._assist_bg_photo(w, h)
-        if photo is not None:
-            self._assist_bg_ref = photo
-            c.create_image(0, 0, image=photo, anchor="nw")
+        if getattr(self, "assist_theme", "night") == "night":
+            photo = self._assist_bg_photo(w, h)
+            if photo is not None:
+                self._assist_bg_ref = photo
+                c.create_image(0, 0, image=photo, anchor="nw")
+            else:
+                c.configure(bg="#241d40")
         else:
-            c.configure(bg="#241d40")
+            c.delete("all")
+            c.configure(bg="#1D2D4F")
 
         # 返回 + 标题
         c.create_polygon(
@@ -1430,15 +1495,30 @@ class AppUI:
         )
 
         # 状态文字
-        c.create_text(
+        self._assist_status_item = c.create_text(
             12, 56, anchor="nw", text=self.assist_message_var.get(),
             fill="#e9e5ff", width=w - 24, font=(ui_font, 11), justify="left",
         )
+        bbox = c.bbox(self._assist_status_item)
+        self._assist_status_bottom = bbox[3] if bbox else 0
+
+        # 夜间 / 白天 切换
+        tx0, tx1 = w - 100, w - 12
+        c.create_polygon(
+            self._round_points(tx0, 14, tx1, 48, 6),
+            fill="#1a1630", outline="#9a8fe0", tags=("a_theme",),
+        )
+        c.create_text(
+            (tx0 + tx1) / 2, 31,
+            text="☀ 白天" if getattr(self, "assist_theme", "night") == "night" else "☾ 夜间",
+            fill="#e8e3ff", font=(ui_font, 9), tags=("a_theme",),
+        )
+        c.tag_bind("a_theme", "<Button-1>", lambda _e: self.toggle_assist_theme())
 
         # 重新连接 / 全部关闭
         for text, x0, x1, cmd, tag in (
-            ("重新连接", w - 268, w - 172, self.reconnect_assist, "a_reconnect"),
-            ("全部关闭", w - 164, w - 12, self.stop_all_assist, "a_stopall"),
+            ("重新连接", w - 268, w - 172, self._click_reconnect, "a_reconnect"),
+            ("全部关闭", w - 164, w - 12, self._click_stopall, "a_stopall"),
         ):
             c.create_polygon(
                 self._round_points(x0, 116, x1, 158, 6),
@@ -1492,11 +1572,16 @@ class AppUI:
                 setattr(self, "_tool_btn_%s" % key, btn)
             else:
                 c.create_rectangle(x0, y0, x0 + bw, y0 + bh, fill="#153a48", outline="#3fc4e0", tags=(tag,))
+            if getattr(self, "_tool_current", None) == key:
+                c.create_polygon(
+                    self._round_points(x0 - 2, y0 - 2, x0 + bw + 2, y0 + bh + 2, 7),
+                    fill="", outline="#a5f3ff", width=2, tags=(tag,),
+                )
             c.create_text(
                 x0 + bw / 2, y0 + bh / 2, text=text, fill="#ffffff",
                 font=(ui_font, 11, "bold"), tags=(tag,),
             )
-            c.tag_bind(tag, "<Button-1>", lambda _e, k=key: self._show_tool(k))
+            c.tag_bind(tag, "<Button-1>", lambda _e, k=key: self._click_tool(k))
 
         c.tag_bind("a_back", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("a_reconnect", "<Enter>", lambda _e: c.configure(cursor="hand2"))
@@ -1588,6 +1673,7 @@ class AppUI:
 
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
+        self.assist_theme = str(self.config.get("assist_theme") or "night")
 
         # ---------- 顶部：背景 + 状态 + 分类按钮 ----------
         top = tk.Canvas(parent, height=self.ASSIST_TOP_H, highlightthickness=0, bd=0, bg="#0c1220")
@@ -1596,7 +1682,7 @@ class AppUI:
         self.assist_message_var = tk.StringVar(
             value="辅助已自动连接，等待游戏窗口（点上方「打开游戏窗口」即可）"
         )
-        self.assist_message_var.trace_add("write", lambda *_a: self._draw_assist_top())
+        self.assist_message_var.trace_add("write", lambda *_a: self._sync_assist_status())
         top.bind("<Configure>", lambda _e: self._draw_assist_top())
         parent.after(30, self._draw_assist_top)
 
