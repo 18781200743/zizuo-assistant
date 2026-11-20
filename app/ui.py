@@ -964,6 +964,30 @@ class AppUI:
             side=tk.RIGHT, padx=6
         )
 
+        legend = ttk.Frame(parent)
+        legend.pack(fill=tk.X, pady=(0, 6))
+
+        def _tag(text, color, bg=None):
+            tk.Label(
+                legend, text=text, fg=color, bg=bg or "#ffffff",
+                font=("Microsoft YaHei UI", 9, bg and "bold" or "normal"),
+                padx=2,
+            ).pack(side=tk.LEFT)
+
+        tk.Label(
+            legend, text="安全等级", fg="#6b7280", bg="#ffffff",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        _tag("绿", "#1b7f3b")
+        tk.Label(legend, text="→", fg="#9ca3af", bg="#ffffff").pack(side=tk.LEFT)
+        _tag("黄", "#a06a00")
+        tk.Label(legend, text="→", fg="#9ca3af", bg="#ffffff").pack(side=tk.LEFT)
+        _tag("红", "#b3261e")
+        tk.Label(
+            legend, text="  红色最危险", fg="#6b7280", bg="#ffffff",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT)
+
         # ---------- 功能分类菜单 ----------
         menu = ttk.Frame(parent)
         menu.pack(fill=tk.X, pady=(0, 8))
@@ -979,13 +1003,13 @@ class AppUI:
             ("抽卡", "gacha"),
             ("运行指令", "commands"),
         ]
-        # 按钮配色：战斗参数=红（会被服务端校验），复活/闪现=黄
+        # 按钮配色：绿=安全，黄=注意，红=会被服务端校验
         styles = {
             "combat": ("#fdecea", "#b3261e", "#f8d7d3"),
             "revive": ("#fff6da", "#8a6100", "#fbeabb"),
         }
         for index, (text, key) in enumerate(tool_items):
-            bg, fg, active = styles.get(key, ("#eef1f6", "#1f2937", "#e2e8f0"))
+            bg, fg, active = styles.get(key, ("#e8f5e9", "#1b7f3b", "#d3ecda"))
             tk.Button(
                 menu, text=text, command=lambda k=key: self._show_tool(k),
                 relief=tk.FLAT, bd=0, bg=bg, fg=fg, activebackground=active,
