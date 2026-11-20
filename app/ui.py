@@ -438,6 +438,110 @@ class AppUI:
         style.configure("Dark.TPanedwindow", background=dark)
         style.configure("AssistBody.TFrame", background="#231e3d")
 
+        # 白天（浅色）
+        style.configure("Light.TFrame", background="#ffffff")
+        style.configure("Light.TLabel", background="#ffffff", foreground="#1f2937")
+        style.configure(
+            "Light.TLabelframe", background="#ffffff", bordercolor="#dce3ee",
+            relief="solid", borderwidth=1,
+        )
+        style.configure("Light.TLabelframe.Label", background="#ffffff", foreground="#1c4f9c")
+        style.configure(
+            "Light.TButton", background="#eef2f8", foreground="#1f2937",
+            bordercolor="#c9d3e4", focusthickness=0, relief="flat", padding=(6, 3),
+        )
+        style.map("Light.TButton", background=[("active", "#e2e8f4")])
+        style.configure(
+            "Light.Accent.TButton", background="#2f7fe8", foreground="#ffffff",
+            bordercolor="#2f7fe8",
+        )
+        style.map("Light.Accent.TButton", background=[("active", "#2568c7")])
+        style.configure("Light.TCheckbutton", background="#ffffff", foreground="#1f2937")
+        style.map("Light.TCheckbutton", background=[("active", "#ffffff")])
+        style.configure(
+            "Light.TEntry", fieldbackground="#f7f9fc", background="#f7f9fc",
+            foreground="#1f2937", insertcolor="#1f2937", bordercolor="#c9d3e4",
+            lightcolor="#c9d3e4", darkcolor="#c9d3e4",
+        )
+        style.configure(
+            "Light.TCombobox", fieldbackground="#f7f9fc", background="#eef2f8",
+            foreground="#1f2937", arrowcolor="#1f2937", bordercolor="#c9d3e4",
+            lightcolor="#c9d3e4", darkcolor="#c9d3e4",
+        )
+        style.map(
+            "Light.TCombobox",
+            fieldbackground=[("readonly", "#f7f9fc")],
+            foreground=[("readonly", "#1f2937")],
+        )
+        style.configure(
+            "Light.Vertical.TScrollbar", background="#dfe6f2", troughcolor="#ffffff",
+            bordercolor="#ffffff", arrowcolor="#5b6478",
+        )
+        style.configure(
+            "Light.Horizontal.TScrollbar", background="#dfe6f2", troughcolor="#ffffff",
+            bordercolor="#ffffff", arrowcolor="#5b6478",
+        )
+        style.configure("Light.TPanedwindow", background="#ffffff")
+
+    _FG_TO_LIGHT = {
+        "#9fb0c9": "#6b7280", "#4ade80": "#15803d", "#f87171": "#b91c1c",
+        "#fbbf24": "#b45309", "#7cc4ff": "#1d4ed8", "#c7d4e8": "#374151",
+        "#e6ebf5": "#1f2937", "#ffffff": "#1f2937", "#dbe4f5": "#374151",
+    }
+
+    def _retint(self, widget, light: bool) -> None:
+        """把区块里写死的前景色换成当前主题的深浅色。"""
+        for child in widget.winfo_children():
+            cls = child.winfo_class()
+            try:
+                if cls in ("TLabel", "Label"):
+                    key = "foreground" if cls == "TLabel" else "fg"
+                    cur = str(child.cget(key) or "").lower()
+                    if cur:
+                        orig = getattr(child, "_orig_fg", None) or cur
+                        child._orig_fg = orig
+                        if light:
+                            new = self._FG_TO_LIGHT.get(orig, orig)
+                        else:
+                            new = orig
+                        child.configure(**{key: new})
+                elif cls == "Listbox":
+                    if light:
+                        child.configure(
+                            bg="#f7f9fc", fg="#1f2937",
+                            selectbackground="#2f7fe8", selectforeground="#ffffff",
+                        )
+                    else:
+                        child.configure(
+                            bg="#1b2a44", fg="#e6ebf5",
+                            selectbackground="#2f7fe8", selectforeground="#ffffff",
+                        )
+            except tk.TclError:
+                pass
+            self._retint(child, light)
+
+    def _apply_page_theme(self, widget, light: bool) -> None:
+        prefix = "Light." if light else "Dark."
+        for child in widget.winfo_children():
+            try:
+                cls = child.winfo_class()
+                if cls == "TScrollbar":
+                    orient = str(child.cget("orient"))
+                    child.configure(
+                        style=prefix + ("Vertical.TScrollbar" if orient == "vertical" else "Horizontal.TScrollbar")
+                    )
+                elif cls == "TButton":
+                    current = str(child.cget("style") or "")
+                    child.configure(
+                        style=prefix + ("Accent.TButton" if "Accent" in current else "TButton")
+                    )
+                elif cls in ("TFrame", "TLabel", "TLabelframe", "TCheckbutton",
+                             "TEntry", "TCombobox", "TPanedwindow"):
+                    child.configure(style=prefix + cls)
+            except tk.TclError:
+                pass
+            self._apply_page_theme(child, light)
+
     def _apply_dark(self, widget) -> None:
         """把某个页面里所有 ttk 控件换成深色样式。"""
         for child in widget.winfo_children():
@@ -562,7 +666,8 @@ class AppUI:
         self._build_assist_tab(
             self._make_scroll(self._page_assist, "assist", bg=self.DARK_PAGE)
         )
-        self._apply_dark(self._page_assist)
+        # 构建完后按当前主题（默认白天）套用配色
+        self.root.after(60, self._apply_assist_theme)
         self._build_commands_tab(self._page_commands)
         self._build_home_tab(self._page_home)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
@@ -1436,19 +1541,17 @@ class AppUI:
         self._apply_assist_theme()
 
     def _apply_assist_theme(self) -> None:
-        color = "#1D2D4F" if self.assist_theme == "day" else "#231e3d"
+        light = getattr(self, "assist_theme", "day") == "day"
+        color = "#ffffff" if light else "#231e3d"
         try:
             style = ttk.Style(self.root)
             style.configure("AssistBody.TFrame", background=color)
-            self.DARK_PAGE = color
-            for name in (
-                "Dark.TFrame", "Dark.TLabel", "Dark.TLabelframe",
-                "Dark.TLabelframe.Label", "Dark.TCheckbutton",
-            ):
-                style.configure(name, background=color)
             canvas = self._scroll_canvases.get("assist")
             if canvas is not None:
                 canvas.configure(bg=color)
+            self._page_assist.configure(style="Light.TFrame" if light else "Dark.TFrame")
+            self._apply_page_theme(self._page_assist, light)
+            self._retint(self._page_assist, light)
         except tk.TclError:
             pass
         self._draw_assist_top()
@@ -1469,7 +1572,8 @@ class AppUI:
         c.delete("all")
         ui_font = "Microsoft YaHei UI"
 
-        if getattr(self, "assist_theme", "day") == "night":
+        light = getattr(self, "assist_theme", "day") == "day"
+        if not light:
             photo = self._assist_bg_photo(w, h)
             if photo is not None:
                 self._assist_bg_ref = photo
@@ -1477,27 +1581,42 @@ class AppUI:
             else:
                 c.configure(bg="#241d40")
         else:
-            c.delete("all")
-            c.configure(bg="#1D2D4F")
+            c.configure(bg="#ffffff")
+
+        title_fg = "#16213a" if light else "#ffffff"
+        sub_fg = "#33405a" if light else "#e9e5ff"
+        legend_fg = "#5b6478" if light else "#c9c2ea"
+        chip_bg = "#eef2f8" if light else "#1a1630"
+        chip_line = "#c9d3e4" if light else "#9a8fe0"
+        back_fg = "#2b3550" if light else "#e8e3ff"
+        btn_bg = "#ffffff" if light else "#0f2f3d"
+        btn_line = "#2aa6c8" if light else "#3fc4e0"
+        btn_inner = "#bfe8f3" if light else "#2a8ea8"
+        btn_fg = "#0f5c74" if light else "#dff6ff"
+        legend_colors = (
+            ("绿", "#15803d"), ("黄", "#b45309"), ("红", "#b91c1c")
+        ) if light else (
+            ("绿", "#4ade80"), ("黄", "#facc15"), ("红", "#f87171")
+        )
 
         # 返回 + 标题
         c.create_polygon(
             self._round_points(12, 14, 96, 48, 6),
-            fill="#1a1630", outline="#9a8fe0", tags=("a_back",),
+            fill=chip_bg, outline=chip_line, tags=("a_back",),
         )
         c.create_text(
-            54, 31, text="‹ 返回", fill="#e8e3ff", font=(ui_font, 10), tags=("a_back",),
+            54, 31, text="‹ 返回", fill=back_fg, font=(ui_font, 10), tags=("a_back",),
         )
         c.tag_bind("a_back", "<Button-1>", lambda _e: self._switch_mode("home"))
         c.create_text(
-            110, 31, anchor="w", text="辅助工具", fill="#ffffff",
+            110, 31, anchor="w", text="辅助工具", fill=title_fg,
             font=(ui_font, 15, "bold"),
         )
 
         # 状态文字
         self._assist_status_item = c.create_text(
             12, 56, anchor="nw", text=self.assist_message_var.get(),
-            fill="#e9e5ff", width=w - 24, font=(ui_font, 11), justify="left",
+            fill=sub_fg, width=w - 24, font=(ui_font, 11), justify="left",
         )
         bbox = c.bbox(self._assist_status_item)
         self._assist_status_bottom = bbox[3] if bbox else 0
@@ -1506,12 +1625,12 @@ class AppUI:
         tx0, tx1 = w - 100, w - 12
         c.create_polygon(
             self._round_points(tx0, 14, tx1, 48, 6),
-            fill="#1a1630", outline="#9a8fe0", tags=("a_theme",),
+            fill=chip_bg, outline=chip_line, tags=("a_theme",),
         )
         c.create_text(
             (tx0 + tx1) / 2, 31,
-            text="☀ 白天" if getattr(self, "assist_theme", "day") == "night" else "☾ 夜间",
-            fill="#e8e3ff", font=(ui_font, 9), tags=("a_theme",),
+            text="☾ 夜间" if light else "☀ 白天",
+            fill=back_fg, font=(ui_font, 9), tags=("a_theme",),
         )
         c.tag_bind("a_theme", "<Button-1>", lambda _e: self.toggle_assist_theme())
 
@@ -1522,32 +1641,32 @@ class AppUI:
         ):
             c.create_polygon(
                 self._round_points(x0, 116, x1, 158, 6),
-                fill="#0f2f3d", outline="#3fc4e0", tags=(tag,),
+                fill=btn_bg, outline=btn_line, tags=(tag,),
             )
             c.create_polygon(
                 self._round_points(x0 + 3, 119, x1 - 3, 155, 5),
-                fill="", outline="#2a8ea8", tags=(tag,),
+                fill="", outline=btn_inner, tags=(tag,),
             )
             c.create_text(
-                (x0 + x1) / 2, 137, text=text, fill="#dff6ff",
+                (x0 + x1) / 2, 137, text=text, fill=btn_fg,
                 font=(ui_font, 11, "bold"), tags=(tag,),
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, cmd=cmd: cmd())
 
         # 安全等级图例
-        c.create_text(12, 170, anchor="w", text="安全等级", fill="#c9c2ea", font=(ui_font, 9))
+        c.create_text(12, 170, anchor="w", text="安全等级", fill=legend_fg, font=(ui_font, 9))
         x = 74
-        for text, color in (("绿", "#4ade80"), ("黄", "#facc15"), ("红", "#f87171")):
+        for text, color in legend_colors:
             c.create_polygon(
                 self._round_points(x - 4, 160, x + 22, 180, 4),
-                fill="#1a1630", outline="",
+                fill=chip_bg, outline="",
             )
             c.create_text(x + 9, 170, text=text, fill=color, font=(ui_font, 10, "bold"))
             x += 28
             if text != "红":
                 c.create_text(x, 170, anchor="w", text="→", fill="#8b84ad", font=(ui_font, 9))
                 x += 20
-        c.create_text(x + 8, 170, anchor="w", text="红色最危险", fill="#c9c2ea", font=(ui_font, 9))
+        c.create_text(x + 8, 170, anchor="w", text="红色最危险", fill=legend_fg, font=(ui_font, 9))
 
         # 分类按钮
         items = [
