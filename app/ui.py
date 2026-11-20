@@ -648,6 +648,11 @@ class AppUI:
         ttk.Label(
             hero_box, textvariable=self.gacha_hero_count, foreground="#555"
         ).pack(anchor=tk.W)
+        ttk.Label(
+            hero_box,
+            text="勾选保留（按最大倍率抽）　数字＝出现 / 中 / 碎片",
+            foreground="#6b7280",
+        ).pack(anchor=tk.W)
 
 
         holder = ttk.Frame(hero_box)
@@ -2982,12 +2987,21 @@ class AppUI:
             self._gacha_cdp_obj = obj
         return obj
 
+    def _update_hero_count(self) -> None:
+        try:
+            total = len(self._gacha_hero_vars)
+            checked = sum(1 for v in self._gacha_hero_vars.values() if v.get())
+            self.gacha_hero_count.set(f"参考名单 {total} 个（已勾 {checked}）")
+        except tk.TclError:
+            pass
+
     def _set_all_heroes(self, value: bool) -> None:
         for var in getattr(self, "_gacha_hero_vars", {}).values():
             try:
                 var.set(value)
             except tk.TclError:
                 pass
+        self._update_hero_count()
 
     def _fixed_checked_ids(self) -> set:
         """默认一个都不勾，由用户自己选。"""
@@ -3011,20 +3025,18 @@ class AppUI:
         checked = self._fixed_checked_ids()
         for index, (hero_id, name) in enumerate(rows):
             cell = ttk.Frame(self._gacha_hero_inner)
-            cell.grid(row=index, column=0, sticky=tk.W, padx=4, pady=1)
+            cell.grid(row=index // 2, column=index % 2, sticky=tk.W, padx=(4, 2), pady=1)
             var = tk.BooleanVar(value=(hero_id in checked))
-            ttk.Checkbutton(cell, text=name, variable=var).pack(side=tk.LEFT)
-            counter = tk.StringVar(value="出现 0 次 · 中 0 次 · 碎片 +0")
-            ttk.Label(cell, textvariable=counter, foreground="#6b7280", anchor=tk.W).pack(
-                side=tk.LEFT, padx=(8, 0)
-            )
+            ttk.Checkbutton(
+                cell, text=name, variable=var, width=6, command=self._update_hero_count
+            ).pack(side=tk.LEFT)
+            counter = tk.StringVar(value="0/0/0")
+            ttk.Label(
+                cell, textvariable=counter, foreground="#6b7280", anchor=tk.W, width=8
+            ).pack(side=tk.LEFT, padx=(2, 0))
             self._gacha_hero_vars[hero_id] = var
             self._gacha_hero_counter_vars[hero_id] = counter
-        self.gacha_hero_count.set(
-            f"参考名单 {len(rows)} 个"
-            f"（已勾 {sum(1 for v in self._gacha_hero_vars.values() if v.get())}）"
-            "　勾选的按最大倍率抽并保留"
-        )
+        self._update_hero_count()
 
     def list_gacha_heroes(self) -> None:
         gacha_cdp = self._gacha_cdp()
@@ -3164,9 +3176,9 @@ class AppUI:
                     if cur is not None:
                         base = self._frag_base.get(str(hero_id))
                         gained = max(0, int(cur) - int(base or 0))
-                frag_txt = "+0" if gained is None else f"+{gained}"
+                frag_txt = "0" if gained is None else str(gained)
                 try:
-                    var.set(f"出现 {appear} 次 · 中 {hit} 次 · 碎片 {frag_txt}")
+                    var.set(f"{appear}/{hit}/{frag_txt}")
                 except tk.TclError:
                     pass
 
