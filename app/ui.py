@@ -847,6 +847,7 @@ class AppUI:
         daily_row = ttk.Frame(tools)
         daily_row.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(8, 0))
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
+        ttk.Button(daily_row, text="一键完成(任务卡)", width=16, command=self.complete_daily).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
         ttk.Label(daily_row, textvariable=self.assist_daily_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
@@ -1664,6 +1665,26 @@ class AppUI:
             )
         else:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
+
+    def complete_daily(self) -> None:
+        """用任务卡把没做完的日常任务秒完成（会消耗任务卡）。"""
+        if not self.assist.running:
+            self.start_assist()
+        if not messagebox.askyesno(
+            "一键完成日常",
+            "会用「任务卡」把没完成的日常任务直接完成，每一条消耗一张任务卡。\n确定继续？",
+        ):
+            return
+        self.assist_daily_status.set("正在用任务卡完成…")
+        result = self.assist.complete_daily_with_cards()
+        if not result.get("ok"):
+            self.assist_daily_status.set("完成失败：%s" % (result.get("error") or "未知原因"))
+            return
+        used = int(result.get("used") or 0)
+        failed = int(result.get("failed") or 0)
+        self.assist_daily_status.set("已用任务卡完成 %d 条（失败 %d）" % (used, failed))
+        self.append_log("一键完成日常：任务卡 %d 张，失败 %d" % (used, failed))
+        self.root.after(1500, self.claim_daily)
 
     def claim_daily(self) -> None:
         """一键领日常：直接调游戏任务服务，把能领的奖励全部领掉（不开面板）。"""

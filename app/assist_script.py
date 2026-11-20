@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 109
+RUNTIME_VERSION = 110
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 109
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 109;
+  const VERSION = 110;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2673,6 +2673,34 @@ RUNTIME_JS = r"""
     }
   }
 
+  /**
+   * 用「任务卡」快速完成日常任务（参考工具同款：SNFA.KYFH(任务编号, 任务线)）。
+   * 只处理日常（任务线 1）；已完成待领 / 已领的跳过。
+   */
+  function completeDailyWithCards() {
+    try {
+      const svc = taskService();
+      if (!svc) return { ok: false, error: '没找到任务服务（SNFA）' };
+      if (typeof svc.KYFH !== 'function') return { ok: false, error: '该版本没有任务卡接口' };
+      const rows = Array.isArray(svc.DHPZ()) ? svc.DHPZ() : [];
+      let used = 0;
+      let failed = 0;
+      const ids = [];
+      for (let i = 0; i < rows.length; i += 1) {
+        const task = rows[i];
+        if (!task) continue;
+        if (task.KLBW) continue;
+        const have = (task.GPIC && task.GPIC.WZMG) || 0;
+        const need = task.DHDO || task.RSHY || 0;
+        if (need > 0 && have >= need) continue;
+        try { svc.KYFH(task.UHNB, 1); used += 1; ids.push(task.UHNB); } catch (_) { failed += 1; }
+      }
+      return { ok: true, used, failed, ids };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /** 兼容旧调用：只领当前页签。 */
   function claimDailyTasks() {
     try { return claimCurrentTab(); } catch (cause) { return { ok: false, error: msgOf(cause) }; }
@@ -4240,6 +4268,7 @@ RUNTIME_JS = r"""
     claimDailyTasks,
     claimAllDailyTabs,
     claimDailyViaService,
+    completeDailyWithCards,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

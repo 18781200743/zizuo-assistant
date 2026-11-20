@@ -593,6 +593,17 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return {}
 
+    def complete_daily_with_cards(self) -> dict:
+        """用任务卡快速完成日常任务（消耗任务卡）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.completeDailyWithCards "
+                "? window.__zzAssist.completeDailyWithCards() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def list_heroes(self) -> list:
         """读游戏里拥有的英雄列表（编号/名字/品质）。"""
         try:
