@@ -894,7 +894,6 @@ class AppUI:
             ("战斗参数", "combat"),
             ("抽卡", "gacha"),
             ("运行指令", "commands"),
-            ("全部展开", "all"),
         ]
         for index, (text, key) in enumerate(tool_items):
             ttk.Button(menu, text=text, command=lambda k=key: self._show_tool(k)).grid(
