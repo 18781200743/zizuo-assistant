@@ -14,6 +14,7 @@ import json
 import time
 import queue
 import sys
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -88,6 +89,26 @@ def load_mapping() -> Dict[str, Any]:
 
 def _today_text() -> str:
     return time.strftime("%Y-%m-%d")
+
+
+def apply_runtime_names(js: str, build: str) -> str:
+    """把运行时 JS 里写死的内部名换成当前版本的新名字。
+
+    游戏每次发版都会把内部名重新随机；映射表里只能放「服务/方法」，
+    而运行时还有一小撮直接写死的名字（日常任务服务、分享入口等），
+    这里按 mapping.builds[build].runtimeNames 做整词替换。
+    """
+    try:
+        table = (load_mapping().get("builds", {}).get(build) or {}).get("runtimeNames") or {}
+    except Exception:  # noqa: BLE001
+        return js
+    if not table:
+        return js
+    for old_name, new_name in sorted(table.items(), key=lambda kv: -len(kv[0])):
+        if not old_name or not new_name or old_name == new_name:
+            continue
+        js = re.sub(r"\b" + re.escape(old_name) + r"\b", new_name, js)
+    return js
 
 
 def _load_stats() -> Dict[str, Any]:
@@ -243,6 +264,17 @@ class AssistBridge:
         except RuntimeError:
             return 'fail:' + self.last_error
 
+        # 先看当前页面是哪个 build，把运行时里写死的内部名换成新名字
+        try:
+            build = str(self.eval_js(
+                "(()=>{try{for(const r of performance.getEntriesByType('resource')){"
+                "const m=/mainScripts\\/index\\.([0-9a-z]+)\\.js/i.exec(r.name);"
+                "if(m)return m[1];}}catch(e){}return '';})()"
+            ) or "")
+        except RuntimeError:
+            build = ""
+        runtime_js = apply_runtime_names(RUNTIME_JS, build)
+
         prefix = (
             "window.__zzAssistMapping = %s;\n"
             "window.__zzAssistStamp = %s;\n" % (mapping_json, json.dumps(stamp))
@@ -252,7 +284,7 @@ class AssistBridge:
         expression = (
             "(function(){try{"
             + prefix
-            + RUNTIME_JS
+            + runtime_js
             + ";return window.__zzAssist?'installed':'fail:运行时未注册';"
             "}catch(e){return 'fail:'+((e&&e.message)||e)}})()"
         )
