@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 121
+RUNTIME_VERSION = 122
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 121
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 121;
+  const VERSION = 122;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -376,6 +376,26 @@ RUNTIME_JS = r"""
     if (state.red.enabled) {
       state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
     }
+  }
+
+  /** 工具那边落盘的今日统计灌回页面：页面刷新、换运行时后数字不会退回 0。 */
+  function seedRedDay(data) {
+    try {
+      if (!data || typeof data !== 'object') return 0;
+      const day = String(data.date || '');
+      if (day && day !== today()) return 0;
+      const count = Math.max(0, Number(data.count) || 0);
+      const green = Math.max(0, Number(data.green) || 0);
+      rollRedDay();
+      let changed = 0;
+      if (count > state.red.today) { state.red.today = count; changed = 1; }
+      if (green > state.red.green) { state.red.green = green; changed = 1; }
+      if (changed) saveRedDay();
+      if (state.red.enabled) {
+        state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+      }
+      return changed;
+    } catch (_) { return 0; }
   }
 
   function saveRedDay() {
@@ -4540,6 +4560,7 @@ RUNTIME_JS = r"""
     clickTeleportTrack,
     set,
     diagnose,
+    seedDaily: seedRedDay,
     // 外部（Python 通过 CDP）直接推进红包扫描：页面定时器被浏览器节流时靠这个兜底。
     // CDP 的 Runtime.evaluate 不走页面定时器，窗口最小化也照常执行。
     __redTick: () => {

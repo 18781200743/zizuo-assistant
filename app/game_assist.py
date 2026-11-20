@@ -329,6 +329,7 @@ class GameAssist:
         self._queue: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
         self._desired: Dict[str, Any] = {}
         self._last_message = ""
+        self._last_red_log: Optional[Tuple[int, int]] = None
         self._status = ""
         self._stats = _load_stats()
         # 全灭确认框：页面只给坐标，点击由这里用 CDP 真鼠标发（页面内假事件游戏不认）
@@ -879,9 +880,39 @@ class GameAssist:
         except Exception as exc:  # noqa: BLE001
             self._status_log("点确认框失败：%s" % exc)
 
+    def _seed_daily(self) -> None:
+        """把 assist_stats.json 里今天的红包统计灌回页面（页面刷新后数字不会退回 0）。"""
+        day = _today_text()
+        count = self._stats.get("redCount") or {}
+        green = self._stats.get("redGreen") or {}
+        if str(count.get("date") or "") != day and str(green.get("date") or "") != day:
+            return
+        payload = {
+            "date": day,
+            "count": int(count.get("value") or 0) if str(count.get("date") or "") == day else 0,
+            "green": int(green.get("value") or 0) if str(green.get("date") or "") == day else 0,
+        }
+        try:
+            self.bridge.eval_js(
+                "window.__zzAssist && window.__zzAssist.seedDaily"
+                " ? window.__zzAssist.seedDaily(%s) : 0" % json.dumps(payload)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def _persist(self, snap: Dict[str, Any]) -> None:
         red = snap.get("redPacket") or {}
         gold = snap.get("gold") or {}
+        try:
+            count = max(0, int(red.get("today") or 0))
+            green = max(0, int(red.get("green") or 0))
+        except (TypeError, ValueError):
+            count, green = 0, 0
+        # 第一次拿到快照不记日志（避免把页面里已有的数当成本次抢到）；之后只要数变了就记一行
+        if self._last_red_log is not None and (count, green) != self._last_red_log:
+            if count > self._last_red_log[0] or green > self._last_red_log[1]:
+                self.log(f"抢到红包：今日 {count} 个 · {green} 绿钻")
+        self._last_red_log = (count, green)
         before = json.dumps(self._stats, sort_keys=True)
         _merge_daily(self._stats, "redCount", str(red.get("date") or ""), red.get("today"))
         _merge_daily(self._stats, "redGreen", str(red.get("date") or ""), red.get("green"))
@@ -948,6 +979,7 @@ class GameAssist:
             return
         if installed == "installed":
             self._status_log("辅助：已连上游戏页，运行时注入完成")
+            self._seed_daily()
             self._reapply()
         try:
             snap = self.bridge.snapshot()
