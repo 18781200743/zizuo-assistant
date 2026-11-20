@@ -895,16 +895,14 @@ class AppUI:
         tk.Entry(coord_row, textvariable=self.assist_coord_y_var, width=9, justify="center").pack(side=tk.LEFT, padx=(8, 2))
         ttk.Label(coord_row, text="Y").pack(side=tk.LEFT)
         ttk.Button(coord_row, text="读当前", width=8, command=self.fill_current_coord).pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Button(coord_row, text="取屏幕点", width=9, command=self.pick_coord).pack(side=tk.LEFT, padx=2)
         ttk.Button(coord_row, text="飞过去", width=8, command=self.fly_to_coord).pack(side=tk.LEFT, padx=2)
-        self.assist_coord_status = tk.StringVar(value="读当前=角色坐标；取屏幕点=点画面取；飞过去=按坐标瞬移")
+        self.assist_coord_status = tk.StringVar(value="读当前=填角色坐标；飞过去=按 X/Y 瞬移（和闪现同一个功能）")
         ttk.Label(coord_row, textvariable=self.assist_coord_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
         daily_row = ttk.Frame(tools)
         daily_row.grid(row=5, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
         ttk.Button(daily_row, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
-        ttk.Button(daily_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
         ttk.Label(daily_row, textvariable=self.assist_daily_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
