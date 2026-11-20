@@ -1453,7 +1453,7 @@ class AppUI:
 
     def _auto_open_game_window(self) -> None:
         """启动时打开游戏：默认直接开内置窗口（系统浏览器已关闭）。"""
-        if not normalize_assist(self.config.get("assist")).get("auto_open_window", True):
+        if not normalize_assist(self.config.get("assist")).get("auto_open_window", False):
             return
         if self._game_proc is not None and self._game_proc.poll() is None:
             return

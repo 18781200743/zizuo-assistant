@@ -17,7 +17,7 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     "mob_enabled": False,
     "boss_enabled": False,
     # 界面启动时没有游戏窗就自动开一个（关掉后仍可手动点「打开游戏窗口」）
-    "auto_open_window": True,
+    "auto_open_window": False,
     # 游戏窗 CDP 调试端口，与 game_window 里的 --remote-debugging-port 保持一致
     "cdp_port": 9229,
     # 战斗参数（参考工具同款，默认关闭）：
