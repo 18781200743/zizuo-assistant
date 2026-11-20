@@ -650,10 +650,11 @@ class AppUI:
 
         # ---------- 变量 ----------
         self.gacha_cdp_targets_var = tk.StringVar(value=str(gacha.get("cdp_targets", "")))
-        self.gacha_cdp_red_var = tk.BooleanVar(value=bool(gacha.get("cdp_keep_red", False)))
+        self.gacha_cdp_red_var = tk.BooleanVar(value=False)
         self.gacha_cdp_max_var = tk.StringVar(value=str(gacha.get("cdp_max_draws", 0)))
         self.gacha_cdp_delay_var = tk.StringVar(value=str(gacha.get("cdp_delay_ms", 1200)))
-        self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
+        # 不刷新候选池、红不算目标（界面上不再提供开关）
+        self.gacha_cdp_refresh_var = tk.BooleanVar(value=False)
         self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
         # 固定「有目标就用最大倍率抽」「抽中也放弃，一直抽」
         self.gacha_cdp_maxbet_var = tk.BooleanVar(value=True)
@@ -699,19 +700,8 @@ class AppUI:
             highlightthickness=1, insertbackground="#111827",
         ).pack(side=tk.LEFT, padx=(6, 4), ipady=3)
         tk.Label(row_a, text="0 为不花", bg=card_bg, fg=sub).pack(side=tk.LEFT)
+        row_a.pack_configure(pady=(10, 10))
 
-        row_b = tk.Frame(cfg_card, bg=card_bg)
-        row_b.pack(fill=tk.X, padx=8, pady=(0, 8))
-        tk.Checkbutton(
-            row_b, text="先刷候选池（出目标再抽）", variable=self.gacha_cdp_refresh_var,
-            bg=card_bg, fg="#374151", activebackground=card_bg, selectcolor="#ffffff",
-            bd=0, highlightthickness=0, font=("Microsoft YaHei UI", 9),
-        ).pack(side=tk.LEFT)
-        tk.Checkbutton(
-            row_b, text="红也算目标（品级6+）", variable=self.gacha_cdp_red_var,
-            bg=card_bg, fg="#374151", activebackground=card_bg, selectcolor="#ffffff",
-            bd=0, highlightthickness=0, font=("Microsoft YaHei UI", 9),
-        ).pack(side=tk.LEFT, padx=(12, 0))
 
         # ---------- 统计卡 ----------
         stat_card = tk.Frame(parent, bg=card_bg, highlightbackground=line, highlightthickness=1)
