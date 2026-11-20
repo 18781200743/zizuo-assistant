@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 122
+RUNTIME_VERSION = 126
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 122
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 122;
+  const VERSION = 126;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -191,7 +191,9 @@ RUNTIME_JS = r"""
   }
 
   function mapping() {
-    const builds = (MAPPING && MAPPING.builds) || {};
+    // 优先读页面上的最新映射：工具更新映射后不用重装运行时就能生效
+    const live = window.__zzAssistMapping;
+    const builds = ((live && live.builds) || (MAPPING && MAPPING.builds) || {});
     if (state.build && builds[state.build]) return builds[state.build];
     return null;
   }
@@ -957,7 +959,7 @@ RUNTIME_JS = r"""
     const kind = state.map.pendingKind;
     const label = kind === 'boss' ? 'BOSS' : '小怪';
 
-    return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
+    return Promise.resolve(reloadByTeleport(world, cfg, mapId)).then(result => {
       if (result !== true) {
         // 游戏没开始切图（多数是刚切过图的冷却）：退避重试，别 5 秒一次硬刷
         state.map.entering = false;
@@ -2331,9 +2333,10 @@ RUNTIME_JS = r"""
         if (finished) return;
         try {
           const st = holder[cfg.state];
-          if (st && st.MAOP === true) sawLoading = true;
+          if (st && cfg.loading && st[cfg.loading] === true) sawLoading = true;
         } catch (_) { /* ignore */ }
-        if (sawLoading && now() - t0 > 1200 && !(holder[cfg.state] || {}).MAOP) finish(true);
+        if (sawLoading && now() - t0 > 1200
+          && cfg.loading && !(holder[cfg.state] || {})[cfg.loading]) finish(true);
         if (now() - t0 > 20000) finish(sawLoading);
         setTimeout(check, 150);
       };
@@ -2821,7 +2824,7 @@ RUNTIME_JS = r"""
       const st = holder && mapCfg.state ? holder[mapCfg.state] : null;
       const mapId = st && mapCfg.mapId ? st[mapCfg.mapId] : null;
       if (!mapId) return Promise.resolve(false);
-      return fastEnterMap(holder, mapCfg, mapId);
+      return reloadByTeleport(holder, mapCfg, mapId);
     } catch (_) {
       return Promise.resolve(false);
     }
