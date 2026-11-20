@@ -16,6 +16,7 @@
   var lastConfirm = 0;
   var build = "";
   var injectTries = 0;
+  var floatView = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -47,9 +48,12 @@
 
   function setStatus(text, kind) {
     var el = $("status");
-    if (!el) return;
-    el.className = "status" + (kind ? " " + kind : "");
-    el.textContent = text;
+    if (el) {
+      el.className = "status" + (kind ? " " + kind : "");
+      el.textContent = text;
+    }
+    var home = $("homeStatus");
+    if (home) home.textContent = text;
   }
 
   function setInfo(text) {
@@ -70,12 +74,58 @@
       setTimeout(inject, 2000);
     }
     game.show();
+    showFloat();
     $("homeState").textContent = "已打开";
     setStatus("正在连接游戏…");
   }
 
+  function ensureFloat() {
+    if (floatView) return floatView;
+    try {
+      floatView = plus.webview.create("float.html", "zz_float", {
+        top: "96px", right: "8px", width: "50px", height: "50px",
+        background: "transparent", zindex: 999, bounce: "none", scalable: false
+      });
+    } catch (e) {
+      floatView = null;
+    }
+    return floatView;
+  }
+
+  function showFloat() {
+    var f = ensureFloat();
+    if (f) {
+      try { f.show(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function hideFloat() {
+    if (floatView) {
+      try { floatView.hide(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  // 游戏里点悬浮球 → 弹出辅助面板
+  window.zzOpenAssist = function () {
+    try { plus.webview.getLaunchWebview().show(); } catch (e) { /* ignore */ }
+    hideFloat();
+    showPage("pageFunc");
+  };
+
+  // 面板里的「返回」→ 回到游戏
+  function backToGame() {
+    if (game) {
+      try { game.show(); } catch (e) { /* ignore */ }
+      try { plus.webview.getLaunchWebview().hide(); } catch (e) { /* ignore */ }
+      showFloat();
+      return true;
+    }
+    return false;
+  }
+
   function backToApp() {
     if (game) game.hide();
+    hideFloat();
   }
 
   // ---------- 注入 + 轮询 ----------
@@ -344,7 +394,10 @@
   function bind() {
     $("btnOpen").onclick = function () { openGame(); };
     $("btnFunc").onclick = function () { backToApp(); showPage("pageFunc"); };
-    $("btnBackHome").onclick = function () { showPage("pageHome"); };
+    $("btnBackHome").onclick = function () {
+      if (backToGame()) return;
+      showPage("pageHome");
+    };
     $("fRed").onclick = function () { toggle("redPacket"); };
     $("fRevive").onclick = function () { toggle("revive"); };
     $("fMob").onclick = function () { toggle("mob"); };
@@ -356,7 +409,7 @@
 
     plus.key.addEventListener("backbutton", function () {
       if ($("list").classList.contains("active")) { showPage("pageFunc"); return; }
-      if (game && game.isVisible && game.isVisible()) { backToApp(); showPage("pageFunc"); return; }
+      if (backToGame()) return;
       if ($("pageFunc").classList.contains("active")) { showPage("pageHome"); return; }
       plus.runtime.quit();
     });

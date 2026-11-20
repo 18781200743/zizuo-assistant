@@ -3,100 +3,228 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>紫作助手</title>
+  <title>百炼英雄 · 助手</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin: 0; padding: 0; height: 100%; background: #f4f5f7; color: #1c2430;
-      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    :root {
+      --card: rgba(255,255,255,.92);
+      --card-line: rgba(255,255,255,.55);
+      --txt: #1f2937;
+      --sub: #4b5768;
+      --shadow: 0 8px 24px rgba(8, 12, 28, .35);
+    }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #0b1020; color: #e6ebf5;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      -webkit-user-select: none; user-select: none;
+    }
     body { padding-top: env(safe-area-inset-top); }
-    .page { display: none; min-height: 100%; padding: 18px 16px 28px; }
+    body.night {
+      background: #0b1020 url("img/home_bg.jpg") no-repeat center top / cover fixed;
+    }
+    body.day { background: #ffffff; color: #1f2937; }
+
+    .page { display: none; min-height: 100vh; padding: 20px 16px 34px; }
     .page.active { display: block; }
 
-    /* 首页 */
-    .home-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 2px 22px; }
-    .home-title { font-size: 28px; font-weight: 700; letter-spacing: 1px; }
-    .home-sub { font-size: 13px; color: #7a8699; margin-top: -14px; margin-bottom: 22px; }
-    .card { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-    .account { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .account .name { font-weight: 600; font-size: 16px; }
-    .account .tag { font-size: 12px; color: #14a06a; background: #e8f7ef; padding: 3px 8px; border-radius: 20px; }
-    .btns { display: flex; gap: 10px; margin-top: 14px; }
-    .btn { flex: 1; border: 0; border-radius: 12px; padding: 14px 10px; font-size: 16px;
-      background: #eef1f6; color: #1c2430; font-weight: 600; }
-    .btn.primary { background: #14a06a; color: #fff; }
-    .btn.dark { background: #1f2836; color: #fff; }
-    .hint { margin-top: 16px; font-size: 13px; color: #8b97a8; line-height: 1.7; }
+    /* ---------- 首页 ---------- */
+    .home-head { display: flex; align-items: flex-start; justify-content: space-between; margin: 4px 2px 0; }
+    .home-title { font-size: 27px; font-weight: 800; letter-spacing: 1px; color: #fff; }
+    body.day .home-title { color: #16213a; }
+    .home-sub { font-size: 13px; color: #dbe3f5; margin: 6px 2px 18px; }
+    body.day .home-sub { color: #4b5768; }
 
-    /* 功能页 */
-    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .nav .back { border: 0; background: #fff; border-radius: 10px; padding: 8px 12px; font-size: 15px; }
-    .nav .title { font-size: 18px; font-weight: 700; }
-    .status { font-size: 12px; color: #7a8699; margin: 4px 2px 14px; line-height: 1.6; }
-    .status.ok { color: #15803d; }
-    .status.bad { color: #c2410c; }
+    .theme-btn {
+      border: 1px solid rgba(160,200,255,.45); background: rgba(20,28,52,.55);
+      color: #dbe6ff; border-radius: 10px; padding: 8px 12px; font-size: 13px;
+    }
+    body.day .theme-btn { background: #eef2f8; border-color: #c9d3e4; color: #33405a; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--card-line);
+      border-radius: 16px; padding: 16px; box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+    body.day .card { background: #ffffff; border-color: #dfe6f2; box-shadow: 0 6px 18px rgba(30,50,90,.10); }
+
+    .account .name { font-weight: 700; font-size: 16px; color: #1f2937; }
+    .account .tag {
+      display: inline-block; margin-top: 6px; font-size: 12px; color: #15803d;
+      background: #e8f7ef; padding: 3px 10px; border-radius: 20px;
+    }
+    .status-line { margin-top: 10px; font-size: 13px; color: #4b5768; line-height: 1.6; }
+
+    .btns { display: flex; gap: 10px; margin-top: 16px; }
+    .btn {
+      flex: 1; border: 0; border-radius: 14px; padding: 14px 10px; font-size: 16px;
+      font-weight: 700; background: #eef2f9; color: #1f2937;
+    }
+    .btn.primary { background: linear-gradient(180deg, #4a9df0, #2f7fe8); color: #fff;
+      box-shadow: 0 6px 16px rgba(47,127,232,.45); }
+    .btn.dark { background: #e9eef8; color: #33405a; border: 1px solid #cfd9ea; }
+    body.night .btn.dark { background: rgba(255,255,255,.82); color: #33405a; }
+
+    /* 辅助工具入口（六边形） */
+    .hero-wrap { margin: 26px 0 22px; display: flex; justify-content: center; }
+    .hero-wrap { position: relative; }
+    .hero-btn {
+      position: relative; width: 94%; max-width: 420px; height: 68px; border: 0; padding: 2px;
+      background: linear-gradient(180deg, #bdf8ff, #23c3da);
+      clip-path: polygon(30px 0, calc(100% - 30px) 0, 100% 50%, calc(100% - 30px) 100%, 30px 100%, 0 50%);
+      filter: drop-shadow(0 0 14px rgba(60,220,255,.55));
+    }
+    .hero-btn span {
+      display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+      color: #fff; font-size: 21px; font-weight: 800; letter-spacing: 6px;
+      background: linear-gradient(180deg, #16525f, #0a2f3a);
+      clip-path: polygon(29px 0, calc(100% - 29px) 0, 100% 50%, calc(100% - 29px) 100%, 29px 100%, 0 50%);
+      text-shadow: 0 0 10px rgba(120,240,255,.55);
+    }
+    .hero-btn::after {
+      content: ""; position: absolute; left: 8%; right: 8%; bottom: -12px; height: 14px;
+      background: radial-gradient(50% 100% at 50% 0%, rgba(140,245,255,.8), transparent 70%);
+      filter: blur(3px);
+    }
+
+    .hint-card { margin-top: 18px; background: rgba(18,26,48,.72); border: 1px solid rgba(90,120,180,.35);
+      border-radius: 16px; padding: 16px; color: #dbe4f5; font-size: 14px; line-height: 1.9; }
+    body.day .hint-card { background: #ffffff; border-color: #dfe6f2; color: #374151; }
+    .hint-card b { display: block; margin-bottom: 8px; color: #fff; }
+    body.day .hint-card b { color: #16213a; }
+
+    .tip { position: fixed; left: 0; right: 0; bottom: 16px; text-align: center;
+      font-size: 12px; color: #f97316; }
+
+    /* ---------- 功能页 ---------- */
+    body.func.night { background: #0b1020 url("img/assist_bg.jpg") no-repeat center top / cover fixed; }
+    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .nav .back {
+      border: 1px solid #9a8fe0; background: rgba(20,18,40,.6); color: #e8e3ff;
+      border-radius: 10px; padding: 8px 14px; font-size: 14px;
+    }
+    body.day .nav .back { background: #fff; border-color: #c9d3e4; color: #33405a; }
+    .nav .title { font-size: 20px; font-weight: 800; color: #fff; }
+    body.day .nav .title { color: #16213a; }
+    .status { font-size: 13px; color: #e9e5ff; margin: 2px 2px 14px; line-height: 1.6; }
+    body.day .status { color: #33405a; }
+    .status.ok { color: #4ade80; }
+    .status.bad { color: #fca5a5; }
+    body.day .status.ok { color: #15803d; }
+    body.day .status.bad { color: #b91c1c; }
+
+    .legend { display: flex; align-items: center; gap: 6px; margin: 0 2px 12px; font-size: 13px; }
+    .legend .lab, .legend .lab2 { color: #c9c2ea; }
+    body.day .legend .lab, body.day .legend .lab2 { color: #5b6478; }
+    .legend b { padding: 2px 9px; border-radius: 6px; background: rgba(20,18,40,.6); font-size: 13px; }
+    body.day .legend b { background: #eef2f8; }
+    .legend .g { color: #4ade80; }
+    .legend .y { color: #facc15; }
+    .legend .r { color: #f87171; }
+    body.day .legend .g { color: #15803d; }
+    body.day .legend .y { color: #b45309; }
+    body.day .legend .r { color: #b91c1c; }
+    .legend i { font-style: normal; color: #8b84ad; }
+
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .grid .btn { padding: 18px 10px; font-size: 16px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-    .grid .btn.on { background: #14a06a; color: #fff; }
-    .grid .btn.warn { background: #fff7ed; color: #b45309; }
+    .grid .btn {
+      padding: 20px 10px; font-size: 16px; color: #fff; border: 1px solid rgba(90,230,255,.75);
+      background: linear-gradient(180deg, rgba(24,78,92,.95), rgba(10,44,54,.95));
+      box-shadow: 0 0 14px rgba(50,200,230,.35), inset 0 0 0 1px rgba(160,245,255,.25);
+    }
+    .grid .btn.warn {
+      border-color: rgba(255,200,130,.85);
+      background: linear-gradient(180deg, #f0952f, #c96418);
+      box-shadow: 0 0 14px rgba(250,170,80,.35);
+    }
+    .grid .btn.danger {
+      border-color: rgba(255,150,170,.85);
+      background: linear-gradient(180deg, #93263a, #6a1826);
+      box-shadow: 0 0 14px rgba(230,90,120,.30);
+    }
+    .grid .btn.on { box-shadow: 0 0 20px rgba(90,240,255,.85); border-color: #b6f7ff; }
     .grid .btn.full { grid-column: span 2; }
-    .info { margin-top: 14px; padding: 12px; background: #fff; border-radius: 12px;
-      font-size: 13px; color: #5b6779; line-height: 1.7; min-height: 44px; }
 
-    /* 怪物列表 */
-    #list { display: none; }
-    #list .item { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 8px; }
-    #list .item.boss { border-left: 4px solid #f59e0b; }
-    #list .name { font-size: 14px; font-weight: 600; max-width: 55%; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; }
-    #list .meta { font-size: 12px; color: #8b97a8; }
-    #list .go { border: 0; border-radius: 10px; padding: 8px 14px; background: #14a06a; color: #fff; }
+    .info {
+      margin-top: 14px; padding: 14px; border-radius: 14px; font-size: 13px; line-height: 1.7;
+      background: rgba(12,20,36,.78); border: 1px solid rgba(90,120,180,.35); color: #dbe4f5;
+      min-height: 44px;
+    }
+    body.day .info { background: #fff; border-color: #dfe6f2; color: #4b5768; }
 
-    .tip { position: fixed; left: 0; right: 0; bottom: 24px; text-align: center; font-size: 12px; color: #9aa5b5; }
+    /* ---------- 怪物列表 ---------- */
+    #listItems .item {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: rgba(255,255,255,.94); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+      box-shadow: 0 4px 14px rgba(8,12,28,.25);
+    }
+    body.day #listItems .item { background: #fff; border: 1px solid #e3e9f3; }
+    #listItems .item.boss { border-left: 4px solid #f59e0b; }
+    #listItems .name { font-size: 14px; font-weight: 700; max-width: 55%; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; color: #1f2937; }
+    #listItems .meta { font-size: 12px; color: #6b7280; }
+    #listItems .go { border: 0; border-radius: 10px; padding: 8px 14px;
+      background: linear-gradient(180deg, #4a9df0, #2f7fe8); color: #fff; font-weight: 700; }
   </style>
 </head>
-<body>
+<body class="night">
+
   <!-- 首页 -->
   <div class="page active" id="pageHome">
     <div class="home-head">
-      <div class="home-title">紫作助手</div>
+      <div>
+        <div class="home-title">百炼英雄 · 助手</div>
+        <div class="home-sub">百炼英雄 · 安卓版</div>
+      </div>
+      <button class="theme-btn" id="btnTheme">☾ 夜间</button>
     </div>
-    <div class="home-sub">百炼英雄 · 安卓版</div>
 
     <div class="card">
       <div class="account">
-        <div>
-          <div class="name">本机游戏</div>
-          <div class="tag" id="homeState">未打开</div>
-        </div>
+        <div class="name">本机游戏</div>
+        <span class="tag" id="homeState">未打开</span>
+        <div class="status-line" id="homeStatus">未打开（点下面「打开游戏」）</div>
       </div>
       <div class="btns">
-        <button class="btn primary" id="btnOpen">▶ 打开游戏</button>
+        <button class="btn primary" id="btnOpen">打开游戏</button>
         <button class="btn dark" id="btnFunc">功能</button>
       </div>
     </div>
 
-    <div class="hint">
-      打开游戏 → 用验证码登录 → 进入主界面后自动连接。<br>
-      功能里是红包、复活、刷新、闪现等；按手机返回键回到这里。
+    <div class="hero-wrap">
+      <button class="hero-btn" id="btnHero"><span>辅助工具</span></button>
     </div>
+
+    <div class="hint-card">
+      <b>使用说明</b>
+      1. 打开游戏，用验证码登录<br>
+      2. 进入主界面后会自动连接<br>
+      3. 点「辅助工具」开启红包 / 复活 / 刷新 / 闪现
+    </div>
+
+    <div class="tip">说明：使用脚本，封号自己负责</div>
   </div>
 
   <!-- 功能页 -->
   <div class="page" id="pageFunc">
     <div class="nav">
       <button class="back" id="btnBackHome">‹ 返回</button>
-      <div class="title">功能</div>
-      <span style="width:56px"></span>
+      <div class="title">辅助工具</div>
+      <span style="width:72px"></span>
     </div>
     <div class="status" id="status">未连接</div>
+    <div class="legend">
+      <span class="lab">安全等级</span>
+      <b class="g">绿</b><i>→</i><b class="y">黄</b><i>→</i><b class="r">红</b>
+      <span class="lab2">红色最危险</span>
+    </div>
     <div class="grid">
       <button class="btn" id="fRed">红包</button>
-      <button class="btn" id="fRevive">复活</button>
+      <button class="btn warn" id="fRevive">复活</button>
       <button class="btn" id="fMob">小怪刷新</button>
-      <button class="btn" id="fBoss">BOSS刷新</button>
-      <button class="btn" id="fMonsters">怪物 / 闪现</button>
-      <button class="btn" id="fClear">清除卡图</button>
+      <button class="btn" id="fBoss">BOSS 刷新</button>
+      <button class="btn warn" id="fMonsters">怪物 / 闪现</button>
+      <button class="btn danger" id="fClear">清除卡图</button>
     </div>
     <div class="info" id="info">—</div>
   </div>
@@ -115,5 +243,42 @@
   <script src="js/renames.js"></script>
   <script src="js/runtime.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    (function () {
+      var KEY = "zz_assist_theme";
+      function apply(theme) {
+        var night = theme !== "day";
+        document.body.classList.toggle("night", night);
+        document.body.classList.toggle("day", !night);
+        var btn = document.getElementById("btnTheme");
+        if (btn) btn.textContent = night ? "☾ 夜间" : "☀ 白天";
+      }
+      var saved = localStorage.getItem(KEY) || "night";
+      apply(saved);
+      var themeBtn = document.getElementById("btnTheme");
+      if (themeBtn) {
+        themeBtn.onclick = function () {
+          var next = document.body.classList.contains("night") ? "day" : "night";
+          localStorage.setItem(KEY, next);
+          apply(next);
+        };
+      }
+      var hero = document.getElementById("btnHero");
+      if (hero) {
+        hero.onclick = function () {
+          var fn = document.getElementById("btnFunc");
+          if (fn) fn.click();
+        };
+      }
+      // 功能页也套一层主题
+      var funcPage = document.getElementById("pageFunc");
+      if (funcPage) {
+        var obs = new MutationObserver(function () {
+          document.body.classList.toggle("func", funcPage.classList.contains("active"));
+        });
+        obs.observe(funcPage, { attributes: true, attributeFilter: ["class"] });
+      }
+    })();
+  </script>
 </body>
 </html>

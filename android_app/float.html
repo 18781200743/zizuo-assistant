@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+    .wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    .fab {
+      width: 100%; height: 100%; border-radius: 50%;
+      border: 2px solid rgba(140, 240, 255, .9);
+      background: radial-gradient(circle at 40% 30%, rgba(30, 110, 130, .92), rgba(8, 38, 50, .92));
+      color: #e6fbff; font: 700 15px/1 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      box-shadow: 0 0 14px rgba(60, 220, 255, .65);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .fab:active { transform: scale(.94); }
+  </style>
+</head>
+<body>
+  <div class="wrap"><button class="fab" id="fab">助手</button></div>
+  <script>
+    document.getElementById("fab").addEventListener("click", function () {
+      try {
+        var main = plus.webview.getLaunchWebview();
+        if (main) {
+          main.evalJS("window.zzOpenAssist && window.zzOpenAssist()");
+        }
+      } catch (e) { /* ignore */ }
+      try { plus.webview.currentWebview().hide(); } catch (e) { /* ignore */ }
+    }, false);
+  </script>
+</body>
+</html>
