@@ -917,6 +917,12 @@ class AppUI:
             return
         try:
             canvas.itemconfigure(item, text=self.home_status_var.get())
+            bbox = canvas.bbox(item)
+            bottom = bbox[3] if bbox else 0
+            # 状态文字行数变了（整个卡片要跟着变高）才重排，避免每次都重画
+            if abs(bottom - getattr(self, "_home_status_bottom", 0)) > 2:
+                self._home_status_bottom = bottom
+                self._draw_home()
         except tk.TclError:
             pass
 
@@ -981,31 +987,31 @@ class AppUI:
         )
         bbox = c.bbox(self._home_status_item)
         text_bottom = bbox[3] if bbox else y0 + 64
-        by0 = max(y0 + 100, text_bottom + 26)
+        self._home_status_bottom = text_bottom
+        by0 = max(y0 + 84, text_bottom + 26)
         by1 = by0 + 42
         card1_bottom = by1 + 16
 
-        # 打开游戏窗口（蓝色发光）
-        bx0, bx1 = x0 + 18, (x0 + x1) // 2 - 6
-        for grow, color, width, fill in (
-            (9, "#123c6b", 10, ""),
-            (5, "#2a6fbf", 7, ""),
-            (0, "", 0, "#2f7fe8"),
-        ):
-            c.create_polygon(
-                self._round_points(bx0 - grow, by0 - grow, bx1 + grow, by1 + grow, 20),
-                fill=fill, outline=color or "#63b3ff", width=width or 2,
-                tags=("home_open",),
-            )
+        # 两个按钮：留够间距，纯色不带发光边
+        inner_w = (x1 - x0) - 36
+        gap = 30
+        btn_w = (inner_w - gap) // 2
+        bx0, bx1 = x0 + 18, x0 + 18 + btn_w
+        cx0, cx1 = bx1 + gap, bx1 + gap + btn_w
+
+        # 打开游戏窗口（纯色）
+        c.create_polygon(
+            self._round_points(bx0, by0, bx1, by1, 18),
+            fill="#2f7fe8", outline="", tags=("home_open",),
+        )
         c.create_text(
             (bx0 + bx1) / 2, (by0 + by1) / 2, text="打开游戏窗口", fill="#ffffff",
             font=(ui_font, 10, "bold"), tags=("home_open",),
         )
 
         # 重新连接（描边）
-        cx0, cx1 = (x0 + x1) // 2 + 6, x1 - 18
         c.create_polygon(
-            self._round_points(cx0, by0, cx1, by1, 20),
+            self._round_points(cx0, by0, cx1, by1, 18),
             fill="#1b2a44", outline="#3a4c70", tags=("home_reconnect",),
         )
         c.create_text(
