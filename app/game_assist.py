@@ -604,8 +604,7 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return {}
 
-    def daily_task_list(self) -> list:
-        """读日常任务：编号/进度/目标/是否已领/目标地图坐标。"""
+    def _read_daily_tasks(self) -> list:
         js = r"""
 (function(){try{
   var mod=null;
@@ -616,7 +615,8 @@ class GameAssist:
   var out=[];
   for (var i=0;i<rows.length;i++){
     var t=rows[i]; if(!t) continue;
-    out.push({id:t.UHNB, progress:(t.GPIC&&t.GPIC.WZMG)||0, target:t.DHDO||t.RSHY||0,
+    out.push({id:t.UHNB, progress:(t.GPIC&&t.GPIC.WGZM)||(t.GPIC&&t.GPIC.EDRL)||0,
+      target:t.DHDO||t.RSHY||0, status:t.ROPG,
       claimed:!!t.KLBW, mapId:t.MIKP||0, x:t.KRXF||0, y:t.JRGO||0});
   }
   return JSON.stringify(out);
@@ -629,55 +629,24 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return []
 
-    def task_go(self, task_name: str) -> dict:
-        """任务面板里点指定任务的「前往」（面板刚打开时行还没渲染，重试几次）。"""
-        result: dict = {}
-        for _ in range(8):
-            try:
-                raw = self.bridge.eval_js(
-                    "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTaskGo "
-                    "? window.__zzAssist.clickTaskGo(%s) : null)" % json.dumps(task_name, ensure_ascii=False)
-                )
-                result = json.loads(raw or "null") or {}
-            except Exception:  # noqa: BLE001
-                result = {}
-            if result.get("ok"):
-                return result
-            time.sleep(0.4)
-        return result
-
-    def task_teleport_track(self) -> dict:
-        """点弹窗里的「传送并追踪」。"""
-        try:
-            raw = self.bridge.eval_js(
-                "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTeleportTrack "
-                "? window.__zzAssist.clickTeleportTrack() : null)"
-            )
-            return json.loads(raw or "null") or {}
-        except Exception:  # noqa: BLE001
-            return {}
-
-    def reload_map_now(self) -> bool:
-        """立刻重进当前地图（刷怪）。"""
+    def daily_task_list(self) -> list:
+        """读日常任务。任务数据要打开任务面板才会从服务器拉取，所以先尝试开面板。"""
+        tasks = self._read_daily_tasks()
+        if tasks:
+            return tasks
         try:
             self.bridge.eval_js(
                 "(function(){try{var a=window.__zzAssist;"
-                "if(a&&a.reloadMapNow){a.reloadMapNow();}return 'ok'}catch(e){return 'ERR'}})()"
+                "if(a&&a.openDailyTasks){a.openDailyTasks();}return 'ok'}catch(e){return 'ERR'}})()"
             )
-            return True
         except Exception:  # noqa: BLE001
-            return False
-
-    def share_game(self) -> dict:
-        """调游戏分享入口（分享任务用）。"""
-        try:
-            raw = self.bridge.eval_js(
-                "JSON.stringify(window.__zzAssist && window.__zzAssist.shareGame "
-                "? window.__zzAssist.shareGame() : null)"
-            )
-            return json.loads(raw or "null") or {}
-        except Exception:  # noqa: BLE001
-            return {}
+            return []
+        for _ in range(8):
+            time.sleep(0.4)
+            tasks = self._read_daily_tasks()
+            if tasks:
+                return tasks
+        return tasks
 
     def goto_task_point(self, map_id: int, x: int, y: int) -> str:
         """按任务给的目标点传送过去（游戏自己的 NMKO）。"""
