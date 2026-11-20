@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 93
+RUNTIME_VERSION = 94
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 93
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 93;
+  const VERSION = 94;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2000,17 +2000,11 @@ RUNTIME_JS = r"""
     }
     const mapCfg = mapConfig();
     const before = holder[mapCfg.core];
-    const until = now() + 4500;
-    const tick = () => {
-      // 只隐藏过场/落地特效，不再强改 MAOP 和调 ANIO()：
-      // 反复强改加载状态会把游戏的切图状态机搞乱，之后就再也切不了图（实测）。
-      try { hideLanding(); } catch (_) { /* ignore */ }
-      try { hideMapTransition(); } catch (_) { /* ignore */ }
-      if (now() < until) setTimeout(tick, 50);
-    };
     let raw = null;
     try { raw = holder[name](mapId); } catch (cause) { throw cause; }
-    tick();
+    // 注意：这里绝不能去隐藏过场节点（MapTransitionView/Transition）。
+    // 11-19 加的「压掉加载页动画」会把过场动画的完成回调掐掉，
+    // 地图进图 Promise 永远不 resolve，之后就再也切不了图（实测踩坑，已回退）。
     // 旧版说明：XIPH 返回 Promise，成功 resolve true，并且 VKXX.ZRRU 会换成新对象。
     // 两个信号谁先到都算成功；Promise 明确返回 false 才算失败，且等它结束再决定，避免重复调用。
     let promiseResult = null;
@@ -2027,7 +2021,6 @@ RUNTIME_JS = r"""
       const finish = value => {
         if (done) return;
         done = true;
-        if (value) setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
         resolve(value);
       };
       const check = () => {
