@@ -106,9 +106,14 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
     import os
 
     # 供助手通过 CDP 真实点击（解决系统模拟点击在 WebView2 上无效）
+    # 后三个参数关掉后台节流：窗口最小化/被遮住时 setTimeout 会被降到 1 秒一次，
+    # 抢红包就废了；关掉之后 60ms 的轮询在后台也能照跑。
     os.environ.setdefault(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        "--remote-debugging-port=9229 --remote-allow-origins=*",
+        "--remote-debugging-port=9229 --remote-allow-origins=*"
+        " --disable-background-timer-throttling"
+        " --disable-backgrounding-occluded-windows"
+        " --disable-renderer-backgrounding",
     )
 
     try:
@@ -211,6 +216,9 @@ def _launch_mac_chromium(
         f"--window-size={int(width)},{int(height)}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
         f"--user-agent={user_agent}",
     ]
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

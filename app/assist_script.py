@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 117
+RUNTIME_VERSION = 118
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 117
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 117;
+  const VERSION = 118;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -43,12 +43,16 @@ RUNTIME_JS = r"""
   if (previous && previous.version === VERSION) return;
   if (previous) {
     try { if (previous.__timer) clearInterval(previous.__timer); } catch (_) { /* ignore */ }
+    try { if (previous.__redTimer) clearInterval(previous.__redTimer); } catch (_) { /* ignore */ }
     try { if (typeof previous.stopAll === 'function') previous.stopAll(); } catch (_) { /* ignore */ }
     try { delete window.__zzAssist; } catch (_) { window.__zzAssist = undefined; }
   }
-  const TICK_MS = 250;        // 红包轮询间隔：聊天里的红包一出现就领
+  const TICK_MS = 250;        // 主循环间隔（地图/祈愿/复活等）
+  const RED_TICK_MS = 60;     // 红包专用高频轮询：尽量贴着 30~60ms 一帧
   const RETRY_MS = 3000;      // 解析失败的重试间隔
-  const CLAIM_GAP_MS = 150;   // 两次领取之间的最小间隔，避免瞬间刷请求
+  const CLAIM_GAP_MS = 50;    // 两次领取之间的最小间隔，避免瞬间刷请求
+  const RED_SCAN_MSG = 24;    // 每个频道只看最新的 24 条，红包都在最新
+  const RED_SEEN_MAX = 600;   // 已处理红包 id 的缓存上限，超出就清空重建
 
   const MAPPING = window.__zzAssistMapping || { builds: {} };
 
@@ -320,7 +324,9 @@ RUNTIME_JS = r"""
       try {
         groups.forEach(list => {
           if (!Array.isArray(list)) return;
-          for (let i = list.length - 1; i >= 0; i -= 1) {
+          // 只扫最新 RED_SCAN_MSG 条：红包一定在最新一端，老消息没必要每 60ms 过一遍
+          const start = Math.max(0, list.length - RED_SCAN_MSG);
+          for (let i = list.length - 1; i >= start; i -= 1) {
             const message = list[i];
             const detail = message && message[ctx.chatCfg.detail];
             const info = detail && detail[ctx.chatCfg.info];
@@ -373,9 +379,20 @@ RUNTIME_JS = r"""
     }
   }
 
+  function pruneRedSeen() {
+    const seen = state.red.seen;
+    const keys = Object.keys(seen);
+    if (keys.length <= RED_SEEN_MAX) return;
+    // 全清会重复问状态，但比重扫整个历史便宜；24 条窗口内重复次数很少
+    state.red.seen = Object.create(null);
+  }
+
   function tickRed() {
     if (!state.red.enabled || !state.ready) return;
     if (now() - state.red.lastAt < CLAIM_GAP_MS) return;
+    // 已经有几个请求在飞就别再堆，避免瞬间并发被服务端限流
+    if (state.red.pending >= 6) return;
+    pruneRedSeen();
     let list = [];
     try { list = packetSources(); } catch (_) { return; }
     state.red.available = list.length > 0;
@@ -3810,9 +3827,8 @@ RUNTIME_JS = r"""
 
   function tick() {
     probe();
-    if (state.ready) {
-      try { tickRed(); } catch (cause) { state.red.reason = '红包异常：' + msgOf(cause); }
-    }
+    // 红包由 RED_TICK_MS 的专用定时器跑，主循环不再重复调用（否则两套一起抢）
+
     // 祈愿不依赖红包服务是否可用，单独跑，互不影响。
     try { tickWish(); } catch (cause) { state.wish.reason = '祈愿异常：' + msgOf(cause); }
     // 地图同理：红包/祈愿都不可用时，打怪重进地图照样能跑。
@@ -4227,7 +4243,7 @@ RUNTIME_JS = r"""
         return { ok: false, message: state.error || '辅助未就绪' };
       }
       state.red.enabled = !!value;
-      state.red.reason = value ? '监控中：聊天里出现可领红包就自动领' : '已关闭';
+      state.red.reason = value ? '监控中：60ms 一轮，红包一进聊天就领' : '已关闭';
       return {
         ok: true,
         message: value ? '快速抢红包已开启（今日已领 ' + state.red.today + ' 个）' : '快速抢红包已关闭',
@@ -4449,8 +4465,14 @@ RUNTIME_JS = r"""
   state.timer = setInterval(() => {
     try { tick(); } catch (_) { /* 定时器里绝不抛出 */ }
   }, TICK_MS);
+  // 红包专用定时器：主循环 250ms 太慢，这里 60ms 转一圈，开启时才有开销
+  state.redTimer = setInterval(() => {
+    if (!state.red.enabled || !state.ready) return;
+    try { tickRed(); } catch (cause) { state.red.reason = '红包异常：' + msgOf(cause); }
+  }, RED_TICK_MS);
   // 留给下一次注入：新运行时先 clearInterval 掉旧定时器，不然两套一起跑
   window.__zzAssist.__timer = state.timer;
+  window.__zzAssist.__redTimer = state.redTimer;
 })();
 """
 
