@@ -844,38 +844,477 @@ class AppUI:
         # 兼容旧配置（名字过滤），没有输入框也不会报错
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
-        # ---------- 战斗参数 ----------
-        combat = ttk.LabelFrame(parent, text="战斗参数（改战斗数值，有风险，默认关）", padding=10)
-        combat.pack(fill=tk.X, pady=(0, 8))
-        combat.columnconfigure(4, weight=1)
-
-        ttk.Label(combat, text="英雄倍伤").grid(row=0, column=0, sticky=tk.W)
-        self.assist_damage_var = tk.StringVar(value=_seconds_text(assist.get("damage_value", 2)))
-        ttk.Entry(combat, textvariable=self.assist_damage_var, width=6, justify="center").grid(row=0, column=1, padx=(8, 2))
-        ttk.Label(combat, text="倍").grid(row=0, column=2, sticky=tk.W)
-        self.assist_damage_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("damage"))
-        self.assist_damage_btn.grid(row=0, column=3, padx=(14, 10))
-        self.assist_damage_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=560).grid(row=0, column=4, sticky=tk.W)
-
-        ttk.Label(combat, text="技能冷却").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
-        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
-        ttk.Label(combat, text="秒").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
-        self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("cooldown"))
-        self.assist_cooldown_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
-        self.assist_cooldown_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
-
+        # ---------- 战斗参数（已全部停用）----------
         ttk.Label(
             parent,
             text=(
-                "提示：倍伤 / 冷却会改动战斗数值，可能被判定异常（实测会弹「战斗数据与服务器不一致」）；"
-                "开着它们时不能开地图刷新。　「免伤」「视野」已移除：都会进服务端校验。"
+                "战斗参数（英雄倍伤 / 免伤 / 技能冷却 / 视野）已全部停用：\n"
+                "实测这些改动都会让客户端数据和服务端对不上，游戏会弹「战斗数据与服务器不一致」。\n"
+                "安全可用的功能：刷新怪物（带血量）、闪现、免费复活、地图刷新、开宝箱、采集、运行指令。"
             ),
             foreground="#c62828",
             wraplength=980,
-        ).pack(anchor=tk.W, pady=(2, 6))
+        ).pack(anchor=tk.W, pady=(2, 8))
+
+        if self.dev_mode:
+            top = ttk.Frame(self.root, padding=(8, 0, 8, 4))
+            top.pack(fill=tk.X)
+            ttk.Label(top, text="目标窗口标题").pack(side=tk.LEFT)
+            ttk.Entry(top, textvariable=self.window_var, width=16).pack(side=tk.LEFT, padx=4)
+
+            size_row = ttk.Frame(self.root, padding=(8, 0, 8, 4))
+            size_row.pack(fill=tk.X)
+            ttk.Label(size_row, text="游戏窗宽").pack(side=tk.LEFT)
+            ttk.Entry(size_row, textvariable=self.width_var, width=6).pack(
+                side=tk.LEFT, padx=4
+            )
+            ttk.Label(size_row, text="高").pack(side=tk.LEFT)
+            ttk.Entry(size_row, textvariable=self.height_var, width=6).pack(
+                side=tk.LEFT, padx=4
+            )
+            preset = ttk.Combobox(
+                size_row,
+                textvariable=self.preset_var,
+                values=list(SIZE_PRESETS.keys()),
+                width=14,
+                state="readonly",
+            )
+            preset.pack(side=tk.LEFT, padx=6)
+            preset.bind("<<ComboboxSelected>>", self._on_preset)
+            ttk.Button(size_row, text="打开游戏窗口", command=self.open_game_window).pack(
+                side=tk.LEFT, padx=4
+            )
+            if ENABLE_BROWSER_OPEN:
+                ttk.Button(size_row, text="系统浏览器", command=self.open_game_browser).pack(
+                    side=tk.LEFT, padx=2
+                )
+
+        self._content = ttk.Frame(self.root)
+        self._content.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        self._page_slots = ttk.Frame(self._content, padding=4)
+        self._page_gacha = ttk.Frame(self._content, padding=4)
+        self._page_assist = ttk.Frame(self._content, padding=4)
+        self._page_commands = ttk.Frame(self._content, padding=4)
+        self._scroll_canvases: Dict[str, tk.Canvas] = {}
+        # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
+        self._build_slots_tab(self._page_slots)
+        self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
+        self._build_assist_tab(self._make_scroll(self._page_assist, "assist"))
+        self._build_commands_tab(self._page_commands)
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self._page_gacha.pack(fill=tk.BOTH, expand=True)
+        self._switch_mode("gacha")
+
+        if self.dev_mode:
+            log_frame = ttk.LabelFrame(self.root, text="日志", padding=4)
+            log_frame.pack(fill=tk.BOTH, expand=False, padx=8, pady=(0, 8))
+            self.log = tk.Text(log_frame, height=10, wrap=tk.WORD)
+            self.log.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.log = None
+
+        self.root.after(200, self._tick_cursor)
+
+    def _switch_mode(self, mode: str) -> None:
+        self.mode_var.set(mode)
+        pages = {
+            "gacha": self._page_gacha,
+            "assist": self._page_assist,
+            "commands": self._page_commands,
+        }
+        buttons = {
+            "gacha": self._mode_btn_gacha,
+            "assist": self._mode_btn_assist,
+            "commands": self._mode_btn_commands,
+        }
+        for name, page in pages.items():
+            if name == mode:
+                page.pack(fill=tk.BOTH, expand=True)
+            else:
+                page.pack_forget()
+        c = getattr(self, "colors", {}) or {}
+        accent = c.get("accent", "#2563eb")
+        soft = c.get("soft", "#f3f4f6")
+        text = c.get("text", "#111827")
+        for name, button in buttons.items():
+            if name == mode:
+                button.configure(bg=accent, fg="#ffffff", activebackground=accent, activeforeground="#ffffff")
+            else:
+                button.configure(bg=soft, fg=text, activebackground="#e5e7eb", activeforeground=text)
+        if mode == "gacha":
+            pass
+        elif mode == "assist":
+            self._update_assist_labels()
+
+    def _build_slots_tab(self, parent: ttk.Frame) -> None:
+        mid = ttk.Panedwindow(parent, orient=tk.HORIZONTAL)
+        mid.pack(fill=tk.BOTH, expand=True)
+
+        left = ttk.Frame(mid, padding=4)
+        center = ttk.Frame(mid, padding=4)
+        right = ttk.Frame(mid, padding=4)
+        mid.add(left, weight=2)
+        mid.add(center, weight=4)
+        mid.add(right, weight=3)
+
+        ttk.Label(left, text="存档 1-10（选中后运行）").pack(anchor=tk.W)
+        self.slot_list = tk.Listbox(left, height=16, exportselection=False)
+        self.slot_list.pack(fill=tk.BOTH, expand=True, pady=4)
+        self.slot_list.bind("<<ListboxSelect>>", self._on_slot_select)
+
+        slot_btns = ttk.Frame(left)
+        slot_btns.pack(fill=tk.X)
+        ttk.Button(slot_btns, text="保存到选中存档", command=self.save_editor_to_slot).pack(
+            fill=tk.X, pady=2
+        )
+        ttk.Button(slot_btns, text="清空选中存档", command=self.clear_selected_slot).pack(
+            fill=tk.X, pady=2
+        )
+        ttk.Label(left, textvariable=self.slot_hint, wraplength=220).pack(
+            anchor=tk.W, pady=6
+        )
+
+        ttk.Label(center, text="脚本代码（录制后复制到任意存档）").pack(anchor=tk.W)
+        editor_wrap = ttk.Frame(center)
+        editor_wrap.pack(fill=tk.BOTH, expand=True, pady=4)
+        self.script_text = tk.Text(editor_wrap, wrap=tk.NONE, undo=True)
+        yscroll = ttk.Scrollbar(editor_wrap, orient=tk.VERTICAL, command=self.script_text.yview)
+        self.script_text.configure(yscrollcommand=yscroll.set)
+        self.script_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        code_btns = ttk.Frame(center)
+        code_btns.pack(fill=tk.X)
+        ttk.Button(code_btns, text="复制脚本", command=self.copy_script).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(code_btns, text="粘贴到编辑器", command=self.paste_script).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(code_btns, text="写入存档…", command=self.write_to_slot_dialog).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(code_btns, text="插入找图(传送)", command=self.insert_find_teleport).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        form = ttk.LabelFrame(right, text="操作", padding=8)
+        form.pack(fill=tk.X)
+        self.pos_var = tk.StringVar(value="鼠标: -")
+        ttk.Label(form, textvariable=self.pos_var).pack(anchor=tk.W)
+        ttk.Label(form, textvariable=self.record_status).pack(anchor=tk.W, pady=2)
+        ttk.Label(form, text="1. 打开游戏窗口").pack(anchor=tk.W, pady=1)
+        ttk.Label(form, text="2. 鼠标移到「传送」上 → 截取模板").pack(anchor=tk.W, pady=1)
+        ttk.Label(form, text="3. F6 录制点击；可用 找图点击(传送)").pack(anchor=tk.W, pady=1)
+        ttk.Label(form, text="4. 写入存档 → F8 单次运行（默认不循环）").pack(
+            anchor=tk.W, pady=1
+        )
+
+        self.loop_var = tk.BooleanVar(value=bool(self.config.get("loop_playback", False)))
+        ttk.Checkbutton(form, text="循环运行（会持续占鼠标，慎用）", variable=self.loop_var).pack(
+            anchor=tk.W, pady=4
+        )
+
+        run_box = ttk.Frame(right)
+        run_box.pack(fill=tk.X, pady=4)
+        ttk.Button(run_box, text="录制(F6)", command=self.toggle_record).pack(side=tk.LEFT, padx=2)
+        ttk.Button(run_box, text="运行选中(F8)", command=self.start_run).pack(side=tk.LEFT, padx=2)
+        ttk.Button(run_box, text="停止(F9)", command=self.stop_run).pack(side=tk.LEFT, padx=2)
+
+        run_box2 = ttk.Frame(right)
+        run_box2.pack(fill=tk.X, pady=4)
+        ttk.Button(run_box2, text="截取模板", command=self.capture_template).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(run_box2, text="保存配置", command=self.save_all).pack(side=tk.LEFT, padx=2)
+
+    def _make_scroll(self, parent: ttk.Frame, key: str) -> ttk.Frame:
+        """给页面套一个可滚动容器，返回里面真正放内容的 frame。"""
+        canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg="#ffffff")
+        sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._scroll_canvases[key] = canvas
+        return inner
+
+    def _on_mousewheel(self, event) -> None:
+        """滚轮滚动当前页面（抽卡页的英雄列表自己滚动，不拦）。"""
+        w = getattr(event, "widget", None)
+        if w is getattr(self, "_gacha_hero_canvas", None):
+            return
+        canvases = getattr(self, "_scroll_canvases", {}) or {}
+        if not canvases:
+            return
+        canvas = canvases.get(self.mode_var.get()) if hasattr(self, "mode_var") else None
+        if canvas is None:
+            canvas = next(iter(canvases.values()))
+        try:
+            canvas.yview_scroll(-1 if getattr(event, "delta", 0) > 0 else 1, "units")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _card(self, parent, title: str, pady=(0, 8)):
+        """统一的卡片容器。"""
+        card = ttk.LabelFrame(parent, text=title, padding=8)
+        card.pack(fill=tk.X, pady=pady)
+        card.columnconfigure(4, weight=1)
+        return card
+
+    def _build_gacha_tab(self, parent: ttk.Frame) -> None:
+        gacha = normalize_gacha(self.config.get("gacha"))
+        enabled = set(gacha.get("enabled_cards") or [])
+
+        # ---------- 目标英雄 ----------
+        hero_box = ttk.LabelFrame(parent, text="目标英雄（勾选要保留的，抽到其它就放弃）", padding=10)
+        hero_box.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        toolbar = ttk.Frame(hero_box)
+        toolbar.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(toolbar, text="全选", width=8, command=lambda: self._set_all_heroes(True)).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(toolbar, text="全不选", width=8, command=lambda: self._set_all_heroes(False)).pack(side=tk.LEFT, padx=4)
+        ttk.Button(toolbar, text="重载名单", width=10, command=self.reload_gacha_heroes).pack(side=tk.LEFT, padx=4)
+        self.gacha_hero_count = tk.StringVar(value="固定名单")
+        ttk.Label(toolbar, textvariable=self.gacha_hero_count, foreground="#555").pack(side=tk.LEFT, padx=12)
+        ttk.Label(
+            toolbar, text="选中的英雄会按最大倍率抽并保留", foreground="#0a7d2c"
+        ).pack(side=tk.RIGHT)
+
+        holder = ttk.Frame(hero_box)
+        holder.pack(fill=tk.BOTH, expand=True)
+        self._gacha_hero_canvas = tk.Canvas(holder, height=172, highlightthickness=0, bg="#ffffff")
+        hero_sb = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=self._gacha_hero_canvas.yview)
+        self._gacha_hero_inner = ttk.Frame(self._gacha_hero_canvas)
+        self._gacha_hero_inner.bind(
+            "<Configure>",
+            lambda _e: self._gacha_hero_canvas.configure(
+                scrollregion=self._gacha_hero_canvas.bbox("all")
+            ),
+        )
+        self._gacha_hero_canvas.create_window((0, 0), window=self._gacha_hero_inner, anchor="nw")
+        self._gacha_hero_canvas.configure(yscrollcommand=hero_sb.set)
+        self._gacha_hero_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hero_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._gacha_hero_vars: Dict[int, tk.BooleanVar] = {}
+        self._gacha_hero_counter_vars: Dict[int, tk.StringVar] = {}
+        self._hero_name_cache: Dict[int, str] = {}
+
+        # ---------- 抽卡设置 / 运行 ----------
+        cdp_box = ttk.LabelFrame(parent, text="直连抽卡（先打开游戏里的酒馆/招募界面）", padding=10)
+        cdp_box.pack(fill=tk.X, pady=(0, 8))
+
+        self.gacha_cdp_targets_var = tk.StringVar(value=str(gacha.get("cdp_targets", "")))
+        self.gacha_cdp_red_var = tk.BooleanVar(value=bool(gacha.get("cdp_keep_red", False)))
+        self.gacha_cdp_max_var = tk.StringVar(value=str(gacha.get("cdp_max_draws", 0)))
+        self.gacha_cdp_delay_var = tk.StringVar(value=str(gacha.get("cdp_delay_ms", 1200)))
+        self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
+        self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
+        self.gacha_cdp_maxbet_var = tk.BooleanVar(value=bool(gacha.get("cdp_max_bet", True)))
+        self.gacha_cdp_abandon_var = tk.BooleanVar(value=bool(gacha.get("cdp_always_abandon", True)))
+        self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
+        self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
+
+        if self.dev_mode:
+            row1 = ttk.Frame(cdp_box)
+            row1.pack(fill=tk.X, pady=(0, 4))
+            ttk.Label(row1, text="目标英雄(名字或编号，逗号分隔)").pack(side=tk.LEFT)
+            ttk.Entry(row1, textvariable=self.gacha_cdp_targets_var, width=28).pack(side=tk.LEFT, padx=6)
+            ttk.Checkbutton(row1, text="只保留红色", variable=self.gacha_cdp_red_var).pack(side=tk.LEFT, padx=10)
+            ttk.Label(row1, text="最大抽数(0不限)").pack(side=tk.LEFT, padx=(10, 2))
+            ttk.Entry(row1, textvariable=self.gacha_cdp_max_var, width=6).pack(side=tk.LEFT)
+            ttk.Label(row1, text="间隔ms").pack(side=tk.LEFT, padx=(10, 2))
+            ttk.Entry(row1, textvariable=self.gacha_cdp_delay_var, width=6).pack(side=tk.LEFT)
+            ttk.Button(row1, text="列出可选英雄", command=self.list_gacha_heroes).pack(side=tk.LEFT, padx=10)
+
+            row2 = ttk.Frame(cdp_box)
+            row2.pack(fill=tk.X, pady=(0, 4))
+            ttk.Checkbutton(
+                row2, text="先刷新候选池，出目标再抽", variable=self.gacha_cdp_refresh_var
+            ).pack(side=tk.LEFT)
+            ttk.Label(row2, text="绿钻刷新预算(0=不付费)").pack(side=tk.LEFT, padx=(12, 4))
+            ttk.Entry(row2, textvariable=self.gacha_cdp_green_var, width=6).pack(side=tk.LEFT)
+            ttk.Checkbutton(
+                row2, text="有目标就用最大倍率抽", variable=self.gacha_cdp_maxbet_var
+            ).pack(side=tk.LEFT, padx=(12, 0))
+
+        opt_row = ttk.Frame(cdp_box)
+        opt_row.pack(fill=tk.X, pady=(2, 4))
+        ttk.Checkbutton(
+            opt_row,
+            text="抽中目标也放弃，一直抽（只攒碎片，不停止）",
+            variable=self.gacha_cdp_abandon_var,
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            opt_row,
+            text="不勾：抽到目标就保留并停止",
+            foreground="#6b7280",
+        ).pack(side=tk.LEFT, padx=10)
+
+        btns = ttk.Frame(cdp_box)
+        btns.pack(fill=tk.X, pady=(2, 4))
+        self.gacha_cdp_btn = ttk.Button(
+            btns, text="开始直连抽卡", width=14, command=self.start_gacha_cdp, style="Accent.TButton"
+        )
+        self.gacha_cdp_btn.pack(side=tk.LEFT)
+        ttk.Button(btns, text="停止", width=10, command=self.stop_gacha_cdp).pack(side=tk.LEFT, padx=8)
+        self.gacha_cdp_status = tk.StringVar(value="需要先打开游戏里的酒馆/招募界面")
+        ttk.Label(btns, textvariable=self.gacha_cdp_status, foreground="#555").pack(side=tk.LEFT, padx=12)
+
+        if self.dev_mode:
+            ttk.Label(cdp_box, textvariable=self.gacha_pool_var, wraplength=980, foreground="#1a4d8f").pack(anchor=tk.W)
+            ttk.Label(cdp_box, textvariable=self.gacha_records_var, wraplength=980, foreground="#0a7a2f").pack(anchor=tk.W)
+
+        # ---------- 抽中统计 ----------
+        hit_box = ttk.LabelFrame(parent, text="抽中统计", padding=8)
+        hit_box.pack(fill=tk.X, pady=(0, 8))
+        self.gacha_hit_total_var = tk.StringVar(value="共 0 张（目标 0 张）")
+        ttk.Label(
+            hit_box, textvariable=self.gacha_hit_total_var, foreground="#0a7a2f"
+        ).pack(anchor=tk.W)
+        self.gacha_hit_var = tk.StringVar(value="还没有抽中目标英雄")
+        ttk.Label(
+            hit_box, textvariable=self.gacha_hit_var, foreground="#333", wraplength=1020, justify=tk.LEFT
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        # 旧版「截图识别抽卡」参数只保留变量
+        self.card_template_labels: Dict[str, tk.Label] = {}
+        self.card_vars: Dict[str, tk.BooleanVar] = {
+            name: tk.BooleanVar(value=name in enabled) for name in CARD_CATALOG
+        }
+        self.ui_status_var = tk.StringVar(value="")
+        self.gacha_max_var = tk.StringVar(value=str(gacha.get("max_draws", 0)))
+        self.gacha_settle_var = tk.StringVar(value=str(gacha.get("settle_ms", 2800)))
+        self.gacha_threshold_var = tk.StringVar(value=str(gacha.get("match_threshold", 0.82)))
+        self.gacha_nohit_var = tk.StringVar(value="正常抽卡")
+        self.gacha_stop_on_hit_var = tk.BooleanVar(value=bool(gacha.get("stop_on_hit", False)))
+        self.gacha_use_gem_var = tk.BooleanVar(value=bool(gacha.get("use_green_gem", False)))
+        self.gacha_use_max_var = tk.BooleanVar(value=bool(gacha.get("use_max_button", True)))
+        self.gacha_slot_var = tk.StringVar(value=f"存档{int(gacha.get('slot', 1))}")
+
+        self.reload_gacha_heroes()
+
+    # ---------------- 游戏辅助 ----------------
+    def _build_assist_tab(self, parent: ttk.Frame) -> None:
+        assist = normalize_assist(self.config.get("assist"))
+
+        # 顶部状态条
+        bar = ttk.Frame(parent)
+        bar.pack(fill=tk.X, pady=(0, 8))
+        self.assist_message_var = tk.StringVar(value="辅助已自动连接，等待游戏窗口…")
+        ttk.Label(bar, textvariable=self.assist_message_var, foreground="#1a4d8f").pack(side=tk.LEFT)
+        ttk.Button(bar, text="全部关闭", width=10, command=self.stop_all_assist).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(bar, text="重新连接", width=10, command=self.reconnect_assist).pack(side=tk.RIGHT, padx=6)
+
+        # ---------- 地图刷新 ----------
+        refresh = ttk.LabelFrame(parent, text="地图刷新", padding=10)
+        refresh.pack(fill=tk.X, pady=(0, 8))
+        refresh.columnconfigure(4, weight=1)
+
+        ttk.Label(refresh, text="小怪死亡后等待").grid(row=0, column=0, sticky=tk.W)
+        self.assist_mob_var = tk.StringVar(value=_seconds_text(assist.get("mob_seconds", 1)))
+        ttk.Entry(refresh, textvariable=self.assist_mob_var, width=6, justify="center").grid(row=0, column=1, padx=(8, 2))
+        ttk.Label(refresh, text="秒").grid(row=0, column=2, sticky=tk.W)
+        self.assist_mob_btn = ttk.Button(refresh, text="开启", width=10, command=lambda: self.toggle_assist("mob"))
+        self.assist_mob_btn.grid(row=0, column=3, padx=(14, 10))
+        self.assist_mob_status = tk.StringVar(value="")
+        ttk.Label(refresh, textvariable=self.assist_mob_status, foreground="#666").grid(row=0, column=4, sticky=tk.W)
+
+        ttk.Label(refresh, text="BOSS 死亡后等待").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_boss_var = tk.StringVar(value=_seconds_text(assist.get("boss_seconds", 3)))
+        ttk.Entry(refresh, textvariable=self.assist_boss_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(refresh, text="秒").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
+        self.assist_boss_btn = ttk.Button(refresh, text="开启", width=10, command=lambda: self.toggle_assist("boss"))
+        self.assist_boss_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_boss_status = tk.StringVar(value="")
+        ttk.Label(refresh, textvariable=self.assist_boss_status, foreground="#666").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        self.assist_gold_var = tk.StringVar(value="BOSS 金币 0")
+        ttk.Label(refresh, textvariable=self.assist_gold_var, foreground="#a35a00").grid(row=1, column=5, sticky=tk.E, padx=(10, 0), pady=(6, 0))
+
+        # ---------- 红包 / 祈愿 ----------
+        free = ttk.LabelFrame(parent, text="红包 / 祈愿", padding=10)
+        free.pack(fill=tk.X, pady=(0, 8))
+        free.columnconfigure(4, weight=1)
+
+        ttk.Label(free, text="快速抢红包").grid(row=0, column=0, sticky=tk.W)
+        self.assist_green_var = tk.StringVar(value="已领 0 个红包")
+        ttk.Label(free, textvariable=self.assist_green_var, foreground="#0a7a2f").grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=8)
+        self.assist_red_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("redPacket"))
+        self.assist_red_btn.grid(row=0, column=3, padx=(14, 10))
+        self.assist_red_status = tk.StringVar(value="尚未开启")
+        ttk.Label(free, textvariable=self.assist_red_status, foreground="#666").grid(row=0, column=4, sticky=tk.W)
+
+        ttk.Label(free, text="祈愿领取").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_wish_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("wish"))
+        self.assist_wish_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_wish_status = tk.StringVar(value="未检查")
+        ttk.Label(free, textvariable=self.assist_wish_status, foreground="#666").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+
+        # ---------- 快速复活 / 闪现 ----------
+        tools = ttk.LabelFrame(parent, text="快速复活 / 闪现", padding=10)
+        tools.pack(fill=tk.X, pady=(0, 8))
+        tools.columnconfigure(4, weight=1)
+
+        ttk.Label(tools, text="快速复活").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(tools, text="免费 · 原地 · 0.1 秒 · 怪不回血", foreground="#0a7d2c").grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=8)
+        self._revive_click_job = None
+        self.assist_revive_btn = ttk.Button(
+            tools, text="快速复活", width=14, command=self.revive_click, style="Accent.TButton"
+        )
+        self.assist_revive_btn.grid(row=0, column=3, padx=(14, 10))
+        ttk.Label(tools, text="点 1 次=复活一次；点 2 次=一直开着", foreground="#666").grid(row=0, column=4, sticky=tk.W)
+        self.assist_revive_status = tk.StringVar(value="尚未开启")
+        ttk.Label(tools, textvariable=self.assist_revive_status, foreground="#666", wraplength=980).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
+
+        ttk.Label(tools, text="闪现寻怪").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
+        self.assist_blink_mode_var = tk.StringVar(value="瞬移")
+        ttk.Combobox(
+            tools,
+            textvariable=self.assist_blink_mode_var,
+            values=["瞬移", "飞过去"],
+            width=8,
+            state="readonly",
+        ).grid(row=2, column=1, sticky=tk.W, padx=8, pady=(10, 0))
+        ttk.Button(tools, text="刷新怪物", width=10, command=self.refresh_blink_list).grid(
+            row=2, column=2, sticky=tk.W, pady=(10, 0)
+        )
+        self.assist_blink_btn = ttk.Button(tools, text="过去", width=10, command=self.blink_assist)
+        self.assist_blink_btn.grid(row=2, column=3, padx=(14, 10), pady=(10, 0))
+        self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
+        ttk.Label(
+            tools, textvariable=self.assist_blink_status, foreground="#666", wraplength=560
+        ).grid(row=2, column=4, sticky=tk.W, pady=(10, 0))
+
+        list_frame = ttk.Frame(tools)
+        list_frame.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(6, 0))
+        self.assist_monster_list = tk.Listbox(list_frame, height=7, activestyle="none")
+        list_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.assist_monster_list.yview)
+        self.assist_monster_list.configure(yscrollcommand=list_sb.set)
+        self.assist_monster_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        list_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.assist_monster_list.bind("<Double-Button-1>", lambda _e: self.blink_assist())
+        self._monster_rows: List[Dict[str, Any]] = []
+        # 兼容旧配置（名字过滤），没有输入框也不会报错
+        self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
+
+        # ---------- 战斗参数（已全部停用）----------
+        ttk.Label(
+            parent,
+            text=(
+                "战斗参数（英雄倍伤 / 免伤 / 技能冷却 / 视野）已全部停用：\n"
+                "实测这些改动都会让客户端数据和服务端对不上，游戏会弹「战斗数据与服务器不一致」。\n"
+                "安全可用的功能：刷新怪物（带血量）、闪现、免费复活、地图刷新、开宝箱、采集、运行指令。"
+            ),
+            foreground="#c62828",
+            wraplength=980,
+        ).pack(anchor=tk.W, pady=(2, 8))
 
         if self.dev_mode:
             row = ttk.Frame(parent)
@@ -1702,23 +2141,18 @@ class AppUI:
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
-                       self.assist_damage_btn,
-                       self.assist_cooldown_btn, self.assist_revive_btn):
+                       self.assist_revive_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
         self.assist_mob_btn.configure(text="关闭" if mob.get("enabled") else "开启")
         self.assist_boss_btn.configure(text="关闭" if boss.get("enabled") else "开启")
         self.assist_red_btn.configure(text="关闭" if red.get("enabled") else "开启")
         self.assist_wish_btn.configure(text="关闭" if wish.get("enabled") else "开启")
-        self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
-        self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
-        self.assist_damage_status.set(str(damage.get("reason") or ("需要版本映射" if gap else "尚未开启")))
-        self.assist_cooldown_status.set(str(cooldown.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         revive_reason = str(revive.get("reason") or ("需要版本映射" if gap else "尚未开启"))
         if revive.get("count"):
             revive_reason += f" · 今日复活 {int(revive.get('count') or 0)} 次"
