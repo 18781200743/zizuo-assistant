@@ -369,7 +369,7 @@ class AppUI:
             padding=(0, 14),
         )
 
-    DARK_PAGE = "#1D2D4F"
+    DARK_PAGE = "#231e3d"
     DARK_CARD = "#16233c"
     DARK_LINE = "#2a3b5c"
     DARK_TXT = "#e6ebf5"
@@ -436,6 +436,7 @@ class AppUI:
             bordercolor=dark, arrowcolor=sub,
         )
         style.configure("Dark.TPanedwindow", background=dark)
+        style.configure("AssistBody.TFrame", background="#231e3d")
 
     def _apply_dark(self, widget) -> None:
         """把某个页面里所有 ttk 控件换成深色样式。"""
@@ -687,12 +688,14 @@ class AppUI:
         )
         ttk.Button(run_box2, text="保存配置", command=self.save_all).pack(side=tk.LEFT, padx=2)
 
-    def _make_scroll(self, parent: ttk.Frame, key: str, bg: str = "#ffffff") -> ttk.Frame:
+    def _make_scroll(
+        self, parent: ttk.Frame, key: str, bg: str = "#ffffff", frame_style: str = ""
+    ) -> ttk.Frame:
         """给页面套一个可滚动容器，返回里面真正放内容的 frame。"""
         canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=bg)
         sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
         hb = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=canvas.xview)
-        inner = ttk.Frame(canvas)
+        inner = ttk.Frame(canvas, style=frame_style) if frame_style else ttk.Frame(canvas)
 
         shown = {"v": True, "h": False}
 
@@ -1387,83 +1390,222 @@ class AppUI:
             "说明：使用脚本，封号自己负责。",
         )
 
+    ASSIST_TOP_H = 352
+
+    def _draw_assist_top(self) -> None:
+        """画辅助工具页顶部：背景、返回、状态、两个按钮、图例、分类按钮。"""
+        c = getattr(self, "_assist_top", None)
+        if c is None:
+            return
+        try:
+            w = c.winfo_width()
+            h = c.winfo_height()
+        except tk.TclError:
+            return
+        if w <= 2 or h <= 2:
+            return
+
+        c.delete("all")
+        ui_font = "Microsoft YaHei UI"
+
+        photo = self._assist_bg_photo(w, h)
+        if photo is not None:
+            self._assist_bg_ref = photo
+            c.create_image(0, 0, image=photo, anchor="nw")
+        else:
+            c.configure(bg="#241d40")
+
+        # 返回 + 标题
+        c.create_polygon(
+            self._round_points(12, 14, 96, 48, 6),
+            fill="#1a1630", outline="#9a8fe0", tags=("a_back",),
+        )
+        c.create_text(
+            54, 31, text="‹ 返回", fill="#e8e3ff", font=(ui_font, 10), tags=("a_back",),
+        )
+        c.tag_bind("a_back", "<Button-1>", lambda _e: self._switch_mode("home"))
+        c.create_text(
+            110, 31, anchor="w", text="辅助工具", fill="#ffffff",
+            font=(ui_font, 15, "bold"),
+        )
+
+        # 状态文字
+        c.create_text(
+            12, 56, anchor="nw", text=self.assist_message_var.get(),
+            fill="#e9e5ff", width=w - 24, font=(ui_font, 11), justify="left",
+        )
+
+        # 重新连接 / 全部关闭
+        for text, x0, x1, cmd, tag in (
+            ("重新连接", w - 268, w - 172, self.reconnect_assist, "a_reconnect"),
+            ("全部关闭", w - 164, w - 12, self.stop_all_assist, "a_stopall"),
+        ):
+            c.create_polygon(
+                self._round_points(x0, 116, x1, 158, 6),
+                fill="#0f2f3d", outline="#3fc4e0", tags=(tag,),
+            )
+            c.create_polygon(
+                self._round_points(x0 + 3, 119, x1 - 3, 155, 5),
+                fill="", outline="#2a8ea8", tags=(tag,),
+            )
+            c.create_text(
+                (x0 + x1) / 2, 137, text=text, fill="#dff6ff",
+                font=(ui_font, 11, "bold"), tags=(tag,),
+            )
+            c.tag_bind(tag, "<Button-1>", lambda _e, cmd=cmd: cmd())
+
+        # 安全等级图例
+        c.create_text(12, 170, anchor="w", text="安全等级", fill="#c9c2ea", font=(ui_font, 9))
+        x = 74
+        for text, color in (("绿", "#4ade80"), ("黄", "#facc15"), ("红", "#f87171")):
+            c.create_polygon(
+                self._round_points(x - 4, 160, x + 22, 180, 4),
+                fill="#1a1630", outline="",
+            )
+            c.create_text(x + 9, 170, text=text, fill=color, font=(ui_font, 10, "bold"))
+            x += 28
+            if text != "红":
+                c.create_text(x, 170, anchor="w", text="→", fill="#8b84ad", font=(ui_font, 9))
+                x += 20
+        c.create_text(x + 8, 170, anchor="w", text="红色最危险", fill="#c9c2ea", font=(ui_font, 9))
+
+        # 分类按钮
+        items = [
+            ("地图 / 红包", "map", "teal"),
+            ("复活 / 闪现", "revive", "orange"),
+            ("日常任务", "daily", "teal"),
+            ("战斗参数", "combat", "red"),
+            ("抽卡", "gacha", "teal"),
+            ("运行指令", "commands", "teal"),
+        ]
+        gap = 8
+        bw = (w - 24 - gap) // 2
+        bh = 48
+        for index, (text, key, kind) in enumerate(items):
+            row, col = divmod(index, 2)
+            x0 = 12 + col * (bw + gap)
+            y0 = 186 + row * (bh + 7)
+            btn = self._tool_button_photo(bw, bh, kind)
+            tag = "a_tool_%s" % key
+            if btn is not None:
+                c.create_image(x0, y0, image=btn, anchor="nw", tags=(tag,))
+                setattr(self, "_tool_btn_%s" % key, btn)
+            else:
+                c.create_rectangle(x0, y0, x0 + bw, y0 + bh, fill="#153a48", outline="#3fc4e0", tags=(tag,))
+            c.create_text(
+                x0 + bw / 2, y0 + bh / 2, text=text, fill="#ffffff",
+                font=(ui_font, 11, "bold"), tags=(tag,),
+            )
+            c.tag_bind(tag, "<Button-1>", lambda _e, k=key: self._show_tool(k))
+
+        c.tag_bind("a_back", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("a_reconnect", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("a_stopall", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("a_back", "<Leave>", lambda _e: c.configure(cursor=""))
+
+    def _assist_bg_photo(self, w: int, h: int):
+        """辅助工具页背景（魔法阵），按尺寸缓存。"""
+        key = (int(w), int(h))
+        if getattr(self, "_assist_bg_key", None) == key:
+            return getattr(self, "_assist_bg_ref", None)
+        photo = None
+        try:
+            from PIL import Image, ImageTk
+
+            path = os.path.join(self.ASSET_DIR, "assist_bg.jpg")
+            im = Image.open(path).convert("RGB")
+            cw, ch = im.size
+            scale = max(w / cw, h / ch)
+            nw, nh = max(1, int(cw * scale)), max(1, int(ch * scale))
+            im = im.resize((nw, nh), Image.LANCZOS)
+            left = (nw - w) // 2
+            top = (nh - h) // 2
+            photo = ImageTk.PhotoImage(im.crop((left, top, left + w, top + h)))
+        except Exception:  # noqa: BLE001
+            photo = None
+        self._assist_bg_key = key
+        self._assist_bg_ref = photo
+        return photo
+
+    def _tool_button_photo(self, w: int, h: int, kind: str):
+        """分类按钮（玻璃质感 + 描边 + 底部光），返回 PhotoImage。"""
+        cache = getattr(self, "_tool_btn_cache", {})
+        key = (int(w), int(h), kind)
+        if key in cache:
+            return cache[key]
+        photo = None
+        try:
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFilter, ImageTk
+
+            styles = {
+                "teal": ((26, 76, 92), (10, 40, 50), (70, 214, 240)),
+                "orange": ((240, 150, 52), (198, 92, 22), (255, 198, 120)),
+                "red": ((140, 44, 62), (92, 22, 38), (240, 120, 140)),
+            }
+            top_c, bot_c, line_c = styles.get(kind, styles["teal"])
+            ss = 3
+            W, H = max(2, int(w)) * ss, max(2, int(h)) * ss
+            img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            # 渐变填充
+            arr = np.zeros((H, W, 3), np.uint8)
+            for y in range(H):
+                t = y / max(1, H - 1)
+                arr[y, :, :] = [
+                    int(top_c[i] + (bot_c[i] - top_c[i]) * t) for i in range(3)
+                ]
+            body = Image.fromarray(arr, "RGB").convert("RGBA")
+            mask = Image.new("L", (W, H), 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                [0, 0, W - 1, H - 1], radius=int(6 * ss), fill=255
+            )
+            body.putalpha(mask)
+            # 外发光
+            glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(glow).rounded_rectangle(
+                [ss, ss, W - 1 - ss, H - 1 - ss], radius=int(6 * ss),
+                outline=line_c + (200,), width=2 * ss,
+            )
+            glow = glow.filter(ImageFilter.GaussianBlur(3 * ss))
+            img = Image.alpha_composite(img, glow)
+            img = Image.alpha_composite(img, body)
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle(
+                [ss, ss, W - 1 - ss, H - 1 - ss], radius=int(6 * ss),
+                outline=line_c + (255,), width=max(1, ss),
+            )
+            # 底边高光
+            d.line(
+                [(int(W * 0.12), H - 2 * ss), (int(W * 0.88), H - 2 * ss)],
+                fill=line_c + (190,), width=max(1, ss),
+            )
+            photo = ImageTk.PhotoImage(img.resize((int(w), int(h)), Image.LANCZOS))
+        except Exception:  # noqa: BLE001
+            photo = None
+        cache[key] = photo
+        self._tool_btn_cache = cache
+        return photo
+
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
 
-        nav = ttk.Frame(parent)
-        nav.pack(fill=tk.X, pady=(0, 6))
-        ttk.Button(nav, text="‹ 返回", command=lambda: self._switch_mode("home")).pack(side=tk.LEFT)
-        ttk.Label(nav, text="辅助工具", font=("Microsoft YaHei UI", 11, "bold")).pack(
-            side=tk.LEFT, padx=8
+        # ---------- 顶部：背景 + 状态 + 分类按钮 ----------
+        top = tk.Canvas(parent, height=self.ASSIST_TOP_H, highlightthickness=0, bd=0, bg="#0c1220")
+        top.pack(fill=tk.X)
+        self._assist_top = top
+        self.assist_message_var = tk.StringVar(
+            value="辅助已自动连接，等待游戏窗口（点上方「打开游戏窗口」即可）"
         )
+        self.assist_message_var.trace_add("write", lambda *_a: self._draw_assist_top())
+        top.bind("<Configure>", lambda _e: self._draw_assist_top())
+        parent.after(30, self._draw_assist_top)
 
-        # 顶部状态条
-        bar = ttk.Frame(parent)
-        bar.pack(fill=tk.X, pady=(0, 8))
-        self.assist_message_var = tk.StringVar(value="辅助已自动连接，等待游戏窗口…")
-        ttk.Label(
-            bar, textvariable=self.assist_message_var, foreground="#7cc4ff",
-            wraplength=440, justify=tk.LEFT,
-        ).pack(anchor=tk.W)
-        btns = ttk.Frame(bar)
-        btns.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(btns, text="全部关闭", width=8, command=self.stop_all_assist).pack(side=tk.RIGHT)
-        ttk.Button(btns, text="重新连接", width=8, command=self.reconnect_assist).pack(
-            side=tk.RIGHT, padx=6
-        )
+        # ---------- 下面：各功能区块（可滚动） ----------
+        body = self._make_scroll(parent, "assist", bg="#231e3d", frame_style="AssistBody.TFrame")
+        parent = body
 
-        legend = ttk.Frame(parent)
-        legend.pack(fill=tk.X, pady=(0, 6))
-
-        def _tag(text, color, bg=None):
-            tk.Label(
-                legend, text=text, fg=color, bg=bg or "#1D2D4F",
-                font=("Microsoft YaHei UI", 9, bg and "bold" or "normal"),
-                padx=2,
-            ).pack(side=tk.LEFT)
-
-        tk.Label(
-            legend, text="安全等级", fg="#9fb0c9", bg="#1D2D4F",
-            font=("Microsoft YaHei UI", 9),
-        ).pack(side=tk.LEFT, padx=(0, 6))
-        _tag("绿", "#4ade80")
-        tk.Label(legend, text="→", fg="#7f8ea8", bg="#1D2D4F").pack(side=tk.LEFT)
-        _tag("黄", "#fbbf24")
-        tk.Label(legend, text="→", fg="#7f8ea8", bg="#1D2D4F").pack(side=tk.LEFT)
-        _tag("红", "#f87171")
-        tk.Label(
-            legend, text="  红色最危险", fg="#9fb0c9", bg="#1D2D4F",
-            font=("Microsoft YaHei UI", 9),
-        ).pack(side=tk.LEFT)
-
-        # ---------- 功能分类菜单 ----------
-        menu = ttk.Frame(parent)
-        menu.pack(fill=tk.X, pady=(0, 8))
-        menu.columnconfigure(0, weight=1)
-        menu.columnconfigure(1, weight=1)
         self._tool_sections = {}
         self._tool_current = None
-        tool_items = [
-            ("地图 / 红包", "map"),
-            ("复活 / 闪现", "revive"),
-            ("日常任务", "daily"),
-            ("战斗参数", "combat"),
-            ("抽卡", "gacha"),
-            ("运行指令", "commands"),
-        ]
-        # 按钮配色：绿=安全，黄=注意，红=会被服务端校验
-        styles = {
-            "combat": ("#fdecea", "#b3261e", "#f8d7d3"),
-            "revive": ("#fff6da", "#8a6100", "#fbeabb"),
-        }
-        for index, (text, key) in enumerate(tool_items):
-            bg, fg, active = styles.get(key, ("#e8f5e9", "#1b7f3b", "#d3ecda"))
-            tk.Button(
-                menu, text=text, command=lambda k=key: self._show_tool(k),
-                relief=tk.FLAT, bd=0, bg=bg, fg=fg, activebackground=active,
-                activeforeground=fg, font=("Microsoft YaHei UI", 10),
-                padx=6, pady=7, cursor="hand2",
-            ).grid(row=index // 2, column=index % 2, sticky="ew", padx=4, pady=4)
 
         # ---------- 地图刷新 ----------
         refresh = ttk.LabelFrame(parent, text="地图刷新", padding=6)
