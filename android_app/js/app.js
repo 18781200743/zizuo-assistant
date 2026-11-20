@@ -107,7 +107,15 @@
 
   // 游戏里点悬浮球 → 弹出辅助面板
   window.zzOpenAssist = function () {
-    try { plus.webview.getLaunchWebview().show(); } catch (e) { /* ignore */ }
+    try {
+      // 先把游戏 webview 藏起来，保证点击落在面板上（不藏会点不动）
+      if (game) game.hide();
+      var launch = plus.webview.getLaunchWebview();
+      if (launch) {
+        try { launch.setStyle({ zindex: 20 }); } catch (e) { /* ignore */ }
+        launch.show();
+      }
+    } catch (e) { /* ignore */ }
     hideFloat();
     showPage("pageFunc");
   };
@@ -115,8 +123,8 @@
   // 面板里的「返回」→ 回到游戏
   function backToGame() {
     if (game) {
+      try { game.setStyle({ zindex: 10 }); } catch (e) { /* ignore */ }
       try { game.show(); } catch (e) { /* ignore */ }
-      try { plus.webview.getLaunchWebview().hide(); } catch (e) { /* ignore */ }
       showFloat();
       return true;
     }
@@ -247,21 +255,21 @@
     var mob = state.mob || {};
     var boss = state.boss || {};
 
-    setOn("fRed", red.enabled, "红包");
-    setOn("fRevive", rv.enabled, "复活");
-    setOn("fMob", mob.enabled, "小怪刷新");
-    setOn("fBoss", boss.enabled, "BOSS刷新");
+    setOn("fRed", red.enabled, "开启");
+    setOn("fRevive", rv.enabled, "快速复活");
+    setOn("fMob", mob.enabled, "开启");
+    setOn("fBoss", boss.enabled, "开启");
     var combat = state.combat || {};
-    setOn("fDmg", (combat.damage || {}).enabled, "英雄倍伤 ×2");
-    setOn("fShield", (combat.shield || {}).enabled, "英雄免伤 100%");
-    setOn("fCd", (combat.cooldown || {}).enabled, "技能冷却 3 秒");
-    setOn("fVision", (combat.vision || {}).enabled, "视野：不让怪发现");
+    setOn("fDmg", (combat.damage || {}).enabled, "开启");
+    setOn("fShield", (combat.shield || {}).enabled, "开启");
+    setOn("fCd", (combat.cooldown || {}).enabled, "开启");
+    setOn("fVision", (combat.vision || {}).enabled, "应用");
 
     var wish = state.wish || {};
     var wishBtn = $("fWish");
     if (wishBtn) {
       wishBtn.classList.toggle("on", !!wish.enabled);
-      wishBtn.textContent = "祈愿领取" + (wish.enabled ? " · 开" : "");
+      wishBtn.textContent = wish.enabled ? "关闭" : "开启";
     }
 
     var bits = [];
@@ -312,6 +320,13 @@
     if (!msg && raw) msg = String(raw);
     if (msg) setInfo(msg);
     return msg;
+  }
+
+  function numVal(id, fallback) {
+    var el = $(id);
+    var v = el ? Number(el.value) : NaN;
+    if (!isFinite(v) || v < 0) return fallback;
+    return v;
   }
 
   function toggleCombat(feature, onValue, offValue) {
@@ -434,6 +449,15 @@
     $("fMob").onclick = function () { toggle("mob"); };
     $("fBoss").onclick = function () { toggle("boss"); };
     $("fMonsters").onclick = openMonsters;
+
+    $("fMob").onclick = function () {
+      var on = !!(state && state.mob && state.mob.enabled);
+      send("mob", on ? 0 : numVal("mobSec", 1));
+    };
+    $("fBoss").onclick = function () {
+      var on = !!(state && state.boss && state.boss.enabled);
+      send("boss", on ? 0 : numVal("bossSec", 3));
+    };
     var wishBtn = $("fWish");
     if (wishBtn) wishBtn.onclick = function () { toggle("wish"); };
 
@@ -459,13 +483,18 @@
     if (dailyCards) dailyCards.onclick = function () { callRuntime("completeDailyWithCards"); };
 
     var dmgBtn = $("fDmg");
-    if (dmgBtn) dmgBtn.onclick = function () { toggleCombat("damage", 2, 0); };
+    if (dmgBtn) dmgBtn.onclick = function () { toggleCombat("damage", numVal("dmgVal", 2), 0); };
     var shieldBtn = $("fShield");
-    if (shieldBtn) shieldBtn.onclick = function () { toggleCombat("shield", 100, 0); };
+    if (shieldBtn) shieldBtn.onclick = function () { toggleCombat("shield", numVal("shieldVal", 100), 0); };
     var cdBtn = $("fCd");
-    if (cdBtn) cdBtn.onclick = function () { toggleCombat("cooldown", 3, 0); };
+    if (cdBtn) cdBtn.onclick = function () { toggleCombat("cooldown", numVal("cdVal", 3), 0); };
     var visionBtn = $("fVision");
-    if (visionBtn) visionBtn.onclick = function () { toggleCombat("vision", 0, -1); };
+    if (visionBtn) visionBtn.onclick = function () {
+      var sel = $("visionVal");
+      var mode = sel ? Number(sel.value) : 0;
+      send("vision", mode);
+      setTimeout(poll, 200);
+    };
 
     var cats = [
       ["catMap", "secMap"],
