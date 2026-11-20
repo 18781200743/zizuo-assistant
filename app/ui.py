@@ -372,7 +372,19 @@ class AppUI:
         # 模式切换（胶囊样式）
         mode_bar = tk.Frame(self.root, bg=c["page"])
         mode_bar.pack(fill=tk.X, padx=18, pady=(4, 0))
-        self.mode_var = tk.StringVar(value="gacha")
+        self.mode_var = tk.StringVar(value="home")
+        self._mode_btn_home = tk.Button(
+            mode_bar,
+            text="首页",
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=8,
+            font=("Microsoft YaHei UI", 10, "bold"),
+            command=lambda: self._switch_mode("home"),
+        )
+        self._mode_btn_home.pack(side=tk.LEFT)
+
         self._mode_btn_gacha = tk.Button(
             mode_bar,
             text="抽卡",
@@ -386,7 +398,7 @@ class AppUI:
         self._mode_btn_gacha.pack(side=tk.LEFT)
         self._mode_btn_assist = tk.Button(
             mode_bar,
-            text="游戏辅助",
+            text="功能",
             relief=tk.FLAT,
             bd=0,
             padx=20,
@@ -458,15 +470,16 @@ class AppUI:
         self._page_gacha = ttk.Frame(self._content, padding=4)
         self._page_assist = ttk.Frame(self._content, padding=4)
         self._page_commands = ttk.Frame(self._content, padding=4)
+        self._page_home = ttk.Frame(self._content, padding=4)
         self._scroll_canvases: Dict[str, tk.Canvas] = {}
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
         self._build_slots_tab(self._page_slots)
         self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
         self._build_assist_tab(self._make_scroll(self._page_assist, "assist"))
         self._build_commands_tab(self._page_commands)
+        self._build_home_tab(self._page_home)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
-        self._page_gacha.pack(fill=tk.BOTH, expand=True)
-        self._switch_mode("gacha")
+        self._switch_mode("home")
 
         if self.dev_mode:
             log_frame = ttk.LabelFrame(self.root, text="日志", padding=4)
@@ -481,11 +494,13 @@ class AppUI:
     def _switch_mode(self, mode: str) -> None:
         self.mode_var.set(mode)
         pages = {
+            "home": self._page_home,
             "gacha": self._page_gacha,
             "assist": self._page_assist,
             "commands": self._page_commands,
         }
         buttons = {
+            "home": self._mode_btn_home,
             "gacha": self._mode_btn_gacha,
             "assist": self._mode_btn_assist,
             "commands": self._mode_btn_commands,
@@ -764,6 +779,47 @@ class AppUI:
         self.reload_gacha_heroes()
 
     # ---------------- 游戏辅助 ----------------
+    def _build_home_tab(self, parent: ttk.Frame) -> None:
+        """首页：只放开游戏/连接说明，具体功能收进「功能」页。"""
+        ttk.Label(parent, text="紫作助手", font=("Microsoft YaHei UI", 22, "bold")).pack(
+            anchor=tk.W, pady=(14, 0)
+        )
+        ttk.Label(parent, text="百炼英雄 · 电脑版", foreground="#666").pack(anchor=tk.W, pady=(2, 0))
+
+        card = ttk.LabelFrame(parent, text="本机游戏", padding=14)
+        card.pack(fill=tk.X, pady=(18, 10))
+        self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
+        ttk.Label(card, textvariable=self.home_status_var, foreground="#333", wraplength=920).pack(
+            anchor=tk.W
+        )
+        row = ttk.Frame(card)
+        row.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(row, text="打开游戏窗口", width=16, command=self.ask_open_game).pack(side=tk.LEFT)
+        ttk.Button(row, text="重新连接", width=12, command=self.reconnect_assist).pack(
+            side=tk.LEFT, padx=8
+        )
+
+        entry = ttk.Frame(parent)
+        entry.pack(fill=tk.X, pady=(14, 0))
+        ttk.Button(entry, text="功能", width=16, command=lambda: self._switch_mode("assist")).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(entry, text="抽卡", width=16, command=lambda: self._switch_mode("gacha")).pack(
+            side=tk.LEFT, padx=8
+        )
+        ttk.Button(
+            entry, text="运行指令", width=16, command=lambda: self._switch_mode("commands")
+        ).pack(side=tk.LEFT)
+
+        ttk.Label(
+            parent,
+            text="打开游戏 → 验证码登录 → 进入主界面后自动连接。\n"
+            "具体功能（红包 / 复活 / 刷新 / 闪现 / 取坐标）都在「功能」里。",
+            foreground="#666",
+            wraplength=920,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(18, 0))
+
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
 
@@ -2083,6 +2139,18 @@ class AppUI:
             self.assist_message_var.set("辅助已自动连接，等待游戏窗口（点上方「打开游戏窗口」即可）")
             return
         gap = bool(state.get("missingMapping")) and not state.get("ready")
+        try:
+            if state.get("ready"):
+                red = (state.get("redPacket") or {})
+                self.home_status_var.set(
+                    "已连接 · %s · 今日红包 %s 个" % (state.get("build") or "?", red.get("today") or 0)
+                )
+            elif state.get("error"):
+                self.home_status_var.set("未就绪：%s" % state.get("error"))
+            else:
+                self.home_status_var.set("等待游戏进入主界面…")
+        except Exception:  # noqa: BLE001
+            pass
         if gap:
             self.assist_message_var.set(
                 "辅助未就绪：没有当前游戏版本的字段映射（游戏每次更新都会重新随机内部名）。"
