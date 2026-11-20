@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 133
+RUNTIME_VERSION = 134
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 133
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 133;
+  const VERSION = 134;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2836,76 +2836,81 @@ RUNTIME_JS = r"""
       if (window.__zzPickOff) { try { window.__zzPickOff(); } catch (_) {} }
       window.__zzPick = null;
       window.__zzPickArmedAt = Date.now();
-
-      // 和参考工具一样的「录制坐标」：百分比坐标（0~100）+ 鼠标方向角度
-      let overlay = document.getElementById('zz-coord-overlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'zz-coord-overlay';
-        overlay.style.cssText = 'position:fixed;left:12px;top:12px;z-index:2147483647;'
-          + 'background:rgba(0,0,0,.72);color:#fff;font:13px/1.5 -apple-system,sans-serif;'
-          + 'padding:6px 10px;border-radius:6px;pointer-events:none;white-space:nowrap;';
-        document.body.appendChild(overlay);
-      }
-      overlay.style.display = 'block';
-      overlay.textContent = '录制坐标：-, --  角度：-°';
-
-      let last = null;
-      let angle = NaN;
-      const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
-      const render = (px, py, ang) => {
-        overlay.textContent = '录制坐标：' + (Number.isFinite(px) ? fmt(px) : '-')
-          + ', ' + (Number.isFinite(py) ? fmt(py) : '-')
-          + '  角度：' + (Number.isFinite(ang) ? ang.toFixed(1) + '°' : '-°');
-      };
-      const onMove = (ev) => {
-        const px = ev.clientX / window.innerWidth * 100;
-        const py = ev.clientY / window.innerHeight * 100;
-        if (last) {
-          const dx = ev.clientX - last.x, dy = ev.clientY - last.y;
-          if (Math.abs(dx) + Math.abs(dy) > 1) angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        }
-        last = { x: ev.clientX, y: ev.clientY };
-        window.__zzCoordHover = { x: px, y: py, angle };
-        render(px, py, angle);
-      };
-      const cleanup = () => {
-        window.removeEventListener('pointermove', onMove, true);
-        window.removeEventListener('pointerdown', onDown, true);
-        window.removeEventListener('keydown', onKey, true);
-        if (overlay) overlay.style.display = 'none';
-        window.__zzPickOff = null;
-      };
-      const onDown = (ev) => {
-        try { ev.stopPropagation(); } catch (_) { /* ignore */ }
-        try { ev.preventDefault(); } catch (_) { /* ignore */ }
-        const px = ev.clientX / window.innerWidth * 100;
-        const py = ev.clientY / window.innerHeight * 100;
-        const text = fmt(px) + ',' + fmt(py);
+      const canvas = window.cc && window.cc.game && window.cc.game.canvas;
+      if (!canvas) return { ok: false, error: '找不到画布' };
+      const handler = function (ev) {
         try {
-          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
-        } catch (_) { /* 交给 Python 那边复制 */ }
-        window.__zzPick = {
-          x: Math.round(px * 100) / 100,
-          y: Math.round(py * 100) / 100,
-          angle: Number.isFinite(angle) ? Math.round(angle * 10) / 10 : null,
-          text,
-          at: Date.now(),
-          screen: [Math.round(ev.clientX), Math.round(ev.clientY)],
-        };
-        cleanup();
-      };
-      const onKey = (ev) => {
-        if (ev.key === 'Escape') {
-          window.__zzPick = { canceled: true, at: Date.now() };
-          cleanup();
+          // 游戏地图用的是 GameMapCamera/Camera（透视相机），screenToWorld 在这版不可靠，
+          // 但 worldToScreen 是准的 → 用「世界→屏幕」反推仿射变换，再求逆。
+          const scene = window.cc.director.getScene();
+          let cam = null;
+          try {
+            const camNode = window.cc.find('Root/GameScene/GameMapCamera/Camera', scene);
+            if (camNode) cam = camNode.getComponent(window.cc.Camera);
+          } catch (_) { cam = null; }
+          if (!cam) {
+            (function walk(n, d) {
+              if (!n || cam || d > 10) return;
+              const c = n.getComponent && n.getComponent(window.cc.Camera);
+              if (c && c.projection === 1) cam = c;
+              (n.children || []).forEach(k => walk(k, d + 1));
+            })(scene, 0);
+          }
+          let baseX = 0, baseY = 0;
+          try {
+            const mv = window.cc.find('Root/GameScene/GameMapCanvas/MapView', scene);
+            if (mv) {
+              const bp = mv.getWorldPosition();
+              baseX = bp.x; baseY = bp.y;
+            }
+          } catch (_) { baseX = 0; baseY = 0; }
+
+          const rect = canvas.getBoundingClientRect();
+          const vp = window.cc.view.getVisibleSizeInPixel();
+          const sx = (ev.clientX - rect.left) * vp.width / rect.width;
+          const sy = vp.height - (ev.clientY - rect.top) * vp.height / rect.height;
+          let wx = null, wy = null;
+          if (cam) {
+            try {
+              const cp = cam.node.getWorldPosition();
+              // 相机中心（游戏世界坐标，已经是 ADUX/WUZI 那套）
+              const cx = cp.x - baseX, cy = cp.y - baseY;
+              const toScreen = (gx, gy) => {
+                const s = cam.worldToScreen(new window.cc.Vec3(gx + baseX, gy + baseY, 0));
+                return [s.x, s.y];
+              };
+              const p0 = toScreen(cx, cy);
+              const p1 = toScreen(cx + 1000, cy);
+              const p2 = toScreen(cx, cy + 1000);
+              // 屏幕 = M * 世界（每 1000 单位的屏幕增量）
+              const m00 = (p1[0] - p0[0]) / 1000, m01 = (p2[0] - p0[0]) / 1000;
+              const m10 = (p1[1] - p0[1]) / 1000, m11 = (p2[1] - p0[1]) / 1000;
+              const det = m00 * m11 - m01 * m10;
+              if (Math.abs(det) > 1e-9) {
+                const dx = sx - p0[0], dy = sy - p0[1];
+                wx = Math.round(cx + (m11 * dx - m01 * dy) / det);
+                wy = Math.round(cy + (-m10 * dx + m00 * dy) / det);
+              }
+            } catch (_) { wx = null; wy = null; }
+          }
+          if (wx === null || wy === null) {
+            // 兜底：老的 screenToWorld
+            try {
+              if (cam && typeof cam.screenToWorld === 'function') {
+                const w = cam.screenToWorld(new window.cc.Vec3(sx, sy, 0));
+                if (w) { wx = Math.round(w.x - baseX); wy = Math.round(w.y - baseY); }
+              }
+            } catch (_) { /* ignore */ }
+          }
+          window.__zzPick = { x: wx, y: wy, at: Date.now(), screen: [Math.round(sx), Math.round(sy)],
+            client: [Math.round(ev.clientX), Math.round(ev.clientY)] };
+        } catch (e) {
+          window.__zzPick = { error: String((e && e.message) || e) };
         }
+        try { window.__zzPickOff(); } catch (_) {}
       };
-      window.addEventListener('pointermove', onMove, true);
-      window.addEventListener('pointerdown', onDown, true);
-      window.addEventListener('keydown', onKey, true);
-      window.__zzPickOff = cleanup;
-      render(NaN, NaN, NaN);
+      canvas.addEventListener('pointerdown', handler, { once: true });
+      window.__zzPickOff = function () { canvas.removeEventListener('pointerdown', handler); window.__zzPickOff = null; };
       return { ok: true };
     } catch (cause) {
       return { ok: false, error: msgOf(cause) };

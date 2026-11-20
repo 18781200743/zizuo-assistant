@@ -882,13 +882,15 @@ class AppUI:
         list_sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.assist_monster_list.bind("<Double-Button-1>", lambda _e: self.blink_assist())
         self._monster_rows: List[Dict[str, Any]] = []
+        self._picked_world = None
         # 兼容旧配置（名字过滤），没有输入框也不会报错
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
         coord_row = ttk.Frame(tools)
         coord_row.grid(row=4, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
         ttk.Button(coord_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT)
-        self.assist_coord_status = tk.StringVar(value="点「取坐标」，鼠标在游戏画面上移动会显示百分比坐标/角度，点一下即复制")
+        ttk.Button(coord_row, text="飞过去", width=8, command=self.fly_to_picked).pack(side=tk.LEFT, padx=(6, 0))
+        self.assist_coord_status = tk.StringVar(value="点「取坐标」，再到游戏画面上点一下；取到后点「飞过去」")
         ttk.Label(coord_row, textvariable=self.assist_coord_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
         daily_row = ttk.Frame(tools)
@@ -1954,6 +1956,19 @@ class AppUI:
         finally:
             self._auto_daily_busy = False
 
+    def fly_to_picked(self) -> None:
+        """飞到最近一次「取坐标」取到的位置。"""
+        point = getattr(self, "_picked_world", None)
+        if not point:
+            self.assist_coord_status.set("先点「取坐标」，在游戏画面上点一下")
+            return
+        if not self.assist.running:
+            self.start_assist()
+        mode = "fly" if self.assist_blink_mode_var.get() == "飞过去" else "instant"
+        self.assist.set_feature("blinkTo", {"x": point[0], "y": point[1], "mode": mode})
+        self.assist_coord_status.set("正在飞过去…" if mode == "fly" else "正在瞬移…")
+        self.append_log("已发送：飞到坐标 (%d, %d)" % (int(point[0]), int(point[1])))
+
     def pick_coord(self) -> None:
         """取坐标：先点按钮，再在游戏画面上点一下要记录的位置。"""
         if not self.assist.running:
@@ -1980,11 +1995,12 @@ class AppUI:
             if picked.get("canceled"):
                 self.assist_coord_status.set("已取消")
                 return
-            angle = picked.get("angle")
-            text = "录制坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
-            if angle is not None:
-                text += "  角度 %s°" % angle
-            self.assist_coord_status.set(text + "  已复制")
+            try:
+                self._picked_world = (float(picked.get("x")), float(picked.get("y")))
+            except (TypeError, ValueError):
+                self._picked_world = None
+            text = "坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
+            self.assist_coord_status.set(text + "  已复制（点「飞过去」过去）")
             self.assist_daily_status.set(text + "  已复制")
             copy_text = str(picked.get("text") or ("%s,%s" % (picked.get("x"), picked.get("y"))))
             try:
