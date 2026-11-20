@@ -140,6 +140,9 @@ def make_exe() -> Path | None:
         f"{ROOT / 'app' / 'instructions.json'};app",
         "--add-data",
         f"{ROOT / 'app' / 'automation_config.json'};app",
+        # 首页头图等界面素材
+        "--add-data",
+        f"{ROOT / 'app' / 'assets'};app/assets",
         str(ROOT / "main.py"),
     ]
     print("运行:", " ".join(cmd))

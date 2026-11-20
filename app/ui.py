@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -1001,111 +1002,29 @@ class AppUI:
             b = int(c1[2] + (c2[2] - c1[2]) * t) >> 8
             canvas.create_line(x0, y0 + i, x1, y0 + i, fill="#%02x%02x%02x" % (r, g, b))
 
-    @staticmethod
-    def _banner_photo(w: int, h: int):
-        """画一条紫蓝渐变 + 科技光效的头图（无人物），返回 PhotoImage。"""
-        try:
-            import numpy as np
-            from PIL import Image, ImageDraw, ImageFilter, ImageTk
-        except Exception:  # noqa: BLE001
-            return None
-        if w <= 2 or h <= 2:
-            return None
-        ss = 2
-        W, H = int(w) * ss, int(h) * ss
+    ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
-        # 横向三段渐变：深紫 → 亮紫 → 深紫
-        stops = [
-            (0.00, (24, 16, 44)),
-            (0.24, (52, 28, 82)),
-            (0.46, (116, 50, 148)),
-            (0.62, (172, 80, 196)),
-            (0.80, (104, 48, 144)),
-            (1.00, (40, 26, 64)),
-        ]
-        xs = np.linspace(0.0, 1.0, W)
-        cols = np.zeros((W, 3))
-        for i in range(len(stops) - 1):
-            p0, c0 = stops[i]
-            p1, c1 = stops[i + 1]
-            m = (xs >= p0) & (xs <= p1)
-            t = (xs[m] - p0) / max(1e-6, p1 - p0)
-            for ch in range(3):
-                cols[m, ch] = c0[ch] + (c1[ch] - c0[ch]) * t
-        arr = np.tile(cols[None, :, :], (H, 1, 1))
-        ys = np.linspace(0.0, 1.0, H)[:, None]
-        shade = 0.58 + 0.42 * np.exp(-((ys - 0.42) ** 2) / (2 * 0.30 ** 2))
-        arr = arr * shade[:, :, None]
-        base = Image.fromarray(np.clip(arr, 0, 255).astype("uint8"), "RGB").convert("RGBA")
-
-        # 光效层
-        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        cx, cy = W * 0.78, H * 0.52
-        r = H * 0.62
-        gd.ellipse(
-            [cx - r, cy - r, cx + r, cy + r],
-            outline=(120, 220, 255, 70), width=max(2, 3 * ss),
-        )
-        r2 = H * 0.44
-        gd.ellipse(
-            [cx - r2, cy - r2, cx + r2, cy + r2],
-            outline=(150, 235, 255, 45), width=max(2, 2 * ss),
-        )
-        # 虚线环
-        for deg in range(0, 360, 10):
-            if deg % 20:
-                continue
-            gd.arc(
-                [cx - r * 1.12, cy - r * 1.12, cx + r * 1.12, cy + r * 1.12],
-                deg, deg + 8, fill=(190, 245, 255, 55), width=max(2, 2 * ss),
-            )
-        # 右侧柔光
-        blob = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        bd = ImageDraw.Draw(blob)
-        bd.ellipse(
-            [cx - H * 0.75, cy - H * 0.75, cx + H * 0.55, cy + H * 0.75],
-            fill=(150, 90, 210, 70),
-        )
-        blob = blob.filter(ImageFilter.GaussianBlur(H * 0.18))
-        base = Image.alpha_composite(base, blob)
-        base = Image.alpha_composite(base, glow.filter(ImageFilter.GaussianBlur(1.2 * ss)))
-
-        # 斜向亮带
-        streak = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(streak)
-        sd.polygon(
-            [(W * 0.30, H), (W * 0.48, 0), (W * 0.62, 0), (W * 0.44, H)],
-            fill=(255, 220, 255, 26),
-        )
-        streak = streak.filter(ImageFilter.GaussianBlur(H * 0.06))
-        base = Image.alpha_composite(base, streak)
-
-        # 细网格点（左上角科技感）
-        dots = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        dd = ImageDraw.Draw(dots)
-        step = max(4, 9 * ss)
-        for yy in range(0, int(H * 0.62), step):
-            for xx in range(0, int(W * 0.42), step):
-                dd.point((xx, yy), fill=(180, 210, 255, 26))
-        base = Image.alpha_composite(base, dots)
-
-        # 底部一条亮边
-        ed = ImageDraw.Draw(base)
-        ed.line([(0, H - 1), (W, H - 1)], fill=(140, 190, 255, 90), width=max(1, ss))
-
-        return ImageTk.PhotoImage(base.resize((int(w), int(h)), Image.LANCZOS))
-
-    def _home_banner(self, w: int, h: int):
-        """按尺寸缓存头图。"""
+    def _home_header(self, w: int, h: int):
+        """头图（和参考图一致的原画），按尺寸缓存 PhotoImage。"""
         key = (int(w), int(h))
-        if getattr(self, "_banner_key", None) != key:
-            self._banner_photo_ref = self._banner_photo(w, h)
-            self._banner_key = key
-        return getattr(self, "_banner_photo_ref", None)
+        if getattr(self, "_header_key", None) == key:
+            return getattr(self, "_header_photo", None)
+        photo = None
+        try:
+            from PIL import Image, ImageTk
+
+            path = os.path.join(self.ASSET_DIR, "home_header.png")
+            im = Image.open(path).convert("RGB")
+            im = im.resize((max(1, int(w)), max(1, int(h))), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(im)
+        except Exception:  # noqa: BLE001
+            photo = None
+        self._header_key = key
+        self._header_photo = photo
+        return photo
 
     def _build_home_tab(self, parent: tk.Frame) -> None:
-        """首页：深色科幻风（渐变头图 + 卡片 + 发光按钮）。"""
+        """首页：深色科幻风（原画头图 + 半透明卡片 + 发光按钮）。"""
         parent.configure(bg=self.BG_TOP)
         canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=self.BG_TOP)
         canvas.pack(fill=tk.BOTH, expand=True)
@@ -1147,87 +1066,83 @@ class AppUI:
         self._home_status_item = None
 
         ui_font = "Microsoft YaHei UI"
-        banner_h = 150
-        self._home_buttons: Dict[str, Any] = {}
+        card_bg = "#f3f5fb"
+        card_line = "#dfe6f2"
+        dark_txt = "#1f2937"
+        sub_txt = "#4b5768"
 
-        # ---------- 背景 ----------
-        self._vgrad(c, 0, 0, w, h, self.BG_TOP, self.BG_BOTTOM)
-
-        # ---------- 顶部紫蓝渐变头图 ----------
-        photo = self._home_banner(w, banner_h)
+        # ---------- 头图（原画，标题/关于已在图里） ----------
+        header_h = int(round(w * 515 / 1152))
+        photo = self._home_header(w, header_h)
         if photo is not None:
             c.create_image(0, 0, image=photo, anchor="nw")
         else:
-            self._vgrad(c, 0, 0, w, banner_h, "#2a1f4a", "#7d3d9e")
-            c.create_line(0, banner_h, w, banner_h, fill="#8d6ac0")
-        c.create_text(
-            24, banner_h * 0.56, anchor="w", text="百炼英雄 · 助手",
-            fill="#ffffff", font=(ui_font, 21, "bold"),
-        )
-        c.create_text(
-            24, banner_h * 0.78, anchor="w", text="百炼英雄 · 电脑版",
-            fill="#d6e9ff", font=(ui_font, 10),
-        )
+            # 素材缺失时的兜底：渐变 + 文字标题
+            self._vgrad(c, 0, 0, w, header_h, "#2a1f4a", "#7d3d9e")
+            c.create_text(
+                24, header_h * 0.55, anchor="w", text="百炼英雄 · 助手",
+                fill="#ffffff", font=(ui_font, 20, "bold"),
+            )
+            c.create_text(
+                24, header_h * 0.78, anchor="w", text="百炼英雄 · 电脑版",
+                fill="#d6e9ff", font=(ui_font, 10),
+            )
 
-        # 关于
-        ax0, ay0, ax1, ay1 = w - 104, 18, w - 16, 60
-        c.create_polygon(
-            self._round_points(ax0, ay0, ax1, ay1, 10),
-            fill="#ffffff", outline="#ffffff", tags=("home_about",),
-        )
-        c.create_text(
-            (ax0 + ax1) / 2, (ay0 + ay1) / 2, text="关于", fill="#1c4f9c",
-            font=(ui_font, 10, "bold"), tags=("home_about",),
+        # 头图下面接一段深蓝背景
+        self._vgrad(c, 0, header_h, w, h, "#1d2c4d", "#182742")
+
+        # 关于（图上按钮的位置，放个透明热区）
+        ax0, ay0 = int(w * 959 / 1152), int(header_h * 108 / 515)
+        ax1, ay1 = int(w * 1117 / 1152), int(header_h * 195 / 515)
+        c.create_rectangle(
+            ax0, ay0, ax1, ay1, fill="", outline="", tags=("home_about",),
         )
         c.tag_bind("home_about", "<Button-1>", lambda _e: self._show_about())
         c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_about", "<Leave>", lambda _e: c.configure(cursor=""))
 
-        # ---------- 本机游戏卡片（高度跟着状态文字走） ----------
-        x0, x1 = 16, w - 16
-        y0 = 172
+        # ---------- 本机游戏卡片（浅色，高度跟着状态文字走） ----------
+        x0, x1 = 18, w - 18
+        y0 = header_h + 8
         title_id = c.create_text(
-            x0 + 18, y0 + 18, anchor="w", text="本机游戏",
-            fill=self.TXT, font=(ui_font, 11, "bold"),
+            x0 + 20, y0 + 20, anchor="w", text="本机游戏",
+            fill=dark_txt, font=(ui_font, 12, "bold"),
         )
         self._home_status_item = c.create_text(
-            x0 + 18, y0 + 44, anchor="nw", text=self.home_status_var.get(),
-            fill="#c7d4e8", width=x1 - x0 - 40, font=(ui_font, 9), justify="left",
+            x0 + 20, y0 + 46, anchor="nw", text=self.home_status_var.get(),
+            fill=sub_txt, width=x1 - x0 - 40, font=(ui_font, 11), justify="left",
         )
         bbox = c.bbox(self._home_status_item)
         text_bottom = bbox[3] if bbox else y0 + 64
         self._home_status_bottom = text_bottom
-        by0 = max(y0 + 84, text_bottom + 26)
-        by1 = by0 + 42
+        by0 = max(y0 + 92, text_bottom + 18)
+        by1 = by0 + 38
         card1_bottom = by1 + 16
 
-        # 两个按钮：留够间距，纯色不带发光边
-        inner_w = (x1 - x0) - 36
-        gap = 30
+        inner_w = (x1 - x0) - 40
+        gap = 18
         btn_w = (inner_w - gap) // 2
-        bx0, bx1 = x0 + 18, x0 + 18 + btn_w
+        bx0, bx1 = x0 + 20, x0 + 20 + btn_w
         cx0, cx1 = bx1 + gap, bx1 + gap + btn_w
 
-        # 打开游戏窗口（纯色）
+        # 打开游戏窗口（蓝色）
         c.create_polygon(
-            self._round_points(bx0, by0, bx1, by1, 18),
-            fill="#2f7fe8", outline="", tags=("home_open",),
+            self._round_points(bx0, by0, bx1, by1, 17),
+            fill="#2f7fe8", outline="#8fc7ff", width=1, tags=("home_open",),
         )
         c.create_text(
             (bx0 + bx1) / 2, (by0 + by1) / 2, text="打开游戏窗口", fill="#ffffff",
-            font=(ui_font, 10, "bold"), tags=("home_open",),
+            font=(ui_font, 11, "bold"), tags=("home_open",),
         )
-
-        # 重新连接（描边）
+        # 重新连接（浅色描边）
         c.create_polygon(
-            self._round_points(cx0, by0, cx1, by1, 18),
-            fill="#1b2a44", outline="#3a4c70", tags=("home_reconnect",),
+            self._round_points(cx0, by0, cx1, by1, 17),
+            fill="#e9eef8", outline="#c3cfe2", tags=("home_reconnect",),
         )
         c.create_text(
-            (cx0 + cx1) / 2, (by0 + by1) / 2, text="重新连接", fill="#c7d4e8",
-            font=(ui_font, 10), tags=("home_reconnect",),
+            (cx0 + cx1) / 2, (by0 + by1) / 2, text="重新连接", fill="#374151",
+            font=(ui_font, 11), tags=("home_reconnect",),
         )
-
         for tag in ("home_open", "home_reconnect"):
             c.tag_bind(tag, "<Enter>", lambda _e: c.configure(cursor="hand2"))
             c.tag_bind(tag, "<Leave>", lambda _e: c.configure(cursor=""))
@@ -1236,14 +1151,14 @@ class AppUI:
 
         card1 = c.create_polygon(
             self._round_points(x0, y0, x1, card1_bottom, 16),
-            fill=self.CARD_BG, outline=self.CARD_LINE,
+            fill=card_bg, outline=card_line,
         )
         c.tag_lower(card1, title_id)
 
         # ---------- 辅助工具（发光六边形） ----------
         hx0, hx1 = 46, w - 46
-        hy0 = card1_bottom + 26
-        hy1 = hy0 + 78
+        hy0 = card1_bottom + 22
+        hy1 = hy0 + 68
         mid = (hy0 + hy1) / 2
         cut = 30
         hexa = [
@@ -1257,11 +1172,11 @@ class AppUI:
         )
         c.create_text(
             hx0 + 26, mid, text="«", fill="#f59e0b",
-            font=(ui_font, 16, "bold"), tags=("home_assist",),
+            font=(ui_font, 15, "bold"), tags=("home_assist",),
         )
         c.create_text(
             hx1 - 26, mid, text="»", fill="#f59e0b",
-            font=(ui_font, 16, "bold"), tags=("home_assist",),
+            font=(ui_font, 15, "bold"), tags=("home_assist",),
         )
         c.create_text(
             (hx0 + hx1) / 2, mid, text="辅助工具", fill="#ffffff",
@@ -1271,16 +1186,16 @@ class AppUI:
         c.tag_bind("home_assist", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_assist", "<Leave>", lambda _e: c.configure(cursor=""))
 
-        # ---------- 使用说明 ----------
-        iy0 = hy1 + 24
-        iy1 = iy0 + 132
+        # ---------- 使用说明（深色卡片） ----------
+        iy0 = hy1 + 20
+        iy1 = min(h - 52, iy0 + 168)
         info = c.create_polygon(
             self._round_points(x0, iy0, x1, iy1, 16),
-            fill=self.CARD_BG, outline=self.CARD_LINE,
+            fill="#223154", outline="#33466c",
         )
         info_title = c.create_text(
-            x0 + 18, iy0 + 18, anchor="w", text="使用说明",
-            fill=self.TXT, font=(ui_font, 11, "bold"),
+            x0 + 18, iy0 + 20, anchor="w", text="使用说明",
+            fill="#ffffff", font=(ui_font, 12, "bold"),
         )
         c.tag_lower(info, info_title)
         lines = [
@@ -1290,13 +1205,13 @@ class AppUI:
         ]
         for i, line in enumerate(lines):
             c.create_text(
-                x0 + 20, iy0 + 50 + i * 26, anchor="w", text=line,
-                fill="#c7d4e8", font=(ui_font, 10),
+                x0 + 20, iy0 + 56 + i * 27, anchor="w", text=line,
+                fill="#dbe4f5", font=(ui_font, 10),
             )
 
         # ---------- 底部说明 ----------
         c.create_text(
-            w / 2, h - 34, text="说明：使用脚本，封号自己负责",
+            w / 2, h - 26, text="说明：使用脚本，封号自己负责",
             fill="#f97316", font=(ui_font, 10),
         )
 
