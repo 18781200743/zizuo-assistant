@@ -583,26 +583,14 @@ class GameAssist:
             return {}
 
     def claim_daily_tasks(self) -> dict:
-        """遍历任务面板所有页签，把能领的奖励全部领掉（约 3 秒）。"""
+        """直接调游戏任务服务领取（不开面板，和参考工具一样）。"""
         try:
-            self.bridge.eval_js(
-                "(window.__zzAssist && window.__zzAssist.claimAllDailyTabs "
-                "? window.__zzAssist.claimAllDailyTabs() : 'no-runtime')"
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.claimDailyViaService "
+                "? window.__zzAssist.claimDailyViaService() : null)"
             )
-        except Exception:  # noqa: BLE001
-            return {}
-        raw = "null"
-        for _ in range(20):
-            time.sleep(0.3)
-            try:
-                raw = self.bridge.eval_js("JSON.stringify(window.__zzDailyResult || null)")
-            except Exception:  # noqa: BLE001
-                continue
-            if raw and raw != "null":
-                break
-        try:
             return json.loads(raw or "null") or {}
-        except ValueError:
+        except Exception:  # noqa: BLE001
             return {}
 
     def list_heroes(self) -> list:

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 108
+RUNTIME_VERSION = 109
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 108
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 108;
+  const VERSION = 109;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2616,6 +2616,63 @@ RUNTIME_JS = r"""
     }
   }
 
+  /** 游戏的任务服务（模块导出 SNFA 的单例）。 */
+  function taskService() {
+    try {
+      for (const pair of window.System.entries()) {
+        const ex = pair[1];
+        if (ex && typeof ex === 'object' && ex.SNFA && ex.SNFA.AWXW) return ex.SNFA.AWXW;
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** 四条任务线：日常 1 / 周常 2 / 成就 3 / 公会 4。 */
+  function taskGroups(svc) {
+    const groups = [];
+    if (typeof svc.DHPZ === 'function') groups.push({ id: 1, name: '日常', rows: svc.DHPZ() });
+    if (typeof svc.HEOT === 'function') groups.push({ id: 2, name: '周常', rows: svc.HEOT() });
+    if (typeof svc.CNUM === 'function') groups.push({ id: 3, name: '成就', rows: svc.CNUM() });
+    if (typeof svc.NSCD === 'function') groups.push({ id: 4, name: '公会', rows: svc.NSCD() });
+    return groups;
+  }
+
+  /**
+   * 直接调游戏任务服务领取（和参考工具一样，不打开任务面板）。
+   *   ROGV(任务线, 该任务在线里的下标)
+   * 可领判定：进度 >= 目标 且 KLBW（已领取标记）为 false。
+   */
+  function claimDailyViaService() {
+    try {
+      const svc = taskService();
+      if (!svc) return { ok: false, error: '没找到任务服务（SNFA）' };
+      let claimed = 0;
+      let waiting = 0;
+      const details = [];
+      for (const group of taskGroups(svc)) {
+        const rows = Array.isArray(group.rows) ? group.rows : [];
+        for (let index = 0; index < rows.length; index += 1) {
+          const task = rows[index];
+          if (!task) continue;
+          const have = (task.GPIC && task.GPIC.WZMG) || 0;
+          const need = task.DHDO || task.RSHY || 0;
+          if (!task.KLBW && need > 0 && have >= need) {
+            try {
+              svc.ROGV(group.id, index);
+              claimed += 1;
+              details.push(group.name + ':' + task.UHNB);
+            } catch (_) { waiting += 1; }
+          } else {
+            waiting += 1;
+          }
+        }
+      }
+      return { ok: true, claimed, waiting, details };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /** 兼容旧调用：只领当前页签。 */
   function claimDailyTasks() {
     try { return claimCurrentTab(); } catch (cause) { return { ok: false, error: msgOf(cause) }; }
@@ -4182,6 +4239,7 @@ RUNTIME_JS = r"""
     openDailyTasks,
     claimDailyTasks,
     claimAllDailyTabs,
+    claimDailyViaService,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

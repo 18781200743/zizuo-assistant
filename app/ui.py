@@ -1666,17 +1666,10 @@ class AppUI:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
 
     def claim_daily(self) -> None:
-        """一键领日常：打开任务面板 → 把能领的奖励全部点掉。"""
+        """一键领日常：直接调游戏任务服务，把能领的奖励全部领掉（不开面板）。"""
         if not self.assist.running:
             self.start_assist()
-        result = self.assist.open_daily_tasks()
-        if not result.get("ok"):
-            self.assist_daily_status.set("打开任务面板失败：%s" % (result.get("error") or "未知原因"))
-            return
-        self.assist_daily_status.set("正在打开任务面板…")
-        self.root.after(1000, self._claim_daily_now)
-
-    def _claim_daily_now(self) -> None:
+        self.assist_daily_status.set("正在领取…")
         result = self.assist.claim_daily_tasks()
         if not result.get("ok"):
             self.assist_daily_status.set("领取失败：%s" % (result.get("error") or "未知原因"))
