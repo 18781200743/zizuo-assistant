@@ -1734,6 +1734,28 @@ class AppUI:
             time.sleep(0.7)
         return False
 
+    def _auto_daily_walk_search(self, boss_name: str, seconds: float = 1.2) -> bool:
+        """传送落地后 BOSS 还没刷出来：按 8 个方向走一圈找它，找到就贴脸。"""
+        try:
+            runner = InstructionRunner(bridge_provider=lambda: self.assist.bridge, log=lambda _m: None)
+            runner._mapping = load_mapping()
+        except Exception:  # noqa: BLE001
+            return False
+        for _round in range(3):
+            for direction in ("上", "右上", "右", "右下", "下", "左下", "左", "左上"):
+                try:
+                    runner._move([direction, str(seconds)])
+                except Exception:  # noqa: BLE001
+                    pass
+                monsters = self.assist.list_monsters()
+                cand = [m for m in monsters if boss_name in str(m.get("name") or "")]
+                if cand:
+                    nearest = min(cand, key=lambda m: int(m.get("d") or 0))
+                    self._auto_daily_log("自动做日常：找到 %s（%s 米）" % (boss_name, nearest.get("d")))
+                    self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
+                    return True
+        return False
+
     def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
         """击杀指定 BOSS：走游戏的「前往 → 传送并追踪」，过去之后再闪现贴脸打。"""
         task_id = task.get("id")
@@ -1764,7 +1786,11 @@ class AppUI:
                 self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
                 time.sleep(8.0)
             else:
-                time.sleep(4.0)
+                self._auto_daily_log("自动做日常：没看到 %s，走一圈找" % boss_name)
+                if self._auto_daily_walk_search(boss_name):
+                    time.sleep(8.0)
+                else:
+                    time.sleep(2.0)
 
     def _auto_daily_kill_count(self, task: Dict[str, Any]) -> None:
         """击杀 N 只怪：闪现到怪堆 + 重进地图刷怪，直到任务进度达标或超时。"""
