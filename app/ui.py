@@ -37,6 +37,7 @@ from .game_window import GAME_WINDOW_TITLE, SIZE_PRESETS, open_game_window
 from .game_assist import GameAssist, load_mapping
 from .instruction_library import (
     CATEGORY_ALL,
+    clear_instruction_override,
     delete_user_instruction,
     export_code,
     format_content,
@@ -44,6 +45,7 @@ from .instruction_library import (
     library_categories,
     library_instructions,
     load_library,
+    save_instruction_override,
     save_user_instruction,
     script_title,
 )
@@ -948,7 +950,9 @@ class AppUI:
 
         row = ttk.Frame(right)
         row.pack(fill=tk.X, pady=(2, 0))
-        ttk.Button(row, text="复制", width=8, command=self.copy_instruction).pack(side=tk.LEFT)
+        ttk.Button(row, text="编辑", width=8, style="Accent.TButton", command=self.edit_instruction).pack(side=tk.LEFT)
+        ttk.Button(row, text="还原", width=8, command=self.restore_instruction).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="复制", width=8, command=self.copy_instruction).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="导出指令码", width=11, command=self.export_instruction).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="导入指令码", width=11, command=self.import_instruction).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="保存为我的", width=11, command=self.save_instruction).pack(side=tk.LEFT, padx=4)
@@ -956,8 +960,13 @@ class AppUI:
 
         ttk.Label(
             parent,
-            text="支持：等待 / 点击 / 滚轮 / 移动 / 传送 / 回城 / 采集 / 开宝箱 / 跳转。开宝箱默认「普通领取」，不消耗双倍次数。",
+            text=(
+                "支持：等待 / 点击 / 滚轮 / 移动 / 传送 / 回城 / 采集 / 开宝箱 / 跳转。"
+                "开宝箱默认「普通领取」，不消耗双倍次数。"
+                "　内置指令也能直接改：选中后点「编辑」，改完保存；想恢复原版点「还原」。"
+            ),
             foreground="#6b7280",
+            wraplength=980,
         ).pack(anchor=tk.W, pady=(6, 0))
 
         self.refresh_command_list()
@@ -973,7 +982,7 @@ class AppUI:
             else:
                 btn.configure(bg=c["soft"], fg=c["text"], activebackground="#e5e7eb", activeforeground=c["text"])
 
-    def refresh_command_list(self) -> None:
+    def refresh_command_list(self, select_title: Optional[str] = None) -> None:
         if not hasattr(self, "cmd_list"):
             return
         self.cmd_library = load_library()
@@ -983,12 +992,18 @@ class AppUI:
         for item in self.cmd_rows:
             content = str(item.get("content") or "")
             count = sum(1 for line in content.splitlines() if line.strip() and not line.strip().startswith("#"))
-            mark = " ·我的" if item.get("custom") else ""
+            mark = " ·我的" if item.get("custom") else (" ·已改" if item.get("edited") else "")
             self.cmd_list.insert(tk.END, "%s（%d 步%s）" % (item.get("title") or "未命名", count, mark))
         total = len(self.cmd_library.get("instructions") or [])
         self.cmd_list_hint.set("共 %d 条，当前显示 %d 条" % (total, len(self.cmd_rows)))
         if self.cmd_rows:
-            self.cmd_list.selection_set(0)
+            index = 0
+            if select_title:
+                for i, item in enumerate(self.cmd_rows):
+                    if str(item.get("title") or "") == select_title:
+                        index = i
+                        break
+            self.cmd_list.selection_set(index)
             self._show_command_detail()
 
     def _selected_command(self) -> Optional[Dict[str, Any]]:
@@ -1004,11 +1019,92 @@ class AppUI:
         item = self._selected_command()
         if not item:
             return
-        self.cmd_title_var.set("%s%s" % (item.get("title") or "", "（我的）" if item.get("custom") else ""))
+        suffix = "（我的）" if item.get("custom") else ("（已修改）" if item.get("edited") else "")
+        self.cmd_title_var.set("%s%s" % (item.get("title") or "", suffix))
         self.cmd_text.configure(state=tk.NORMAL)
         self.cmd_text.delete("1.0", tk.END)
         self.cmd_text.insert("1.0", format_content(str(item.get("content") or "")))
         self.cmd_text.configure(state=tk.DISABLED)
+
+    def edit_instruction(self) -> None:
+        """编辑被选中的指令（内置的自己改过的也直接改本体，不用先另存一份）。"""
+        item = self._selected_command()
+        if not item:
+            messagebox.showinfo("编辑指令", "先在左边选一条指令")
+            return
+        title = str(item.get("title") or "未命名")
+        win = tk.Toplevel(self.root)
+        win.title("编辑指令 - %s" % title)
+        win.transient(self.root)
+        win.geometry("640x560")
+        win.minsize(480, 360)
+
+        ttk.Label(
+            win,
+            text="一行一条：# 开头的行是注释；支持 等待/点击/滚轮/移动/传送/回城/采集/开宝箱/跳转",
+            foreground="#6b7280",
+        ).pack(anchor=tk.W, padx=12, pady=(10, 4))
+
+        frame = ttk.Frame(win)
+        frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+        text = tk.Text(frame, wrap=tk.NONE, undo=True)
+        sb_y = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text.yview)
+        sb_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text.xview)
+        text.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        text.grid(row=0, column=0, sticky="nsew")
+        sb_y.grid(row=0, column=1, sticky="ns")
+        sb_x.grid(row=1, column=0, sticky="ew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        text.insert("1.0", format_content(str(item.get("content") or "")))
+        text.focus_set()
+
+        note = tk.StringVar(value="")
+        ttk.Label(win, textvariable=note, foreground="#c62828").pack(anchor=tk.W, padx=12)
+
+        btns = ttk.Frame(win)
+        btns.pack(fill=tk.X, padx=12, pady=10)
+
+        def _save() -> None:
+            content = text.get("1.0", tk.END).strip()
+            if not content:
+                note.set("内容不能为空")
+                return
+            try:
+                if item.get("custom"):
+                    save_user_instruction(
+                        title, content, int(item.get("category_id") or 3), old_title=title
+                    )
+                else:
+                    save_instruction_override(item.get("id"), content)
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("编辑指令", str(exc), parent=win)
+                return
+            win.destroy()
+            self.refresh_command_list(select_title=title)
+            self.cmd_status.set("已保存修改：%s" % title)
+
+        ttk.Button(btns, text="保存", style="Accent.TButton", command=_save).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btns, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.grab_set()
+
+    def restore_instruction(self) -> None:
+        """把改过的内置指令还原成原版。"""
+        item = self._selected_command()
+        if not item:
+            return
+        if item.get("custom"):
+            messagebox.showinfo("还原内置指令", "「我的」指令请直接用「编辑」或「删除」")
+            return
+        if not item.get("edited"):
+            messagebox.showinfo("还原内置指令", "这条是内置原版，没有改过")
+            return
+        if not messagebox.askyesno("还原内置指令", "把「%s」恢复成内置原版？" % (item.get("title") or "")):
+            return
+        clear_instruction_override(item.get("id"))
+        self.refresh_command_list(select_title=str(item.get("title") or ""))
+        self.cmd_status.set("已还原：%s" % (item.get("title") or ""))
 
     def run_instruction(self) -> None:
         item = self._selected_command()

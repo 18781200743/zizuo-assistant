@@ -34,6 +34,13 @@ def _user_library_path() -> Path:
     return path
 
 
+def _overrides_path() -> Path:
+    """内置指令的修改记录（内置库在打包后的 _internal 里，直接改会被下次更新覆盖）。"""
+    path = project_root() / "saves" / "instructions_overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _read_json(path: Path, default: Any) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -42,13 +49,22 @@ def _read_json(path: Path, default: Any) -> Any:
 
 
 def load_library() -> Dict[str, Any]:
-    """内置指令库 + 用户自己保存的指令。"""
+    """内置指令库 + 用户自己保存的指令（内置的被改过就用改过的内容）。"""
     data = _read_json(library_path(), {})
     if not isinstance(data, dict):
         data = {}
     categories = list(data.get("categories") or [])
     definitions = list(data.get("definitions") or [])
-    instructions = list(data.get("instructions") or [])
+    instructions = [dict(item) for item in (data.get("instructions") or []) if isinstance(item, dict)]
+
+    # 内置指令的修改：按 id 覆盖内容，原版仍保留在 instructions.json 里
+    overrides = _read_json(_overrides_path(), {})
+    if isinstance(overrides, dict) and overrides:
+        for item in instructions:
+            key = str(item.get("id") if item.get("id") is not None else "")
+            if key and key in overrides:
+                item["content"] = str(overrides[key])
+                item["edited"] = True
 
     user = _read_json(_user_library_path(), [])
     if isinstance(user, list):
@@ -66,6 +82,36 @@ def load_library() -> Dict[str, Any]:
         "definitions": definitions,
         "instructions": instructions,
     }
+
+
+def save_instruction_override(instruction_id: Any, content: str) -> None:
+    """修改内置指令：内容写进 saves/instructions_overrides.json，重启也还在。"""
+    key = str(instruction_id if instruction_id is not None else "").strip()
+    if not key:
+        raise ValueError("这条指令没有编号，无法保存修改")
+    content = (content or "").strip()
+    if not content:
+        raise ValueError("指令内容是空的")
+    path = _overrides_path()
+    data = _read_json(path, {})
+    if not isinstance(data, dict):
+        data = {}
+    data[key] = content
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def clear_instruction_override(instruction_id: Any) -> None:
+    """把内置指令还原成原版。"""
+    key = str(instruction_id if instruction_id is not None else "").strip()
+    if not key:
+        return
+    path = _overrides_path()
+    data = _read_json(path, {})
+    if not isinstance(data, dict):
+        return
+    if key in data:
+        data.pop(key)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def library_categories(library: Dict[str, Any]) -> List[Dict[str, Any]]:
