@@ -1317,7 +1317,7 @@ class AppUI:
         ttk.Button(row, text="编辑", command=self.edit_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
-        ttk.Button(row, text="复制", command=self.copy_instruction).pack(
+        ttk.Button(row, text="删除", command=self.delete_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
         row2 = ttk.Frame(right)
@@ -1325,7 +1325,7 @@ class AppUI:
         ttk.Button(row2, text="还原", command=self.restore_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X
         )
-        ttk.Button(row2, text="删除", command=self.delete_instruction).pack(
+        ttk.Button(row2, text="复制", command=self.copy_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
 
