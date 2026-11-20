@@ -648,45 +648,170 @@ class AppUI:
         gacha = normalize_gacha(self.config.get("gacha"))
         enabled = set(gacha.get("enabled_cards") or [])
 
-        # ---------- 目标英雄 ----------
-        hero_box = ttk.LabelFrame(parent, text="目标英雄（勾选要保留的，抽到其它就放弃）", padding=10)
-        hero_box.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        # ---------- 变量 ----------
+        self.gacha_cdp_targets_var = tk.StringVar(value=str(gacha.get("cdp_targets", "")))
+        self.gacha_cdp_red_var = tk.BooleanVar(value=bool(gacha.get("cdp_keep_red", False)))
+        self.gacha_cdp_max_var = tk.StringVar(value=str(gacha.get("cdp_max_draws", 0)))
+        self.gacha_cdp_delay_var = tk.StringVar(value=str(gacha.get("cdp_delay_ms", 1200)))
+        self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
+        self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
+        # 固定「有目标就用最大倍率抽」「抽中也放弃，一直抽」
+        self.gacha_cdp_maxbet_var = tk.BooleanVar(value=True)
+        self.gacha_cdp_abandon_var = tk.BooleanVar(value=True)
+        self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
+        self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
+        self.gacha_cdp_status = tk.StringVar(value="打开酒馆/招募界面，再点「开始招募」")
 
-        toolbar = ttk.Frame(hero_box)
-        toolbar.pack(fill=tk.X, pady=(0, 6))
-        ttk.Button(toolbar, text="全选", width=8, command=lambda: self._set_all_heroes(True)).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(toolbar, text="全不选", width=8, command=lambda: self._set_all_heroes(False)).pack(side=tk.LEFT, padx=4)
-        ttk.Button(toolbar, text="重载名单", width=10, command=self.reload_gacha_heroes).pack(side=tk.LEFT, padx=4)
-        self.gacha_hero_count = tk.StringVar(value="参考名单")
-        ttk.Label(
-            hero_box, textvariable=self.gacha_hero_count, foreground="#555"
-        ).pack(anchor=tk.W)
-        ttk.Label(
-            hero_box,
-            text="勾选保留（按最大倍率抽）　数字＝出现 / 中 / 碎片",
-            foreground="#6b7280",
-        ).pack(anchor=tk.W)
+        page_bg = "#ffffff"
+        card_bg = "#f6f8fa"
+        line = "#dde3ea"
+        sub = "#6b7280"
 
+        # ---------- 标题 ----------
+        head = tk.Frame(parent, bg=page_bg)
+        head.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            head, text="英雄招募", bg=page_bg, fg="#111827",
+            font=("Microsoft YaHei UI", 13, "bold"),
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            head, text="开始招募时自动打开招募界面", bg=page_bg, fg=sub,
+            font=("Microsoft YaHei UI", 8),
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
-        holder = ttk.Frame(hero_box)
-        holder.pack(fill=tk.BOTH, expand=True)
-        self._gacha_hero_canvas = tk.Canvas(holder, height=88, width=300, highlightthickness=0, bg="#ffffff")
-        hero_sb = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=self._gacha_hero_canvas.yview)
-        self._gacha_hero_inner = ttk.Frame(self._gacha_hero_canvas)
-        self._gacha_hero_inner.bind(
-            "<Configure>",
-            lambda _e: self._gacha_hero_canvas.configure(
-                scrollregion=self._gacha_hero_canvas.bbox("all")
-            ),
+        # ---------- 设置卡 ----------
+        cfg_card = tk.Frame(parent, bg=card_bg, highlightbackground=line, highlightthickness=1)
+        cfg_card.pack(fill=tk.X, pady=(0, 8))
+
+        row_a = tk.Frame(cfg_card, bg=card_bg)
+        row_a.pack(fill=tk.X, padx=10, pady=(10, 6))
+        tk.Label(row_a, text="抽奖次数", bg=card_bg, fg="#374151").pack(side=tk.LEFT)
+        tk.Entry(
+            row_a, textvariable=self.gacha_cdp_max_var, width=5, justify="center",
+            relief=tk.FLAT, bg="#ffffff", fg="#111827", highlightbackground=line,
+            highlightthickness=1, insertbackground="#111827",
+        ).pack(side=tk.LEFT, padx=(6, 4), ipady=3)
+        tk.Label(row_a, text="0 为无限", bg=card_bg, fg=sub).pack(side=tk.LEFT)
+        tk.Label(row_a, text="绿钻消耗", bg=card_bg, fg="#374151").pack(side=tk.LEFT, padx=(16, 0))
+        tk.Entry(
+            row_a, textvariable=self.gacha_cdp_green_var, width=5, justify="center",
+            relief=tk.FLAT, bg="#ffffff", fg="#111827", highlightbackground=line,
+            highlightthickness=1, insertbackground="#111827",
+        ).pack(side=tk.LEFT, padx=(6, 4), ipady=3)
+        tk.Label(row_a, text="0 为不花", bg=card_bg, fg=sub).pack(side=tk.LEFT)
+
+        row_b = tk.Frame(cfg_card, bg=card_bg)
+        row_b.pack(fill=tk.X, padx=8, pady=(0, 8))
+        tk.Checkbutton(
+            row_b, text="先刷候选池（出目标再抽）", variable=self.gacha_cdp_refresh_var,
+            bg=card_bg, fg="#374151", activebackground=card_bg, selectcolor="#ffffff",
+            bd=0, highlightthickness=0, font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT)
+        tk.Checkbutton(
+            row_b, text="红也算目标（品级6+）", variable=self.gacha_cdp_red_var,
+            bg=card_bg, fg="#374151", activebackground=card_bg, selectcolor="#ffffff",
+            bd=0, highlightthickness=0, font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
+        # ---------- 统计卡 ----------
+        stat_card = tk.Frame(parent, bg=card_bg, highlightbackground=line, highlightthickness=1)
+        stat_card.pack(fill=tk.X, pady=(0, 8))
+
+        stat_left = tk.Frame(stat_card, bg=card_bg)
+        stat_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=8)
+        self.gacha_stat_draws_var = tk.StringVar(value="0")
+        self.gacha_stat_red_var = tk.StringVar(value="0")
+        self.gacha_stat_cost_var = tk.StringVar(value="0")
+        self.gacha_stat_green_var = tk.StringVar(value="0")
+        self.gacha_stat_time_var = tk.StringVar(value="0:00")
+        stat_rows = [
+            ("总次数", self.gacha_stat_draws_var, "红出现", self.gacha_stat_red_var),
+            ("总消耗", self.gacha_stat_cost_var, "绿钻消耗", self.gacha_stat_green_var),
+        ]
+        for r, (l1, v1, l2, v2) in enumerate(stat_rows):
+            tk.Label(stat_left, text=l1, bg=card_bg, fg=sub).grid(row=r, column=0, sticky="w", pady=1)
+            tk.Label(
+                stat_left, textvariable=v1, bg=card_bg, fg="#111827",
+                font=("Microsoft YaHei UI", 10, "bold"),
+            ).grid(row=r, column=1, sticky="w", padx=(4, 18))
+            tk.Label(stat_left, text=l2, bg=card_bg, fg=sub).grid(row=r, column=2, sticky="w")
+            tk.Label(
+                stat_left, textvariable=v2, bg=card_bg, fg="#111827",
+                font=("Microsoft YaHei UI", 10, "bold"),
+            ).grid(row=r, column=3, sticky="w", padx=(4, 0))
+        tk.Label(stat_left, text="总时间", bg=card_bg, fg=sub).grid(row=2, column=0, sticky="w", pady=1)
+        tk.Label(
+            stat_left, textvariable=self.gacha_stat_time_var, bg=card_bg, fg="#111827",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        ).grid(row=2, column=1, sticky="w", padx=(4, 0))
+
+        btns = tk.Frame(stat_card, bg=card_bg)
+        btns.pack(side=tk.RIGHT, padx=10, pady=8)
+        tk.Button(
+            btns, text="清空", command=self.clear_gacha_stats, relief=tk.FLAT, bd=0,
+            bg="#e9edf2", fg="#374151", activebackground="#dfe4ea",
+            font=("Microsoft YaHei UI", 10), padx=14, pady=9, cursor="hand2",
+        ).pack(side=tk.LEFT)
+        self.gacha_cdp_btn = tk.Button(
+            btns, text="开始招募", command=self.toggle_gacha_cdp, relief=tk.FLAT, bd=0,
+            bg="#2f9e5f", fg="#ffffff", activebackground="#26864f", activeforeground="#ffffff",
+            font=("Microsoft YaHei UI", 10, "bold"), padx=16, pady=9, cursor="hand2",
         )
-        self._gacha_hero_canvas.create_window((0, 0), window=self._gacha_hero_inner, anchor="nw")
+        self.gacha_cdp_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        # 状态 + 名单按钮同一行，省高度
+        line2 = tk.Frame(parent, bg=page_bg)
+        line2.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(
+            line2, textvariable=self.gacha_cdp_status, bg=page_bg, fg="#555",
+            anchor="w", justify=tk.LEFT,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        for text, cmd in (
+            ("重载", self.reload_gacha_heroes),
+            ("全不选", lambda: self._set_all_heroes(False)),
+            ("全选", lambda: self._set_all_heroes(True)),
+        ):
+            tk.Button(
+                line2, text=text, command=cmd, relief=tk.FLAT, bd=0,
+                bg="#eef1f6", fg="#374151", activebackground="#e2e8f0",
+                font=("Microsoft YaHei UI", 8), padx=8, pady=2, cursor="hand2",
+            ).pack(side=tk.RIGHT, padx=(4, 0))
+
+        # ---------- 英雄列表 ----------
+        head2 = tk.Frame(parent, bg=page_bg)
+        head2.pack(fill=tk.X)
+        self.gacha_hero_count = tk.StringVar(value="最大倍数招募（已选 0）")
+        tk.Label(
+            head2, textvariable=self.gacha_hero_count, bg=page_bg, fg="#111827",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        ).pack(side=tk.LEFT)
+        tk.Label(head2, text="出现 / 中 / 碎片", bg=page_bg, fg=sub).pack(side=tk.RIGHT)
+
+        holder = tk.Frame(parent, bg=page_bg)
+        holder.pack(fill=tk.BOTH, expand=True)
+        self._gacha_hero_canvas = tk.Canvas(
+            holder, height=88, width=300, highlightthickness=0, bd=0, bg=page_bg
+        )
+        hero_sb = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=self._gacha_hero_canvas.yview)
+        self._gacha_hero_inner = tk.Frame(self._gacha_hero_canvas, bg=page_bg)
+        self._gacha_hero_inner.columnconfigure(0, weight=1)
+        self._gacha_hero_inner.columnconfigure(1, weight=1)
+        win_id = self._gacha_hero_canvas.create_window(
+            (0, 0), window=self._gacha_hero_inner, anchor="nw"
+        )
         self._gacha_hero_canvas.configure(yscrollcommand=hero_sb.set)
 
         hero_shown = {"v": True}
 
-        def _sync_hero_sb(_e=None):
-            # 名单能一屏放完就不要滚动条
+        def _sync_hero(_e=None):
+            # 两列铺满宽度；名单能一屏放完就不要滚动条
             try:
+                self._gacha_hero_canvas.configure(
+                    scrollregion=self._gacha_hero_canvas.bbox("all")
+                )
+                self._gacha_hero_canvas.itemconfigure(
+                    win_id, width=self._gacha_hero_canvas.winfo_width()
+                )
                 need = (
                     self._gacha_hero_inner.winfo_reqheight()
                     > self._gacha_hero_canvas.winfo_height() + 1
@@ -700,59 +825,16 @@ class AppUI:
             except tk.TclError:
                 pass
 
-        self._gacha_hero_inner.bind("<Configure>", _sync_hero_sb, add="+")
-        self._gacha_hero_canvas.bind("<Configure>", _sync_hero_sb)
+        self._gacha_hero_inner.bind("<Configure>", _sync_hero, add="+")
+        self._gacha_hero_canvas.bind("<Configure>", _sync_hero)
         self._gacha_hero_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         hero_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
         self._gacha_hero_vars: Dict[int, tk.BooleanVar] = {}
         self._gacha_hero_counter_vars: Dict[int, tk.StringVar] = {}
         self._hero_name_cache: Dict[int, str] = {}
-
-        # ---------- 抽卡设置 / 运行 ----------
-        cdp_box = ttk.LabelFrame(parent, text="直连抽卡（先打开游戏里的酒馆/招募界面）", padding=6)
-        cdp_box.pack(fill=tk.X, pady=(0, 6))
-
-        self.gacha_cdp_targets_var = tk.StringVar(value=str(gacha.get("cdp_targets", "")))
-        self.gacha_cdp_red_var = tk.BooleanVar(value=bool(gacha.get("cdp_keep_red", False)))
-        self.gacha_cdp_max_var = tk.StringVar(value=str(gacha.get("cdp_max_draws", 0)))
-        self.gacha_cdp_delay_var = tk.StringVar(value=str(gacha.get("cdp_delay_ms", 1200)))
-        self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
-        self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
-        # 这两项不再给用户调：固定「有目标就用最大倍率抽」「抽中也放弃，一直抽」
-        self.gacha_cdp_maxbet_var = tk.BooleanVar(value=True)
-        self.gacha_cdp_abandon_var = tk.BooleanVar(value=True)
-        self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
-        self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
-
-        # 参数行不再显示（值保留在 config 里，按默认走）；腾出高度让 19 个英雄一屏全显示
-        btns = ttk.Frame(cdp_box)
-        btns.pack(fill=tk.X, pady=(2, 4))
-        self.gacha_cdp_btn = ttk.Button(
-            btns, text="开始直连抽卡", width=14, command=self.start_gacha_cdp, style="Accent.TButton"
-        )
-        self.gacha_cdp_btn.pack(side=tk.LEFT)
-        ttk.Button(btns, text="停止", width=10, command=self.stop_gacha_cdp).pack(side=tk.LEFT, padx=8)
-        self.gacha_cdp_status = tk.StringVar(value="打开招募面板后再点开始")
-        ttk.Label(
-            cdp_box, textvariable=self.gacha_cdp_status, foreground="#555", wraplength=330,
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(4, 0))
-
-        if self.dev_mode:
-            ttk.Label(cdp_box, textvariable=self.gacha_pool_var, wraplength=430, foreground="#1a4d8f").pack(anchor=tk.W)
-            ttk.Label(cdp_box, textvariable=self.gacha_records_var, wraplength=430, foreground="#0a7a2f").pack(anchor=tk.W)
-
-        # ---------- 抽中统计 ----------
-        hit_box = ttk.LabelFrame(parent, text="抽中统计", padding=8)
-        hit_box.pack(fill=tk.X, pady=(0, 6))
-        self.gacha_hit_total_var = tk.StringVar(value="共 0 张（目标 0 张）")
-        ttk.Label(
-            hit_box, textvariable=self.gacha_hit_total_var, foreground="#0a7a2f"
-        ).pack(anchor=tk.W)
-        self.gacha_hit_var = tk.StringVar(value="还没有抽中目标英雄")
-        ttk.Label(
-            hit_box, textvariable=self.gacha_hit_var, foreground="#333", wraplength=330, justify=tk.LEFT
-        ).pack(anchor=tk.W, pady=(4, 0))
+        self._gacha_running = False
+        self._gacha_start_ts = None
 
         # 旧版「截图识别抽卡」参数只保留变量
         self.card_template_labels: Dict[str, tk.Label] = {}
@@ -2987,9 +3069,8 @@ class AppUI:
 
     def _update_hero_count(self) -> None:
         try:
-            total = len(self._gacha_hero_vars)
             checked = sum(1 for v in self._gacha_hero_vars.values() if v.get())
-            self.gacha_hero_count.set(f"参考名单 {total} 个（已勾 {checked}）")
+            self.gacha_hero_count.set(f"最大倍数招募（已选 {checked}）")
         except tk.TclError:
             pass
 
@@ -3022,16 +3103,22 @@ class AppUI:
         self._hero_name_cache = {hid: name for hid, name in rows}
         checked = self._fixed_checked_ids()
         for index, (hero_id, name) in enumerate(rows):
-            cell = ttk.Frame(self._gacha_hero_inner)
-            cell.grid(row=index // 2, column=index % 2, sticky=tk.W, padx=(4, 2), pady=1)
+            cell = tk.Frame(
+                self._gacha_hero_inner, bg="#ffffff",
+                highlightbackground="#e3e8ef", highlightthickness=1,
+            )
+            cell.grid(row=index // 2, column=index % 2, sticky="ew", padx=3, pady=1)
             var = tk.BooleanVar(value=(hero_id in checked))
-            ttk.Checkbutton(
-                cell, text=name, variable=var, width=6, command=self._update_hero_count
-            ).pack(side=tk.LEFT)
+            tk.Checkbutton(
+                cell, text=name, variable=var, command=self._update_hero_count,
+                bg="#ffffff", activebackground="#ffffff", selectcolor="#ffffff",
+                bd=0, highlightthickness=0, anchor="w",
+                font=("Microsoft YaHei UI", 10),
+            ).pack(side=tk.LEFT, padx=(6, 0), pady=2)
             counter = tk.StringVar(value="0/0/0")
-            ttk.Label(
-                cell, textvariable=counter, foreground="#6b7280", anchor=tk.W, width=8
-            ).pack(side=tk.LEFT, padx=(2, 0))
+            tk.Label(
+                cell, textvariable=counter, bg="#ffffff", fg="#6b7280",
+            ).pack(side=tk.RIGHT, padx=(0, 8))
             self._gacha_hero_vars[hero_id] = var
             self._gacha_hero_counter_vars[hero_id] = counter
         self._update_hero_count()
@@ -3108,7 +3195,23 @@ class AppUI:
             self.gacha_cdp_status.set("开始失败：" + str(result.get("message")))
             self.append_log("直连抽卡开始失败：" + str(result.get("message")))
             return
-        self.gacha_cdp_btn.configure(text="抽卡中…")
+        self._gacha_running = True
+        self._gacha_start_ts = time.monotonic()
+        try:
+            self.gacha_cdp_btn.configure(text="停止", bg="#c0392b", activebackground="#a93226")
+        except tk.TclError:
+            pass
+        for var, value in (
+            (self.gacha_stat_draws_var, "0"),
+            (self.gacha_stat_red_var, "0"),
+            (self.gacha_stat_cost_var, "0"),
+            (self.gacha_stat_green_var, "0"),
+            (self.gacha_stat_time_var, "0:00"),
+        ):
+            try:
+                var.set(value)
+            except tk.TclError:
+                pass
         self.gacha_cdp_status.set("已开始，读取招募面板…")
         self.append_log("已开始直连抽卡")
         self.root.after(600, self._tick_gacha_cdp)
@@ -3118,14 +3221,52 @@ class AppUI:
             self._gacha_cdp().stop()
         except Exception:  # noqa: BLE001
             pass
+        self._gacha_running = False
         try:
-            self.gacha_cdp_btn.configure(text="开始直连抽卡")
+            self.gacha_cdp_btn.configure(text="开始招募", bg="#2f9e5f", activebackground="#26864f")
         except tk.TclError:
             pass
         try:
             self.gacha_cdp_status.set("已停止")
         except tk.TclError:
             pass
+
+    def toggle_gacha_cdp(self) -> None:
+        """一个按钮：没跑就开，跑着就停。"""
+        if getattr(self, "_gacha_running", False):
+            self.stop_gacha_cdp()
+        else:
+            self.start_gacha_cdp()
+
+    def clear_gacha_stats(self) -> None:
+        """清空统计数字（引擎自己的计数在下次开始时才重置）。"""
+        if getattr(self, "_gacha_running", False):
+            try:
+                self.gacha_cdp_status.set("先点「停止」再清空")
+            except tk.TclError:
+                pass
+            return
+        self._frag_base = {}
+        self._gold_base = None
+        self._gacha_start_ts = None
+        for var in (
+            self.gacha_stat_draws_var, self.gacha_stat_red_var,
+            self.gacha_stat_cost_var, self.gacha_stat_green_var,
+        ):
+            try:
+                var.set("0")
+            except tk.TclError:
+                pass
+        try:
+            self.gacha_stat_time_var.set("0:00")
+            self.gacha_cdp_status.set("统计已清空")
+        except tk.TclError:
+            pass
+        for var in getattr(self, "_gacha_hero_counter_vars", {}).values():
+            try:
+                var.set("0/0/0")
+            except tk.TclError:
+                pass
 
     def _tick_gacha_cdp(self) -> None:
         try:
@@ -3134,12 +3275,7 @@ class AppUI:
             snap = None
         if snap:
             stats = snap.get("stats") or {}
-            text = (
-                f"抽 {stats.get('draws', 0)} / 放弃 {stats.get('abandoned', 0)}"
-                f" / 保留 {stats.get('kept', 0)}"
-            )
-            if stats.get("refreshes"):
-                text += f" / 刷新 {stats.get('refreshes')}（绿钻 {stats.get('greenSpent', 0)}）"
+            text = ""
             candidates = snap.get("candidates") or []
             if candidates:
                 cache = getattr(self, "_hero_name_cache", {})
@@ -3181,72 +3317,60 @@ class AppUI:
                     pass
 
             records = snap.get("records") or []
-            total_hit = sum(int(r.get("count") or 0) for r in records)
-            target_hit = sum(
-                int((info or {}).get("hit") or 0)
-                for info in (counters or {}).values()
-            )
             gold = snap.get("gold")
             if isinstance(gold, (int, float)) and self._gold_base is None:
                 self._gold_base = int(gold)
-            spent_txt = ""
-            if isinstance(gold, (int, float)) and self._gold_base is not None:
-                spent = max(0, self._gold_base - int(gold))
-                spent_txt = f"，消耗金币 {spent:,}"
+
+            # ---- 统计卡 / 按钮状态 ----
+            running = bool(snap.get("running"))
+            self._gacha_running = running
             try:
-                self.gacha_hit_total_var.set(
-                    f"共 {total_hit} 张（目标 {target_hit} 张，抽了 {stats.get('draws', 0)} 次{spent_txt}）"
-                )
+                if running:
+                    self.gacha_cdp_btn.configure(
+                        text="停止", bg="#c0392b", activebackground="#a93226"
+                    )
+                else:
+                    self.gacha_cdp_btn.configure(
+                        text="开始招募", bg="#2f9e5f", activebackground="#26864f"
+                    )
             except tk.TclError:
                 pass
-            if records:
-                ordered = sorted(
-                    records,
-                    key=lambda r: (-int(r.get("count") or 0), -int(r.get("quality") or 0)),
+            try:
+                all_records = snap.get("records") or []
+                reds = sum(
+                    int(r.get("count") or 0)
+                    for r in all_records
+                    if int(r.get("quality") or 0) >= 6
                 )
-                try:
-                    self.gacha_hit_var.set(
-                        "，".join(f"{r.get('name')}×{r.get('count')}" for r in ordered)
-                    )
-                except tk.TclError:
-                    pass
-            else:
-                try:
-                    self.gacha_hit_var.set("还没有抽中英雄")
-                except tk.TclError:
-                    pass
-            if records:
-                records = sorted(
-                    records,
-                    key=lambda r: (-int(r.get("count") or 0), -int(r.get("quality") or 0)),
-                )
-                text_records = "，".join(
-                    f"{r.get('name')}×{r.get('count')}" for r in records[:20]
-                )
-                try:
-                    self.gacha_records_var.set("抽中：" + text_records)
-                except tk.TclError:
-                    pass
-            else:
-                try:
-                    self.gacha_records_var.set("抽中：尚未出货")
-                except tk.TclError:
-                    pass
-            if snap.get("action"):
-                text += " | " + str(snap.get("action"))
-            if snap.get("stopReason"):
-                text += " | " + str(snap.get("stopReason"))
+                spent = 0
+                if isinstance(gold, (int, float)) and self._gold_base is not None:
+                    spent = max(0, self._gold_base - int(gold))
+                self.gacha_stat_draws_var.set(str(int(stats.get("draws") or 0)))
+                self.gacha_stat_red_var.set(str(reds))
+                self.gacha_stat_cost_var.set(f"{spent:,}")
+                self.gacha_stat_green_var.set(str(int(stats.get("greenSpent") or 0)))
+                if running and self._gacha_start_ts:
+                    secs = max(0, int(time.monotonic() - self._gacha_start_ts))
+                    self.gacha_stat_time_var.set(f"{secs // 60}:{secs % 60:02d}")
+            except tk.TclError:
+                pass
+
+            for part in (snap.get("action"), snap.get("stopReason")):
+                part = str(part or "").strip()
+                if part:
+                    text = (text + " | " + part) if text else part
             if not snap.get("ready") and snap.get("stateReason"):
-                text += " | " + str(snap.get("stateReason"))
+                part = str(snap.get("stateReason")).strip()
+                if part:
+                    text = (text + " | " + part) if text else part
+            if not text:
+                text = "待开始"
             try:
                 self.gacha_cdp_status.set(text)
             except tk.TclError:
                 return
             if not snap.get("running"):
-                try:
-                    self.gacha_cdp_btn.configure(text="开始直连抽卡")
-                except tk.TclError:
-                    pass
+                self._gacha_running = False
                 return
         try:
             self.root.after(600, self._tick_gacha_cdp)
