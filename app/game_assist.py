@@ -604,6 +604,44 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return {}
 
+    def daily_task_list(self) -> list:
+        """读日常任务：编号/进度/目标/是否已领/目标地图坐标。"""
+        js = r"""
+(function(){try{
+  var mod=null;
+  for (var pair of System.entries()) { var ex=pair[1]; if(ex&&ex.SNFA){mod=ex;break;} }
+  if(!mod) return '[]';
+  var s=mod.SNFA.AWXW;
+  var rows=(s&&typeof s.DHPZ==='function')?s.DHPZ():[];
+  var out=[];
+  for (var i=0;i<rows.length;i++){
+    var t=rows[i]; if(!t) continue;
+    out.push({id:t.UHNB, progress:(t.GPIC&&t.GPIC.WZMG)||0, target:t.DHDO||t.RSHY||0,
+      claimed:!!t.KLBW, mapId:t.MIKP||0, x:t.KRXF||0, y:t.JRGO||0});
+  }
+  return JSON.stringify(out);
+}catch(e){return 'ERR '+((e&&e.message)||e)}})()
+"""
+        try:
+            raw = self.bridge.eval_js(js)
+            data = json.loads(raw or "[]")
+            return data if isinstance(data, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def goto_task_point(self, map_id: int, x: int, y: int) -> str:
+        """按任务给的目标点传送过去（游戏自己的 NMKO）。"""
+        js = (
+            "(function(){try{var w=window.VKXX;if(!w) return 'no';"
+            "if(typeof w.NMKO!=='function') return 'no NMKO';"
+            "w.NMKO(%d,%d,%d,(function(){}));return 'ok';"
+            "}catch(e){return 'ERR '+((e&&e.message)||e)}})()" % (int(map_id), int(x), int(y))
+        )
+        try:
+            return str(self.bridge.eval_js(js))
+        except Exception as exc:  # noqa: BLE001
+            return "ERR " + str(exc)
+
     def list_heroes(self) -> list:
         """读游戏里拥有的英雄列表（编号/名字/品质）。"""
         try:

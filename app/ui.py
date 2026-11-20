@@ -117,6 +117,28 @@ VISION_WIDE = "1 · 扩大索敌"
 VISION_CHOICES = [VISION_OFF, VISION_ZERO, VISION_WIDE]
 
 
+# 日常任务编号 -> 名字（游戏里的任务表编号，用于显示和判断能不能自动做）
+DAILY_TASK_NAMES = {
+    1043: "合成一次宝石",
+    1007: "击杀BOSS熔岩领主",
+    1015: "开启5个地图宝箱",
+    1017: "分享游戏1次",
+    1032: "击杀BOSS黑石矮人王",
+    1033: "击杀BOSS炎魔大帝",
+    1034: "挑战云顶试炼塔1次",
+    1009: "招募英雄3次",
+    1010: "升级英雄1次",
+    1012: "挑战荣耀竞技场",
+    1014: "采集资源50次",
+    1018: "观看视频广告",
+    1035: "击杀1000只怪物",
+    1047: "登录游戏",
+}
+
+# 这些任务不做（要花钱/要 SDK/用户不要）
+DAILY_TASK_SKIP = ("宝箱", "分享", "广告", "招募", "合成", "竞技", "试炼")
+
+
 def _fmt_hp(value: Any) -> str:
     """血量显示：1.2亿 / 15.8万 / 3780。"""
     try:
@@ -848,6 +870,7 @@ class AppUI:
         daily_row.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(8, 0))
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
         ttk.Button(daily_row, text="一键完成(任务卡)", width=16, command=self.complete_daily).pack(side=tk.LEFT, padx=4)
+        ttk.Button(daily_row, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
         ttk.Label(daily_row, textvariable=self.assist_daily_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
@@ -1665,6 +1688,78 @@ class AppUI:
             )
         else:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
+
+    def auto_daily(self) -> None:
+        """自动去完成任务（传送/战斗/采集），做完自动领取。"""
+        if getattr(self, "_auto_daily_busy", False):
+            messagebox.showinfo("自动做日常", "上一次还在跑")
+            return
+        if not messagebox.askyesno(
+            "自动做日常",
+            "会自动传送、打怪、采集来完成任务（最多 4 分钟），完成后自动领取。\n继续？",
+        ):
+            return
+        if not self.assist.running:
+            self.start_assist()
+        self._auto_daily_busy = True
+        self.assist_daily_status.set("自动做日常：准备中…")
+        threading.Thread(target=self._auto_daily_worker, daemon=True).start()
+
+    def _auto_daily_log(self, text: str) -> None:
+        try:
+            self.root.after(0, lambda: self.assist_daily_status.set(text))
+        except tk.TclError:
+            pass
+
+    def _auto_daily_collect(self) -> None:
+        try:
+            runner = InstructionRunner(bridge_provider=lambda: self.assist.bridge, log=self.append_log)
+            runner._mapping = load_mapping()
+            runner._collect(["活动"])
+        except Exception as exc:  # noqa: BLE001
+            self.append_log("采集失败：%s" % exc)
+
+    def _auto_daily_worker(self) -> None:
+        deadline = time.monotonic() + 240
+        try:
+            for _round in range(5):
+                tasks = self.assist.daily_task_list()
+                if not tasks:
+                    break
+                pending = [t for t in tasks if not t.get("claimed") and t.get("progress", 0) < t.get("target", 0)]
+                if not pending:
+                    break
+                for task in pending:
+                    if time.monotonic() > deadline:
+                        break
+                    name = DAILY_TASK_NAMES.get(task["id"], "任务%d" % task["id"])
+                    if any(word in name for word in DAILY_TASK_SKIP):
+                        continue
+                    self._auto_daily_log("自动做日常：%s（%s/%s）" % (name, task.get("progress"), task.get("target")))
+                    if "采集" in name:
+                        self._auto_daily_collect()
+                        continue
+                    map_id = int(task.get("mapId") or 0)
+                    if not map_id:
+                        continue
+                    for _attempt in range(3):
+                        if time.monotonic() > deadline:
+                            break
+                        self.assist.goto_task_point(map_id, task.get("x") or 0, task.get("y") or 0)
+                        time.sleep(12)
+                        fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task["id"])
+                        if fresh and fresh.get("progress", 0) >= fresh.get("target", 0):
+                            break
+            result = self.assist.claim_daily_tasks()
+            claimed = int(result.get("claimed") or 0)
+            left = int(result.get("waiting") or 0)
+            self._auto_daily_log("自动做日常结束：领了 %d 个，还剩 %d 个没完成" % (claimed, left))
+            self.append_log("自动做日常：领了 %d 个，还剩 %d 个" % (claimed, left))
+        except Exception as exc:  # noqa: BLE001
+            self.append_log("自动做日常出错：%s" % exc)
+            self._auto_daily_log("自动做日常出错：%s" % exc)
+        finally:
+            self._auto_daily_busy = False
 
     def complete_daily(self) -> None:
         """用任务卡把没做完的日常任务秒完成（会消耗任务卡）。"""
