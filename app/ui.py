@@ -858,88 +858,232 @@ class AppUI:
         self.reload_gacha_heroes()
 
     # ---------------- 游戏辅助 ----------------
+    # ------------------------------------------------------------ 首页（深色）
+
+    BG_TOP = "#0b1220"
+    BG_BOTTOM = "#182540"
+    BANNER_TOP = "#0a2f66"
+    BANNER_BOTTOM = "#2b8ae6"
+    CARD_BG = "#16233c"
+    CARD_LINE = "#2a3b5c"
+    TXT = "#e6ebf5"
+    SUB = "#9fb0c9"
+
+    @staticmethod
+    def _round_points(x0: float, y0: float, x1: float, y1: float, r: float):
+        """圆角矩形的顶点（用折线近似）。"""
+        import math
+
+        r = max(1.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+        pts = []
+        for cx, cy, start_deg in (
+            (x1 - r, y0 + r, -90),
+            (x1 - r, y1 - r, 0),
+            (x0 + r, y1 - r, 90),
+            (x0 + r, y0 + r, 180),
+        ):
+            for i in range(7):
+                a = math.radians(start_deg + 90.0 * i / 6)
+                pts.extend((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
+
+    @staticmethod
+    def _vgrad(canvas: tk.Canvas, x0, y0, x1, y1, top: str, bottom: str) -> None:
+        steps = max(2, int(y1 - y0))
+        c1 = canvas.winfo_rgb(top)
+        c2 = canvas.winfo_rgb(bottom)
+        for i in range(steps):
+            t = i / float(steps - 1)
+            r = int(c1[0] + (c2[0] - c1[0]) * t) >> 8
+            g = int(c1[1] + (c2[1] - c1[1]) * t) >> 8
+            b = int(c1[2] + (c2[2] - c1[2]) * t) >> 8
+            canvas.create_line(x0, y0 + i, x1, y0 + i, fill="#%02x%02x%02x" % (r, g, b))
+
     def _build_home_tab(self, parent: tk.Frame) -> None:
-        """首页：渐变头图 + 本机游戏卡片 + 辅助工具入口。"""
-        page_bg = "#f3f5f9"
+        """首页：深色科幻风（渐变头图 + 卡片 + 发光按钮）。"""
+        parent.configure(bg=self.BG_TOP)
+        canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=self.BG_TOP)
+        canvas.pack(fill=tk.BOTH, expand=True)
+        self._home_canvas = canvas
+        self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
+        self.home_status_var.trace_add("write", lambda *_a: self._sync_home_status())
+        canvas.bind("<Configure>", lambda _e: self._draw_home())
+        parent.after(30, self._draw_home)
 
-        banner = tk.Canvas(parent, height=132, highlightthickness=0, bd=0, bg=page_bg)
-        banner.pack(fill=tk.X)
+    def _sync_home_status(self) -> None:
+        item = getattr(self, "_home_status_item", None)
+        canvas = getattr(self, "_home_canvas", None)
+        if not item or canvas is None:
+            return
+        try:
+            canvas.itemconfigure(item, text=self.home_status_var.get())
+        except tk.TclError:
+            pass
 
-        about = tk.Button(
-            banner, text="关于", command=self._show_about, relief=tk.FLAT, bd=0,
-            bg="#ffffff", fg="#1e40af", activebackground="#e0e7ff",
-            font=("Microsoft YaHei UI", 9), padx=12, pady=4, cursor="hand2",
+    def _draw_home(self) -> None:
+        c = getattr(self, "_home_canvas", None)
+        if c is None:
+            return
+        try:
+            w = c.winfo_width()
+            h = c.winfo_height()
+        except tk.TclError:
+            return
+        if w <= 2 or h <= 2:
+            return
+
+        c.delete("all")
+        self._home_status_item = None
+
+        ui_font = "Microsoft YaHei UI"
+        banner_h = 150
+        self._home_buttons: Dict[str, Any] = {}
+
+        # ---------- 背景 ----------
+        self._vgrad(c, 0, 0, w, h, self.BG_TOP, self.BG_BOTTOM)
+
+        # ---------- 顶部蓝色渐变头图 ----------
+        self._vgrad(c, 0, 0, w, banner_h, self.BANNER_TOP, self.BANNER_BOTTOM)
+        c.create_line(0, banner_h, w, banner_h, fill="#57b0ff")
+        c.create_text(
+            24, banner_h * 0.56, anchor="w", text="百炼英雄 · 助手",
+            fill="#ffffff", font=(ui_font, 21, "bold"),
+        )
+        c.create_text(
+            24, banner_h * 0.78, anchor="w", text="百炼英雄 · 电脑版",
+            fill="#d6e9ff", font=(ui_font, 10),
         )
 
-        def _paint(_e=None):
-            w = max(1, banner.winfo_width())
-            h = 132
-            banner.delete("all")
-            c1 = (30, 64, 175)    # 深蓝
-            c2 = (59, 130, 246)   # 亮蓝
-            for y in range(h):
-                t = y / max(1, h - 1)
-                r = int(c1[0] + (c2[0] - c1[0]) * t)
-                g = int(c1[1] + (c2[1] - c1[1]) * t)
-                b = int(c1[2] + (c2[2] - c1[2]) * t)
-                banner.create_line(0, y, w, y, fill="#%02x%02x%02x" % (r, g, b))
-            banner.create_text(24, 58, anchor="w", text="百炼英雄 · 助手",
-                               fill="#ffffff", font=("Microsoft YaHei UI", 18, "bold"))
-            banner.create_text(24, 92, anchor="w", text="百炼英雄 · 电脑版",
-                               fill="#dbeafe", font=("Microsoft YaHei UI", 9))
-            banner.create_window(w - 14, 20, window=about, anchor="ne")
+        # 关于
+        ax0, ay0, ax1, ay1 = w - 104, 18, w - 16, 60
+        c.create_polygon(
+            self._round_points(ax0, ay0, ax1, ay1, 10),
+            fill="#ffffff", outline="#ffffff", tags=("home_about",),
+        )
+        c.create_text(
+            (ax0 + ax1) / 2, (ay0 + ay1) / 2, text="关于", fill="#1c4f9c",
+            font=(ui_font, 10, "bold"), tags=("home_about",),
+        )
+        c.tag_bind("home_about", "<Button-1>", lambda _e: self._show_about())
+        c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_about", "<Leave>", lambda _e: c.configure(cursor=""))
 
-        banner.bind("<Configure>", _paint)
-        parent.after(50, _paint)
+        # ---------- 本机游戏卡片（高度跟着状态文字走） ----------
+        x0, x1 = 16, w - 16
+        y0 = 172
+        title_id = c.create_text(
+            x0 + 18, y0 + 18, anchor="w", text="本机游戏",
+            fill=self.TXT, font=(ui_font, 11, "bold"),
+        )
+        self._home_status_item = c.create_text(
+            x0 + 18, y0 + 44, anchor="nw", text=self.home_status_var.get(),
+            fill="#c7d4e8", width=x1 - x0 - 40, font=(ui_font, 9), justify="left",
+        )
+        bbox = c.bbox(self._home_status_item)
+        text_bottom = bbox[3] if bbox else y0 + 64
+        by0 = max(y0 + 100, text_bottom + 26)
+        by1 = by0 + 42
+        card1_bottom = by1 + 16
 
-        card = tk.Frame(parent, bg="#ffffff", highlightbackground="#e3e8f0", highlightthickness=1)
-        card.pack(fill=tk.X, padx=16, pady=(16, 0))
-        tk.Label(card, text="本机游戏", bg="#ffffff", fg="#667085",
-                 font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", padx=14, pady=(12, 0))
+        # 打开游戏窗口（蓝色发光）
+        bx0, bx1 = x0 + 18, (x0 + x1) // 2 - 6
+        for grow, color, width, fill in (
+            (9, "#123c6b", 10, ""),
+            (5, "#2a6fbf", 7, ""),
+            (0, "", 0, "#2f7fe8"),
+        ):
+            c.create_polygon(
+                self._round_points(bx0 - grow, by0 - grow, bx1 + grow, by1 + grow, 20),
+                fill=fill, outline=color or "#63b3ff", width=width or 2,
+                tags=("home_open",),
+            )
+        c.create_text(
+            (bx0 + bx1) / 2, (by0 + by1) / 2, text="打开游戏窗口", fill="#ffffff",
+            font=(ui_font, 10, "bold"), tags=("home_open",),
+        )
 
-        self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
-        tk.Label(
-            card, textvariable=self.home_status_var, bg="#ffffff", fg="#1f2937",
-            font=("Microsoft YaHei UI", 10), justify=tk.LEFT, wraplength=400,
-        ).pack(anchor="w", padx=14, pady=(6, 10))
+        # 重新连接（描边）
+        cx0, cx1 = (x0 + x1) // 2 + 6, x1 - 18
+        c.create_polygon(
+            self._round_points(cx0, by0, cx1, by1, 20),
+            fill="#1b2a44", outline="#3a4c70", tags=("home_reconnect",),
+        )
+        c.create_text(
+            (cx0 + cx1) / 2, (by0 + by1) / 2, text="重新连接", fill="#c7d4e8",
+            font=(ui_font, 10), tags=("home_reconnect",),
+        )
 
-        row = tk.Frame(card, bg="#ffffff")
-        row.pack(fill=tk.X, padx=14, pady=(0, 14))
-        tk.Button(
-            row, text="打开游戏窗口", command=self.ask_open_game, relief=tk.FLAT, bd=0,
-            bg="#2563eb", fg="#ffffff", activebackground="#1d4ed8", activeforeground="#ffffff",
-            font=("Microsoft YaHei UI", 10, "bold"), pady=8, cursor="hand2",
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X)
-        tk.Button(
-            row, text="重新连接", command=self.reconnect_assist, relief=tk.FLAT, bd=0,
-            bg="#eef1f6", fg="#1f2937", activebackground="#e2e8f0",
-            font=("Microsoft YaHei UI", 10), pady=8, cursor="hand2",
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0))
+        for tag in ("home_open", "home_reconnect"):
+            c.tag_bind(tag, "<Enter>", lambda _e: c.configure(cursor="hand2"))
+            c.tag_bind(tag, "<Leave>", lambda _e: c.configure(cursor=""))
+        c.tag_bind("home_open", "<Button-1>", lambda _e: self.ask_open_game())
+        c.tag_bind("home_reconnect", "<Button-1>", lambda _e: self.reconnect_assist())
 
-        tk.Button(
-            parent, text="辅助工具", command=lambda: self._switch_mode("assist"),
-            relief=tk.FLAT, bd=0, bg="#16a34a", fg="#ffffff",
-            activebackground="#15803d", activeforeground="#ffffff",
-            font=("Microsoft YaHei UI", 14, "bold"), pady=12, cursor="hand2",
-        ).pack(fill=tk.X, padx=16, pady=(22, 0))
+        card1 = c.create_polygon(
+            self._round_points(x0, y0, x1, card1_bottom, 16),
+            fill=self.CARD_BG, outline=self.CARD_LINE,
+        )
+        c.tag_lower(card1, title_id)
 
-        tip = tk.Frame(parent, bg="#ffffff", highlightbackground="#e3e8f0", highlightthickness=1)
-        tip.pack(fill=tk.X, padx=16, pady=(18, 0))
-        tk.Label(tip, text="使用说明", bg="#ffffff", fg="#667085",
-                 font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", padx=14, pady=(12, 0))
-        tk.Label(
-            tip,
-            text="1. 打开游戏窗口，用验证码登录\n"
-                 "2. 进入主界面后会自动连接\n"
-                 "3. 点「辅助工具」开启红包 / 复活 / 刷新 / 闪现",
-            bg="#ffffff", fg="#475467", justify=tk.LEFT,
-            font=("Microsoft YaHei UI", 9),
-        ).pack(anchor="w", padx=14, pady=(6, 12))
+        # ---------- 辅助工具（发光六边形） ----------
+        hx0, hx1 = 46, w - 46
+        hy0 = card1_bottom + 26
+        hy1 = hy0 + 78
+        mid = (hy0 + hy1) / 2
+        cut = 30
+        hexa = [
+            hx0 + cut, hy0, hx1 - cut, hy0, hx1, mid,
+            hx1 - cut, hy1, hx0 + cut, hy1, hx0, mid,
+        ]
+        c.create_polygon(hexa, fill="", outline="#0d5f6e", width=16, tags=("home_assist",))
+        c.create_polygon(hexa, fill="", outline="#16b8cf", width=7, tags=("home_assist",))
+        c.create_polygon(
+            hexa, fill="#0d3b46", outline="#7ff0ff", width=2, tags=("home_assist",)
+        )
+        c.create_text(
+            hx0 + 26, mid, text="«", fill="#f59e0b",
+            font=(ui_font, 16, "bold"), tags=("home_assist",),
+        )
+        c.create_text(
+            hx1 - 26, mid, text="»", fill="#f59e0b",
+            font=(ui_font, 16, "bold"), tags=("home_assist",),
+        )
+        c.create_text(
+            (hx0 + hx1) / 2, mid, text="辅助工具", fill="#ffffff",
+            font=(ui_font, 18, "bold"), tags=("home_assist",),
+        )
+        c.tag_bind("home_assist", "<Button-1>", lambda _e: self._switch_mode("assist"))
+        c.tag_bind("home_assist", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_assist", "<Leave>", lambda _e: c.configure(cursor=""))
 
-        tk.Label(
-            parent, text="说明：使用脚本，封号自己负责", bg=page_bg, fg="#c0392b",
-            font=("Microsoft YaHei UI", 9), wraplength=400,
-        ).pack(side=tk.BOTTOM, pady=(0, 20))
+        # ---------- 使用说明 ----------
+        iy0 = hy1 + 24
+        iy1 = iy0 + 132
+        info = c.create_polygon(
+            self._round_points(x0, iy0, x1, iy1, 16),
+            fill=self.CARD_BG, outline=self.CARD_LINE,
+        )
+        info_title = c.create_text(
+            x0 + 18, iy0 + 18, anchor="w", text="使用说明",
+            fill=self.TXT, font=(ui_font, 11, "bold"),
+        )
+        c.tag_lower(info, info_title)
+        lines = [
+            "1. 打开游戏窗口，用验证码登录",
+            "2. 进入主界面后会自动连接",
+            "3. 点「辅助工具」开启红包 / 复活 / 刷新 / 闪现",
+        ]
+        for i, line in enumerate(lines):
+            c.create_text(
+                x0 + 20, iy0 + 50 + i * 26, anchor="w", text=line,
+                fill="#c7d4e8", font=(ui_font, 10),
+            )
+
+        # ---------- 底部说明 ----------
+        c.create_text(
+            w / 2, h - 34, text="说明：使用脚本，封号自己负责",
+            fill="#f97316", font=(ui_font, 10),
+        )
 
     def _show_about(self) -> None:
         messagebox.showinfo(
