@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 120
+RUNTIME_VERSION = 121
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 120
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 120;
+  const VERSION = 121;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -51,7 +51,8 @@ RUNTIME_JS = r"""
   const RED_TICK_MS = 60;     // 红包专用高频轮询：尽量贴着 30~60ms 一帧
   const RETRY_MS = 3000;      // 解析失败的重试间隔
   const CLAIM_GAP_MS = 50;    // 两次领取之间的最小间隔，避免瞬间刷请求
-  const RED_SCAN_MSG = 24;    // 每个频道只看最新的 24 条，红包都在最新
+  const RED_SCAN_MSG = 100;   // 每个频道扫满（游戏每个频道只留 100 条）：
+                              // 实测聊天共 3 个频道 —— 世界 world_*、跨服 cross_*、公会 guild_*
   const RED_SEEN_MAX = 600;   // 已处理红包 id 的缓存上限，超出就清空重建
   const RED_STORE_KEY = 'zz_red_daily';  // 今日红包数/绿钻存在页面里，刷新页面不清零
 
@@ -327,7 +328,7 @@ RUNTIME_JS = r"""
       try {
         groups.forEach(list => {
           if (!Array.isArray(list)) return;
-          // 只扫最新 RED_SCAN_MSG 条：红包一定在最新一端，老消息没必要每 60ms 过一遍
+          // 扫满整段（最多 100 条）：红包可能在 24 条以外，漏了就被别人抢走
           const start = Math.max(0, list.length - RED_SCAN_MSG);
           for (let i = list.length - 1; i >= start; i -= 1) {
             const message = list[i];
