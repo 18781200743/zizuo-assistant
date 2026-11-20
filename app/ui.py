@@ -244,8 +244,8 @@ class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("桌面找图助手")
-        self.root.geometry("780x940")
-        self.root.minsize(680, 720)
+        self.root.geometry("840x960")
+        self.root.minsize(720, 760)
 
         self.config: Dict[str, Any] = load_config()
         self.slots: List[List[str]] = load_slots()
