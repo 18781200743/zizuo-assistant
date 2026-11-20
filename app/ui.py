@@ -845,30 +845,20 @@ class AppUI:
         self.assist_damage_status = tk.StringVar(value="尚未开启")
         ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=560).grid(row=0, column=4, sticky=tk.W)
 
-        ttk.Label(combat, text="英雄免伤").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        self.assist_shield_var = tk.StringVar(value=_seconds_text(assist.get("shield_percent", 100)))
-        ttk.Entry(combat, textvariable=self.assist_shield_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
-        ttk.Label(combat, text="%（100 = 不受伤）").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
-        self.assist_shield_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("shield"))
-        self.assist_shield_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
-        self.assist_shield_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
-
-        ttk.Label(combat, text="技能冷却").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, text="技能冷却").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
-        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=2, column=1, padx=(8, 2), pady=(6, 0))
-        ttk.Label(combat, text="秒").grid(row=2, column=2, sticky=tk.W, pady=(6, 0))
+        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(combat, text="秒").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("cooldown"))
-        self.assist_cooldown_btn.grid(row=2, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_cooldown_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
         self.assist_cooldown_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(
             parent,
             text=(
-                "提示：「英雄免伤」只削减怪物打到你身上的伤害数值，不写单位属性；"
-                "倍伤 / 冷却改的是战斗数值，可能被判定异常，而且开着它们时不能开地图刷新。"
-                "　（「视野」已移除：视野值会进每帧哈希，改了一定被服务端对出来）"
+                "提示：倍伤 / 冷却会改动战斗数值，可能被判定异常（实测会弹「战斗数据与服务器不一致」）；"
+                "开着它们时不能开地图刷新。　「免伤」「视野」已移除：都会进服务端校验。"
             ),
             foreground="#c62828",
             wraplength=980,
@@ -1271,7 +1261,6 @@ class AppUI:
                 continue
         for key, var, low, high in (
             ("damage_value", getattr(self, "assist_damage_var", None), 1.0, 70000.0),
-            ("shield_percent", getattr(self, "assist_shield_var", None), 1.0, 100.0),
             ("cooldown_seconds", getattr(self, "assist_cooldown_var", None), 0.1, 3600.0),
         ):
             if var is None:
@@ -1523,20 +1512,9 @@ class AppUI:
                 "英雄倍伤",
             )
         elif name == "shield":
-            try:
-                value = float(self.assist_shield_var.get().strip())
-            except (ValueError, AttributeError):
-                messagebox.showerror("参数错误", "免伤比例需要是数字")
-                return
-            if not 1 <= value <= 100:
-                messagebox.showerror("参数错误", "免伤比例需要在 1 - 100 之间")
-                return
-            send = 0 if enabled else value
-            btn, status, label = (
-                self.assist_shield_btn,
-                self.assist_shield_status,
-                "英雄免伤",
-            )
+            # 免伤会改伤害数值，服务端校验必中（实测弹「战斗数据与服务器不一致」），已移除
+            messagebox.showinfo("英雄免伤", "这个功能已移除：伤害数值会被服务端校验（会弹「战斗数据与服务器不一致」）。")
+            return
         elif name == "vision":
             # 视野功能已移除：视野值会进每帧哈希，改了一定会被服务端校验出来
             messagebox.showinfo("视野修改", "这个功能已移除（会被服务器检测）。野外刷 BOSS 不需要它。")
@@ -1702,7 +1680,7 @@ class AppUI:
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
-                       self.assist_damage_btn, self.assist_shield_btn,
+                       self.assist_damage_btn,
                        self.assist_cooldown_btn, self.assist_revive_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
@@ -1711,7 +1689,6 @@ class AppUI:
         self.assist_red_btn.configure(text="关闭" if red.get("enabled") else "开启")
         self.assist_wish_btn.configure(text="关闭" if wish.get("enabled") else "开启")
         self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
-        self.assist_shield_btn.configure(text="关闭" if (combat.get("shield") or {}).get("enabled") else "开启")
         self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
@@ -1719,7 +1696,6 @@ class AppUI:
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
         self.assist_damage_status.set(str(damage.get("reason") or ("需要版本映射" if gap else "尚未开启")))
-        self.assist_shield_status.set(str((combat.get("shield") or {}).get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_cooldown_status.set(str(cooldown.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         revive_reason = str(revive.get("reason") or ("需要版本映射" if gap else "尚未开启"))
         if revive.get("count"):

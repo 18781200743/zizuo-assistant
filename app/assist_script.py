@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 100
+RUNTIME_VERSION = 101
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 100
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 100;
+  const VERSION = 101;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1441,6 +1441,9 @@ RUNTIME_JS = r"""
   }
 
   function setCombat(name, value) {
+    if (name === 'shield') {
+      throw Error('英雄免伤已停用：伤害数值会被服务端校验（实测弹「战斗数据与服务器不一致」）');
+    }
     const cfg = combatConfig();
     const item = state.combat[name];
     // 免伤只改伤害数值，不碰单位属性，可以和地图刷新一起开
