@@ -1719,6 +1719,32 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log("采集失败：%s" % exc)
 
+    def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
+        """击杀指定 BOSS：在当前地图里按名字找它，闪现过去打；找不到就重进地图刷。"""
+        task_id = task.get("id")
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
+            if int(fresh.get("progress") or 0) >= int(fresh.get("target") or 1):
+                return
+            monsters = self.assist.list_monsters()
+            cand = [m for m in monsters if boss_name in str(m.get("name") or "")]
+            if cand:
+                nearest = min(cand, key=lambda m: int(m.get("d") or 0))
+                self._auto_daily_log("自动做日常：去找 %s（%s 米）" % (boss_name, nearest.get("d")))
+                try:
+                    self.assist.set_feature(
+                        "blinkTo",
+                        {"x": nearest.get("x"), "y": nearest.get("y"), "mode": "instant"},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(12.0)
+            else:
+                self._auto_daily_log("自动做日常：地图里没看到 %s，重进地图刷" % boss_name)
+                self.assist.reload_map_now()
+                time.sleep(4.0)
+
     def _auto_daily_kill_count(self, task: Dict[str, Any]) -> None:
         """击杀 N 只怪：闪现到怪堆 + 重进地图刷怪，直到任务进度达标或超时。"""
         task_id = task.get("id")
@@ -1799,6 +1825,9 @@ class AppUI:
                     self._auto_daily_log("自动做日常：%s（%s/%s）" % (name, task.get("progress"), task.get("target")))
                     if "分享" in name:
                         self._auto_daily_share()
+                        continue
+                    if name.startswith("击杀BOSS"):
+                        self._auto_daily_kill_boss(task, name[len("击杀BOSS"):].strip())
                         continue
                     if "只怪" in name:
                         self._auto_daily_kill_count(task)
