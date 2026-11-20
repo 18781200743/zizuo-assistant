@@ -1442,7 +1442,8 @@ class AppUI:
             self.start_assist()
         except Exception as exc:  # noqa: BLE001
             self.append_log(f"游戏辅助自动连接失败：{exc}")
-        self.root.after(600, self._auto_open_game_window)
+        # 不自动打开游戏窗口（用户要求）；需要时点首页「打开游戏窗口」
+        # self.root.after(600, self._auto_open_game_window)
         self.root.after(4000, self.reload_gacha_heroes)
 
     def _game_open_mode(self) -> str:
