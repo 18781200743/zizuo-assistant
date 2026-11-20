@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 126
+RUNTIME_VERSION = 127
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 126
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 126;
+  const VERSION = 127;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1859,6 +1859,24 @@ RUNTIME_JS = r"""
     const dead0 = deadHeroCount();
     if (!dead0) return '现在没有英雄倒地，不需要复活';
 
+    // 刚全灭时面板要过一两秒才弹：等它出来，走「放弃」免费回城复活
+    const waitPanelUntil = now() + 6000;
+    while (now() < waitPanelUntil) {
+      const p2 = findDefeatPanel(cfg);
+      if (p2) {
+        box.reason = '全灭：正在放弃回城…';
+        await reviveByCamp(cfg, p2);
+        box.reason = '已回城复活，等地图就绪…';
+        await waitWorldReady(20000);
+        try { teleportNoFx(spot.x, spot.y); } catch (_) { try { teleportFire(spot.x, spot.y); } catch (_) { /* ignore */ } }
+        await new Promise(r => setTimeout(r, 400));
+        box.count += 1;
+        box.lastResult = '手动复活（全灭回城）';
+        return '全灭：已回城复活并传回原地';
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+
     // ① 先试只结束战斗（原地复活，0.1 秒，不传送）
     box.reason = '手动复活中…';
     leaveBattle();
@@ -3187,6 +3205,7 @@ RUNTIME_JS = r"""
       }
       box.deadCount = dead;
       if (!dead) {
+        box.panelWaitAt = 0;
         if (state.campFly.running) {
           box.reason = state.campFly.reason;
           return;
@@ -3201,6 +3220,16 @@ RUNTIME_JS = r"""
               + (box.mode === 'campfly' ? '回营地复活并飞回原位' : '复活');
         }
         return;
+      }
+      // 传送营地并不会让英雄复活：全灭时必须等面板出来点「放弃」（免费回城复活）
+      if (box.mode === 'tp') {
+        if (!box.panelWaitAt) {
+          box.panelWaitAt = nowMs + 8000;
+          box.reason = '检测到 ' + dead + ' 个英雄倒地，等全灭面板（免费回城复活）…';
+          return;
+        }
+        if (nowMs < box.panelWaitAt) return;
+        box.panelWaitAt = 0;
       }
     }
 
