@@ -1001,6 +1001,109 @@ class AppUI:
             b = int(c1[2] + (c2[2] - c1[2]) * t) >> 8
             canvas.create_line(x0, y0 + i, x1, y0 + i, fill="#%02x%02x%02x" % (r, g, b))
 
+    @staticmethod
+    def _banner_photo(w: int, h: int):
+        """画一条紫蓝渐变 + 科技光效的头图（无人物），返回 PhotoImage。"""
+        try:
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFilter, ImageTk
+        except Exception:  # noqa: BLE001
+            return None
+        if w <= 2 or h <= 2:
+            return None
+        ss = 2
+        W, H = int(w) * ss, int(h) * ss
+
+        # 横向三段渐变：深紫 → 亮紫 → 深紫
+        stops = [
+            (0.00, (24, 16, 44)),
+            (0.24, (52, 28, 82)),
+            (0.46, (116, 50, 148)),
+            (0.62, (172, 80, 196)),
+            (0.80, (104, 48, 144)),
+            (1.00, (40, 26, 64)),
+        ]
+        xs = np.linspace(0.0, 1.0, W)
+        cols = np.zeros((W, 3))
+        for i in range(len(stops) - 1):
+            p0, c0 = stops[i]
+            p1, c1 = stops[i + 1]
+            m = (xs >= p0) & (xs <= p1)
+            t = (xs[m] - p0) / max(1e-6, p1 - p0)
+            for ch in range(3):
+                cols[m, ch] = c0[ch] + (c1[ch] - c0[ch]) * t
+        arr = np.tile(cols[None, :, :], (H, 1, 1))
+        ys = np.linspace(0.0, 1.0, H)[:, None]
+        shade = 0.58 + 0.42 * np.exp(-((ys - 0.42) ** 2) / (2 * 0.30 ** 2))
+        arr = arr * shade[:, :, None]
+        base = Image.fromarray(np.clip(arr, 0, 255).astype("uint8"), "RGB").convert("RGBA")
+
+        # 光效层
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        cx, cy = W * 0.78, H * 0.52
+        r = H * 0.62
+        gd.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            outline=(120, 220, 255, 70), width=max(2, 3 * ss),
+        )
+        r2 = H * 0.44
+        gd.ellipse(
+            [cx - r2, cy - r2, cx + r2, cy + r2],
+            outline=(150, 235, 255, 45), width=max(2, 2 * ss),
+        )
+        # 虚线环
+        for deg in range(0, 360, 10):
+            if deg % 20:
+                continue
+            gd.arc(
+                [cx - r * 1.12, cy - r * 1.12, cx + r * 1.12, cy + r * 1.12],
+                deg, deg + 8, fill=(190, 245, 255, 55), width=max(2, 2 * ss),
+            )
+        # 右侧柔光
+        blob = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        bd = ImageDraw.Draw(blob)
+        bd.ellipse(
+            [cx - H * 0.75, cy - H * 0.75, cx + H * 0.55, cy + H * 0.75],
+            fill=(150, 90, 210, 70),
+        )
+        blob = blob.filter(ImageFilter.GaussianBlur(H * 0.18))
+        base = Image.alpha_composite(base, blob)
+        base = Image.alpha_composite(base, glow.filter(ImageFilter.GaussianBlur(1.2 * ss)))
+
+        # 斜向亮带
+        streak = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(streak)
+        sd.polygon(
+            [(W * 0.30, H), (W * 0.48, 0), (W * 0.62, 0), (W * 0.44, H)],
+            fill=(255, 220, 255, 26),
+        )
+        streak = streak.filter(ImageFilter.GaussianBlur(H * 0.06))
+        base = Image.alpha_composite(base, streak)
+
+        # 细网格点（左上角科技感）
+        dots = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        dd = ImageDraw.Draw(dots)
+        step = max(4, 9 * ss)
+        for yy in range(0, int(H * 0.62), step):
+            for xx in range(0, int(W * 0.42), step):
+                dd.point((xx, yy), fill=(180, 210, 255, 26))
+        base = Image.alpha_composite(base, dots)
+
+        # 底部一条亮边
+        ed = ImageDraw.Draw(base)
+        ed.line([(0, H - 1), (W, H - 1)], fill=(140, 190, 255, 90), width=max(1, ss))
+
+        return ImageTk.PhotoImage(base.resize((int(w), int(h)), Image.LANCZOS))
+
+    def _home_banner(self, w: int, h: int):
+        """按尺寸缓存头图。"""
+        key = (int(w), int(h))
+        if getattr(self, "_banner_key", None) != key:
+            self._banner_photo_ref = self._banner_photo(w, h)
+            self._banner_key = key
+        return getattr(self, "_banner_photo_ref", None)
+
     def _build_home_tab(self, parent: tk.Frame) -> None:
         """首页：深色科幻风（渐变头图 + 卡片 + 发光按钮）。"""
         parent.configure(bg=self.BG_TOP)
@@ -1050,9 +1153,13 @@ class AppUI:
         # ---------- 背景 ----------
         self._vgrad(c, 0, 0, w, h, self.BG_TOP, self.BG_BOTTOM)
 
-        # ---------- 顶部蓝色渐变头图 ----------
-        self._vgrad(c, 0, 0, w, banner_h, self.BANNER_TOP, self.BANNER_BOTTOM)
-        c.create_line(0, banner_h, w, banner_h, fill="#57b0ff")
+        # ---------- 顶部紫蓝渐变头图 ----------
+        photo = self._home_banner(w, banner_h)
+        if photo is not None:
+            c.create_image(0, 0, image=photo, anchor="nw")
+        else:
+            self._vgrad(c, 0, 0, w, banner_h, "#2a1f4a", "#7d3d9e")
+            c.create_line(0, banner_h, w, banner_h, fill="#8d6ac0")
         c.create_text(
             24, banner_h * 0.56, anchor="w", text="百炼英雄 · 助手",
             fill="#ffffff", font=(ui_font, 21, "bold"),
