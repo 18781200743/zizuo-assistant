@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 102
+RUNTIME_VERSION = 103
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 102
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 102;
+  const VERSION = 103;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1359,25 +1359,50 @@ RUNTIME_JS = r"""
 
   /* ---- 技能冷却 ---- */
 
+  /** 我方 10 个英雄自己的技能编号（只改这些，怪物不受影响）。 */
+  function heroSkillIds(cfg) {
+    const ids = new Set();
+    try {
+      const world = combatWorld(cfg);
+      const core = world[cfg.world.core];
+      const manager = core[cfg.world.manager]();
+      const team = core[cfg.world.team](world[cfg.world.player]);
+      const members = manager[cfg.world.members](team) || [];
+      for (const id of members) {
+        const unit = core[cfg.world.read](id);
+        const attr = unit ? unit[cfg.world.attribute] : null;
+        const list = attr && attr.CNIS;
+        if (!Array.isArray(list)) continue;
+        for (const row of list) {
+          if (row && Number.isSafeInteger(row.ZLTC)) ids.add(row.ZLTC);
+        }
+      }
+    } catch (_) { /* 不在普通地图时返回空的，调用方会退化成全局 */ }
+    return ids;
+  }
+
   function cooldownRows(cfg) {
     const manager = combatManager(cfg);
     const skills = manager[cfg.config.table](cfg.config.skillTable);
     if (!Array.isArray(skills)) throw Error('技能配置表（' + cfg.config.skillTable + '）读取失败');
+    const wanted = heroSkillIds(cfg);
     const rows = [];
     for (const row of skills) {
       if (!row) continue;
       const id = row[cfg.config.skill];
       if (!Number.isSafeInteger(id)) continue;
+      // 只改我方英雄的技能；拿不到队伍时才退化成全局
+      if (wanted.size && !wanted.has(id)) continue;
       const cd = row[cfg.config.cooldown];
       if (!cd || typeof cd !== 'object') continue;
       const ms = cd[cfg.config.ms];
       if (typeof ms !== 'number' || !Number.isFinite(ms)) continue;
-      // 参考工具只改长冷却技能（40~60 秒），这里保持一致
-      if (ms < 40000 || ms > 60000) continue;
+      // 有冷却的技能都算（原来只认 40~60 秒的大招）
+      if (ms < 1000) continue;
       rows.push({ id, row, cd });
     }
     if (!rows.length) throw Error('技能配置里没找到可改的冷却（版本可能变了）');
-    return { manager, skills, rows };
+    return { manager, skills, rows, heroes: wanted.size };
   }
 
   /** 原生冷却读取入口（参考工具：az_lengqueDuquMokuai / az_lengqueDuquFangfa）。 */
