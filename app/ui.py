@@ -1123,6 +1123,35 @@ class AppUI:
         self.refresh_command_list()
         self.cmd_status.set("已删除")
 
+    def _restore_feature(self, feature: str, seconds: float, btn, status, attempt: int = 0) -> None:
+        """恢复上次开着的刷新；刚启动时运行时可能还没装好，失败就过几秒重试。"""
+        try:
+            state = self.assist.state or {}
+            enabled = bool((state.get(feature) or {}).get("enabled"))
+            if enabled:
+                btn.configure(text="关闭")
+                if status is not None:
+                    status.set("已恢复上次的开启状态")
+                return
+            self.assist.set_feature(feature, seconds)
+            btn.configure(text="关闭")
+            if status is not None:
+                status.set("正在恢复上次的开启状态…")
+            if attempt == 0:
+                self.append_log(
+                    "已恢复%s地图刷新：等 %g 秒" % ("小怪" if feature == "mob" else "BOSS", seconds)
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if attempt < 5:
+            try:
+                self.root.after(
+                    4000,
+                    lambda: self._restore_feature(feature, seconds, btn, status, attempt + 1),
+                )
+            except tk.TclError:
+                pass
+
     def _assist_names(self) -> Dict[str, Any]:
         assist = normalize_assist(self.config.get("assist"))
         names: Dict[str, Any] = {
@@ -1193,14 +1222,7 @@ class AppUI:
                 seconds = max(1.0, float(str(var.get()).strip() or "1"))
             except (tk.TclError, ValueError):
                 seconds = 1.0
-            try:
-                self.assist.set_feature(feature, seconds)
-                btn.configure(text="关闭")
-                if status is not None:
-                    status.set("正在恢复上次的开启状态…")
-                self.append_log("已恢复%s地图刷新：等 %g 秒" % ("小怪" if feature == "mob" else "BOSS", seconds))
-            except Exception:  # noqa: BLE001
-                pass
+            self._restore_feature(feature, seconds, btn, status, attempt=0)
 
     def _auto_connect_assist(self) -> None:
         """界面一打开就连上（和参考工具一样，不需要「启动辅助」这一步）。"""
