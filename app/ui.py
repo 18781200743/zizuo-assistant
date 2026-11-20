@@ -869,7 +869,6 @@ class AppUI:
         daily_row = ttk.Frame(tools)
         daily_row.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(8, 0))
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
-        ttk.Button(daily_row, text="一键完成(任务卡)", width=16, command=self.complete_daily).pack(side=tk.LEFT, padx=4)
         ttk.Button(daily_row, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
         ttk.Button(daily_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
