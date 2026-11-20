@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 12
+GACHA_VERSION = 13
 
 GACHA_JS = r"""
 (() => {
@@ -31,7 +31,7 @@ GACHA_JS = r"""
     error: '',
     stopReason: '',
     lastHero: null,
-    stats: { draws: 0, kept: 0, abandoned: 0, refreshes: 0, greenSpent: 0 },
+    stats: { draws: 0, kept: 0, abandoned: 0, refreshes: 0, greenSpent: 0, redAppear: 0 },
     // 抽中记录：英雄编号 -> { id, name, quality, count }
     records: Object.create(null),
     // 目标英雄计数：编号 -> { appear 出现次数, hit 抽中次数 }
@@ -354,6 +354,12 @@ GACHA_JS = r"""
         const ctr = state.counters[item.heroId] || (state.counters[item.heroId] = { appear: 0, hit: 0 });
         ctr.appear += 1;
       }
+      // 「红出现」= 候选池里出现过的红（品级 6 以上）数量
+      try {
+        for (const item of candidates) {
+          if (heroInfo(item.heroId, g).quality >= 6) state.stats.redAppear += 1;
+        }
+      } catch (_) {}
     }
 
     if (picked) {
@@ -532,6 +538,7 @@ GACHA_JS = r"""
         abandoned: state.stats.abandoned,
         refreshes: state.stats.refreshes,
         greenSpent: state.stats.greenSpent,
+        redAppear: state.stats.redAppear,
       },
       candidates,
       records: Object.keys(state.records).map(id => state.records[id]),
@@ -564,7 +571,7 @@ GACHA_JS = r"""
     }
     const view = findView(g);
     if (!view) throw Error('请先打开酒馆/招募界面再开始');
-    state.stats = { draws: 0, kept: 0, abandoned: 0, refreshes: 0, greenSpent: 0 };
+    state.stats = { draws: 0, kept: 0, abandoned: 0, refreshes: 0, greenSpent: 0, redAppear: 0 };
     state.records = Object.create(null);
     state.counters = Object.create(null);
     state.poolKey = '';

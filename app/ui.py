@@ -3430,11 +3430,16 @@ class AppUI:
                 pass
             try:
                 all_records = snap.get("records") or []
-                reds = sum(
-                    int(r.get("count") or 0)
-                    for r in all_records
-                    if int(r.get("quality") or 0) >= 6
-                )
+                red_appear = stats.get("redAppear")
+                if red_appear is None:
+                    # 旧运行时没有这个字段，用抽到的红代替
+                    reds = sum(
+                        int(r.get("count") or 0)
+                        for r in all_records
+                        if int(r.get("quality") or 0) >= 6
+                    )
+                else:
+                    reds = int(red_appear or 0)
                 spent = 0
                 if isinstance(gold, (int, float)) and self._gold_base is not None:
                     spent = max(0, self._gold_base - int(gold))
@@ -3450,8 +3455,11 @@ class AppUI:
 
             for part in (snap.get("action"), snap.get("stopReason")):
                 part = str(part or "").strip()
-                if part:
-                    text = (text + " | " + part) if text else part
+                if not part:
+                    continue
+                if part in text:
+                    continue
+                text = (text + " | " + part) if text else part
             if not snap.get("ready") and snap.get("stateReason"):
                 part = str(snap.get("stateReason")).strip()
                 if part:
