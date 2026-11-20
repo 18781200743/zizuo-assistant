@@ -1469,7 +1469,7 @@ class AppUI:
         c.delete("all")
         ui_font = "Microsoft YaHei UI"
 
-        if getattr(self, "assist_theme", "night") == "night":
+        if getattr(self, "assist_theme", "day") == "night":
             photo = self._assist_bg_photo(w, h)
             if photo is not None:
                 self._assist_bg_ref = photo
@@ -1510,7 +1510,7 @@ class AppUI:
         )
         c.create_text(
             (tx0 + tx1) / 2, 31,
-            text="☀ 白天" if getattr(self, "assist_theme", "night") == "night" else "☾ 夜间",
+            text="☀ 白天" if getattr(self, "assist_theme", "day") == "night" else "☾ 夜间",
             fill="#e8e3ff", font=(ui_font, 9), tags=("a_theme",),
         )
         c.tag_bind("a_theme", "<Button-1>", lambda _e: self.toggle_assist_theme())
@@ -1673,7 +1673,7 @@ class AppUI:
 
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
-        self.assist_theme = str(self.config.get("assist_theme") or "night")
+        self.assist_theme = str(self.config.get("assist_theme") or "day")
 
         # ---------- 顶部：背景 + 状态 + 分类按钮 ----------
         top = tk.Canvas(parent, height=self.ASSIST_TOP_H, highlightthickness=0, bd=0, bg="#0c1220")
