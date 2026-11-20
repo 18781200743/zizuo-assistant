@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 113
+RUNTIME_VERSION = 114
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 113
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 113;
+  const VERSION = 114;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2699,6 +2699,20 @@ RUNTIME_JS = r"""
     }
   }
 
+  /** 立刻重进当前地图（刷怪用），成功返回 true。 */
+  function reloadMapNow() {
+    try {
+      const mapCfg = mapConfig();
+      const holder = window[mapCfg.holder];
+      const st = holder && mapCfg.state ? holder[mapCfg.state] : null;
+      const mapId = st && mapCfg.mapId ? st[mapCfg.mapId] : null;
+      if (!mapId) return Promise.resolve(false);
+      return fastEnterMap(holder, mapCfg, mapId);
+    } catch (_) {
+      return Promise.resolve(false);
+    }
+  }
+
   /** 调游戏自己的分享入口（任务「分享游戏1次」用）。 */
   function shareGame() {
     try {
@@ -4298,6 +4312,7 @@ RUNTIME_JS = r"""
     claimDailyViaService,
     completeDailyWithCards,
     shareGame,
+    reloadMapNow,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

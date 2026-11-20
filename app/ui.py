@@ -1719,6 +1719,29 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log("采集失败：%s" % exc)
 
+    def _auto_daily_kill_count(self, task: Dict[str, Any]) -> None:
+        """击杀 N 只怪：闪现到怪堆 + 重进地图刷怪，直到任务进度达标或超时。"""
+        task_id = task.get("id")
+        target = int(task.get("target") or 0)
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
+            if int(fresh.get("progress") or 0) >= target:
+                return
+            monsters = self.assist.list_monsters()
+            if monsters:
+                nearest = min(monsters, key=lambda m: int(m.get("d") or 0))
+                try:
+                    self.assist.set_feature(
+                        "blinkTo", {"x": nearest.get("x"), "y": nearest.get("y"), "mode": "instant"}
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(4.0)
+            else:
+                self.assist.reload_map_now()
+                time.sleep(3.5)
+
     def _auto_daily_share(self) -> None:
         """分享任务：调游戏分享入口 → 最小化/恢复窗口 → 等任务进度。"""
         try:
@@ -1776,6 +1799,9 @@ class AppUI:
                     self._auto_daily_log("自动做日常：%s（%s/%s）" % (name, task.get("progress"), task.get("target")))
                     if "分享" in name:
                         self._auto_daily_share()
+                        continue
+                    if "只怪" in name:
+                        self._auto_daily_kill_count(task)
                         continue
                     if "采集" in name:
                         self._auto_daily_collect()

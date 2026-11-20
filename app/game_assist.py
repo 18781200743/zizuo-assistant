@@ -629,6 +629,17 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return []
 
+    def reload_map_now(self) -> bool:
+        """立刻重进当前地图（刷怪）。"""
+        try:
+            self.bridge.eval_js(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(a&&a.reloadMapNow){a.reloadMapNow();}return 'ok'}catch(e){return 'ERR'}})()"
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def share_game(self) -> dict:
         """调游戏分享入口（分享任务用）。"""
         try:
