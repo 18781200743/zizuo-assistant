@@ -630,15 +630,21 @@ class GameAssist:
             return []
 
     def task_go(self, task_name: str) -> dict:
-        """任务面板里点指定任务的「前往」。"""
-        try:
-            raw = self.bridge.eval_js(
-                "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTaskGo "
-                "? window.__zzAssist.clickTaskGo(%s) : null)" % json.dumps(task_name, ensure_ascii=False)
-            )
-            return json.loads(raw or "null") or {}
-        except Exception:  # noqa: BLE001
-            return {}
+        """任务面板里点指定任务的「前往」（面板刚打开时行还没渲染，重试几次）。"""
+        result: dict = {}
+        for _ in range(8):
+            try:
+                raw = self.bridge.eval_js(
+                    "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTaskGo "
+                    "? window.__zzAssist.clickTaskGo(%s) : null)" % json.dumps(task_name, ensure_ascii=False)
+                )
+                result = json.loads(raw or "null") or {}
+            except Exception:  # noqa: BLE001
+                result = {}
+            if result.get("ok"):
+                return result
+            time.sleep(0.4)
+        return result
 
     def task_teleport_track(self) -> dict:
         """点弹窗里的「传送并追踪」。"""
