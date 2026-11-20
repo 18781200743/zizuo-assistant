@@ -441,6 +441,15 @@ class GameAssist:
         if not self.running:
             self.start()
 
+    def clear_stuck(self) -> Dict[str, Any]:
+        """清除卡住的切图标记（传送/回城点了没反应时用）。"""
+        if not self.running:
+            self.start()
+        try:
+            return self.bridge.command("clearStuck", 1)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": str(exc)}
+
     def set_feature(self, feature: str, value: Any) -> None:
         """只排队，真正的调用在轮询线程里做，UI 永远不会卡。"""
         if feature == "redPacket":

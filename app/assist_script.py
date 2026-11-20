@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 129
+RUNTIME_VERSION = 130
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 129
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 129;
+  const VERSION = 130;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4153,6 +4153,28 @@ RUNTIME_JS = r"""
       heroTimerRestore();
       try { stopCampFly('已关闭'); } catch (_) { /* ignore */ }
       return { ok: true, message: '已全部关闭（战斗数值已恢复）' };
+    }
+
+    if (feature === 'clearStuck') {
+      // 切图标记卡住时（XXNL/FZJB），游戏会静默忽略所有传送/回城
+      let w = null;
+      try { w = window[mapConfig().holder]; } catch (_) { w = null; }
+      if (!w) return { ok: false, message: '还没进入游戏（找不到世界服务）' };
+      let before = {};
+      try { before = { xxnl: !!w.XXNL, fzjb: !!w.FZJB, loading: !!(w.HOFK && w.HOFK.VOAT) }; } catch (_) { before = {}; }
+      try { w.XXNL = false; } catch (_) { /* ignore */ }
+      try { w.FZJB = false; } catch (_) { /* ignore */ }
+      try { if (w.HOFK) w.HOFK.VOAT = false; } catch (_) { /* ignore */ }
+      try {
+        const mapCfg = mapConfig();
+        const st = mapCfg && mapCfg.state ? w[mapCfg.state] : null;
+        if (st && mapCfg.loading && st[mapCfg.loading] !== undefined) st[mapCfg.loading] = false;
+      } catch (_) { /* ignore */ }
+      return {
+        ok: true,
+        message: '已清除卡住的切图标记（清除前：XXNL=' + (before.xxnl ? '卡住' : '正常')
+          + '，加载中=' + (before.loading ? '是' : '否') + '）',
+      };
     }
 
     if (feature === 'blinkTo') {

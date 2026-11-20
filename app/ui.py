@@ -799,6 +799,14 @@ class AppUI:
         ttk.Label(refresh, textvariable=self.assist_boss_status, foreground="#666").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
         self.assist_gold_var = tk.StringVar(value="BOSS 金币 0")
         ttk.Label(refresh, textvariable=self.assist_gold_var, foreground="#a35a00").grid(row=1, column=5, sticky=tk.E, padx=(10, 0), pady=(6, 0))
+        ttk.Button(refresh, text="清除卡图", width=10, command=self.clear_stuck).grid(
+            row=2, column=0, sticky=tk.W, pady=(8, 0)
+        )
+        ttk.Label(
+            refresh,
+            text="传送 / 回城点了没反应时点一下（清掉卡住的切图标记）",
+            foreground="#666",
+        ).grid(row=2, column=1, columnspan=4, sticky=tk.W, padx=(8, 0), pady=(8, 0))
 
         # ---------- 红包 / 祈愿 ----------
         free = ttk.LabelFrame(parent, text="红包 / 祈愿", padding=10)
@@ -1639,6 +1647,17 @@ class AppUI:
         self.assist.set_feature("revive", {"mode": "tp", "delay": 0})
         self.assist_revive_status.set("一直开着：有人倒地就自动复活")
         self.append_log("已发送：开启自动复活（一直开着）")
+
+    def clear_stuck(self) -> None:
+        """清除卡住的切图标记：传送/回城点了没反应时用。"""
+        if not self.assist.running:
+            self.start_assist()
+        result = self.assist.clear_stuck()
+        message = str((result or {}).get("message") or "已尝试清除")
+        try:
+            self.append_log("已发送：" + message)
+        except Exception:  # noqa: BLE001
+            pass
 
     def revive_now(self) -> None:
         """手动复活一次（免费：0.1 秒原地拉起倒地的英雄，不传送、不花货币）。"""
