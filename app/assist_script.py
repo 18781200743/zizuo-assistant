@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 130
+RUNTIME_VERSION = 132
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 130
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 130;
+  const VERSION = 132;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2840,24 +2840,67 @@ RUNTIME_JS = r"""
       if (!canvas) return { ok: false, error: '找不到画布' };
       const handler = function (ev) {
         try {
-          // 找 Canvas 相机
-          let cam = null;
+          // 游戏地图用的是 GameMapCamera/Camera（透视相机），screenToWorld 在这版不可靠，
+          // 但 worldToScreen 是准的 → 用「世界→屏幕」反推仿射变换，再求逆。
           const scene = window.cc.director.getScene();
-          (function walk(n, d) {
-            if (!n || cam || d > 10) return;
-            const c = n.getComponent(window.cc.Canvas);
-            if (c && c.cameraComponent) cam = c.cameraComponent;
-            (n.children || []).forEach(k => walk(k, d + 1));
-          })(scene, 0);
+          let cam = null;
+          try {
+            const camNode = window.cc.find('Root/GameScene/GameMapCamera/Camera', scene);
+            if (camNode) cam = camNode.getComponent(window.cc.Camera);
+          } catch (_) { cam = null; }
+          if (!cam) {
+            (function walk(n, d) {
+              if (!n || cam || d > 10) return;
+              const c = n.getComponent && n.getComponent(window.cc.Camera);
+              if (c && c.projection === 1) cam = c;
+              (n.children || []).forEach(k => walk(k, d + 1));
+            })(scene, 0);
+          }
+          let baseX = 0, baseY = 0;
+          try {
+            const mv = window.cc.find('Root/GameScene/GameMapCanvas/MapView', scene);
+            if (mv) {
+              const bp = mv.getWorldPosition();
+              baseX = bp.x; baseY = bp.y;
+            }
+          } catch (_) { baseX = 0; baseY = 0; }
+
           const rect = canvas.getBoundingClientRect();
           const vp = window.cc.view.getVisibleSizeInPixel();
           const sx = (ev.clientX - rect.left) * vp.width / rect.width;
           const sy = vp.height - (ev.clientY - rect.top) * vp.height / rect.height;
           let wx = null, wy = null;
-          if (cam && typeof cam.screenToWorld === 'function') {
-            const v3 = window.cc.v3 ? window.cc.v3(sx, sy, 0) : { x: sx, y: sy, z: 0 };
-            const w = cam.screenToWorld(v3);
-            if (w) { wx = Math.round(w.x); wy = Math.round(w.y); }
+          if (cam) {
+            try {
+              const cp = cam.node.getWorldPosition();
+              // 相机中心（游戏世界坐标，已经是 ADUX/WUZI 那套）
+              const cx = cp.x - baseX, cy = cp.y - baseY;
+              const toScreen = (gx, gy) => {
+                const s = cam.worldToScreen(new window.cc.Vec3(gx + baseX, gy + baseY, 0));
+                return [s.x, s.y];
+              };
+              const p0 = toScreen(cx, cy);
+              const p1 = toScreen(cx + 1000, cy);
+              const p2 = toScreen(cx, cy + 1000);
+              // 屏幕 = M * 世界（每 1000 单位的屏幕增量）
+              const m00 = (p1[0] - p0[0]) / 1000, m01 = (p2[0] - p0[0]) / 1000;
+              const m10 = (p1[1] - p0[1]) / 1000, m11 = (p2[1] - p0[1]) / 1000;
+              const det = m00 * m11 - m01 * m10;
+              if (Math.abs(det) > 1e-9) {
+                const dx = sx - p0[0], dy = sy - p0[1];
+                wx = Math.round(cx + (m11 * dx - m01 * dy) / det);
+                wy = Math.round(cy + (-m10 * dx + m00 * dy) / det);
+              }
+            } catch (_) { wx = null; wy = null; }
+          }
+          if (wx === null || wy === null) {
+            // 兜底：老的 screenToWorld
+            try {
+              if (cam && typeof cam.screenToWorld === 'function') {
+                const w = cam.screenToWorld(new window.cc.Vec3(sx, sy, 0));
+                if (w) { wx = Math.round(w.x - baseX); wy = Math.round(w.y - baseY); }
+              }
+            } catch (_) { /* ignore */ }
           }
           window.__zzPick = { x: wx, y: wy, at: Date.now(), screen: [Math.round(sx), Math.round(sy)],
             client: [Math.round(ev.clientX), Math.round(ev.clientY)] };
