@@ -244,8 +244,16 @@ class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("百炼英雄 · 助手")
-        self.root.geometry("480x920")
-        self.root.minsize(460, 680)
+        _w, _h = 480, 760
+        try:
+            _sw = self.root.winfo_screenwidth()
+            _sh = self.root.winfo_screenheight()
+            _x = max(0, (_sw - _w) // 2)
+            _y = max(0, (_sh - _h) // 3)
+            self.root.geometry("%dx%d+%d+%d" % (_w, _h, _x, _y))
+        except Exception:  # noqa: BLE001
+            self.root.geometry("480x760")
+        self.root.minsize(460, 640)
 
         self.config: Dict[str, Any] = load_config()
         self.slots: List[List[str]] = load_slots()
@@ -433,7 +441,7 @@ class AppUI:
         self._page_gacha = ttk.Frame(self._content, padding=4)
         self._page_assist = ttk.Frame(self._content, padding=4)
         self._page_commands = ttk.Frame(self._content, padding=4)
-        self._page_home = ttk.Frame(self._content, padding=4)
+        self._page_home = tk.Frame(self._content, bg="#f3f5f9")
         self._scroll_canvases: Dict[str, tk.Canvas] = {}
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
         self._build_slots_tab(self._page_slots)
@@ -747,40 +755,88 @@ class AppUI:
         self.reload_gacha_heroes()
 
     # ---------------- 游戏辅助 ----------------
-    def _build_home_tab(self, parent: ttk.Frame) -> None:
-        """首页：标题 / 本机游戏状态 / 辅助工具入口 / 说明。"""
-        top = ttk.Frame(parent)
-        top.pack(fill=tk.X, pady=(6, 0))
-        ttk.Label(top, text="百炼英雄 · 助手", font=("Microsoft YaHei UI", 15, "bold")).pack(side=tk.LEFT)
-        ttk.Button(top, text="关于", command=self._show_about).pack(side=tk.RIGHT)
+    def _build_home_tab(self, parent: tk.Frame) -> None:
+        """首页：渐变头图 + 本机游戏卡片 + 辅助工具入口。"""
+        page_bg = "#f3f5f9"
 
-        card = ttk.LabelFrame(parent, text="本机游戏", padding=10)
-        card.pack(fill=tk.X, pady=(16, 0))
+        banner = tk.Canvas(parent, height=132, highlightthickness=0, bd=0, bg=page_bg)
+        banner.pack(fill=tk.X)
+
+        about = tk.Button(
+            banner, text="关于", command=self._show_about, relief=tk.FLAT, bd=0,
+            bg="#ffffff", fg="#1e40af", activebackground="#e0e7ff",
+            font=("Microsoft YaHei UI", 9), padx=12, pady=4, cursor="hand2",
+        )
+
+        def _paint(_e=None):
+            w = max(1, banner.winfo_width())
+            h = 132
+            banner.delete("all")
+            c1 = (30, 64, 175)    # 深蓝
+            c2 = (59, 130, 246)   # 亮蓝
+            for y in range(h):
+                t = y / max(1, h - 1)
+                r = int(c1[0] + (c2[0] - c1[0]) * t)
+                g = int(c1[1] + (c2[1] - c1[1]) * t)
+                b = int(c1[2] + (c2[2] - c1[2]) * t)
+                banner.create_line(0, y, w, y, fill="#%02x%02x%02x" % (r, g, b))
+            banner.create_text(24, 58, anchor="w", text="百炼英雄 · 助手",
+                               fill="#ffffff", font=("Microsoft YaHei UI", 18, "bold"))
+            banner.create_text(24, 92, anchor="w", text="百炼英雄 · 电脑版",
+                               fill="#dbeafe", font=("Microsoft YaHei UI", 9))
+            banner.create_window(w - 14, 20, window=about, anchor="ne")
+
+        banner.bind("<Configure>", _paint)
+        parent.after(50, _paint)
+
+        card = tk.Frame(parent, bg="#ffffff", highlightbackground="#e3e8f0", highlightthickness=1)
+        card.pack(fill=tk.X, padx=16, pady=(16, 0))
+        tk.Label(card, text="本机游戏", bg="#ffffff", fg="#667085",
+                 font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", padx=14, pady=(12, 0))
+
         self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
-        ttk.Label(
-            card, textvariable=self.home_status_var, foreground="#333",
-            wraplength=400, justify=tk.LEFT,
-        ).pack(anchor=tk.W)
-        row = ttk.Frame(card)
-        row.pack(fill=tk.X, pady=(10, 0))
-        ttk.Button(row, text="打开游戏窗口", command=self.ask_open_game).pack(
-            side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(row, text="重新连接", command=self.reconnect_assist).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0)
-        )
+        tk.Label(
+            card, textvariable=self.home_status_var, bg="#ffffff", fg="#1f2937",
+            font=("Microsoft YaHei UI", 10), justify=tk.LEFT, wraplength=400,
+        ).pack(anchor="w", padx=14, pady=(6, 10))
 
-        ttk.Button(
-            parent, text="辅助工具", style="Home.TButton",
-            command=lambda: self._switch_mode("assist"),
-        ).pack(fill=tk.X, pady=(28, 0))
+        row = tk.Frame(card, bg="#ffffff")
+        row.pack(fill=tk.X, padx=14, pady=(0, 14))
+        tk.Button(
+            row, text="打开游戏窗口", command=self.ask_open_game, relief=tk.FLAT, bd=0,
+            bg="#2563eb", fg="#ffffff", activebackground="#1d4ed8", activeforeground="#ffffff",
+            font=("Microsoft YaHei UI", 10, "bold"), pady=8, cursor="hand2",
+        ).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        tk.Button(
+            row, text="重新连接", command=self.reconnect_assist, relief=tk.FLAT, bd=0,
+            bg="#eef1f6", fg="#1f2937", activebackground="#e2e8f0",
+            font=("Microsoft YaHei UI", 10), pady=8, cursor="hand2",
+        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0))
 
-        ttk.Label(
-            parent,
-            text="说明：使用脚本，封号自己负责",
-            foreground="#c0392b",
-            wraplength=400,
-        ).pack(side=tk.BOTTOM, pady=(0, 24))
+        tk.Button(
+            parent, text="辅助工具", command=lambda: self._switch_mode("assist"),
+            relief=tk.FLAT, bd=0, bg="#16a34a", fg="#ffffff",
+            activebackground="#15803d", activeforeground="#ffffff",
+            font=("Microsoft YaHei UI", 14, "bold"), pady=12, cursor="hand2",
+        ).pack(fill=tk.X, padx=16, pady=(22, 0))
+
+        tip = tk.Frame(parent, bg="#ffffff", highlightbackground="#e3e8f0", highlightthickness=1)
+        tip.pack(fill=tk.X, padx=16, pady=(18, 0))
+        tk.Label(tip, text="使用说明", bg="#ffffff", fg="#667085",
+                 font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", padx=14, pady=(12, 0))
+        tk.Label(
+            tip,
+            text="1. 打开游戏窗口，用验证码登录\n"
+                 "2. 进入主界面后会自动连接\n"
+                 "3. 点「辅助工具」开启红包 / 复活 / 刷新 / 闪现",
+            bg="#ffffff", fg="#475467", justify=tk.LEFT,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", padx=14, pady=(6, 12))
+
+        tk.Label(
+            parent, text="说明：使用脚本，封号自己负责", bg=page_bg, fg="#c0392b",
+            font=("Microsoft YaHei UI", 9), wraplength=400,
+        ).pack(side=tk.BOTTOM, pady=(0, 20))
 
     def _show_about(self) -> None:
         messagebox.showinfo(
