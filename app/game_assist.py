@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import queue
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -583,14 +583,26 @@ class GameAssist:
             return {}
 
     def claim_daily_tasks(self) -> dict:
-        """领取当前任务面板里所有可领取的日常奖励。"""
+        """遍历任务面板所有页签，把能领的奖励全部领掉（约 3 秒）。"""
         try:
-            raw = self.bridge.eval_js(
-                "JSON.stringify(window.__zzAssist && window.__zzAssist.claimDailyTasks "
-                "? window.__zzAssist.claimDailyTasks() : null)"
+            self.bridge.eval_js(
+                "(window.__zzAssist && window.__zzAssist.claimAllDailyTabs "
+                "? window.__zzAssist.claimAllDailyTabs() : 'no-runtime')"
             )
-            return json.loads(raw or "null") or {}
         except Exception:  # noqa: BLE001
+            return {}
+        raw = "null"
+        for _ in range(20):
+            time.sleep(0.3)
+            try:
+                raw = self.bridge.eval_js("JSON.stringify(window.__zzDailyResult || null)")
+            except Exception:  # noqa: BLE001
+                continue
+            if raw and raw != "null":
+                break
+        try:
+            return json.loads(raw or "null") or {}
+        except ValueError:
             return {}
 
     def list_heroes(self) -> list:

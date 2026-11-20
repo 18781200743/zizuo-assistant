@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 107
+RUNTIME_VERSION = 108
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 107
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 107;
+  const VERSION = 108;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2543,29 +2543,82 @@ RUNTIME_JS = r"""
     }
   }
 
-  /** 领取当前面板里所有可领取的日常奖励，返回领取数量。 */
-  function claimDailyTasks() {
+  /** 任务面板里任意页签的行组件（DailyTasksListItemView / WeeklyTasksListItemView ...）。 */
+  function taskRowsAny() {
+    const rows = [];
     try {
-      const rows = dailyTaskRows();
-      if (!rows.length) return { ok: false, error: '任务面板还没打开' };
-      let claimed = 0;
-      let waiting = 0;
-      const details = [];
-      for (const comp of rows) {
-        let can = false;
-        try { can = !!(comp.VRVD && comp.VRVD.node && comp.VRVD.node.active); } catch (_) { can = false; }
-        let desc = '';
-        try { desc = String((comp.QRDV && comp.QRDV.string) || '').slice(0, 24); } catch (_) { desc = ''; }
-        if (can && typeof comp.VPMG === 'function') {
-          try { comp.VPMG(); claimed += 1; details.push('领：' + desc); } catch (_) { waiting += 1; }
-        } else {
-          waiting += 1;
+      const scene = window.cc.director.getScene();
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 8000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        const nm = String(n.name || '');
+        if (n.activeInHierarchy && /ListItemView$/.test(nm)) {
+          (n._components || []).forEach(c => {
+            try { if (typeof c.VPMG === 'function') rows.push(c); } catch (_) { /* ignore */ }
+          });
         }
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
       }
-      return { ok: true, claimed, waiting, rows: rows.length, details };
-    } catch (cause) {
-      return { ok: false, error: msgOf(cause) };
+    } catch (_) { /* ignore */ }
+    return rows;
+  }
+
+  /** 领取当前页签里所有可领取的奖励。 */
+  function claimCurrentTab() {
+    const rows = taskRowsAny();
+    let claimed = 0;
+    for (const comp of rows) {
+      let can = false;
+      try { can = !!(comp.VRVD && comp.VRVD.node && comp.VRVD.node.active); } catch (_) { can = false; }
+      if (!can) continue;
+      try { comp.VPMG(); claimed += 1; } catch (_) { /* ignore */ }
     }
+    return { rows: rows.length, claimed };
+  }
+
+  /**
+   * 一键领取：遍历任务面板的每个页签（日常/周常/成就/公会日常/工会），把能领的都领掉。
+   * 结果写进 window.__zzDailyResult，Python 侧等一会儿后读。
+   */
+  function claimAllDailyTabs() {
+    try {
+      window.__zzDailyResult = null;
+      const tg = findNodeByName('TabGroup');
+      if (!tg) { window.__zzDailyResult = { ok: false, error: '任务面板没打开' }; return 'no-panel'; }
+      const tabs = (tg.children || []).slice();
+      let index = 0;
+      let claimed = 0;
+      let rows = 0;
+      const step = () => {
+        if (index >= tabs.length) {
+          window.__zzDailyResult = { ok: true, claimed, rows, tabs: tabs.length };
+          return;
+        }
+        const tab = tabs[index];
+        try { tab.emit('click'); } catch (_) { /* ignore */ }
+        setTimeout(() => {
+          const got = claimCurrentTab();
+          claimed += got.claimed;
+          rows += got.rows;
+          index += 1;
+          step();
+        }, 450);
+      };
+      step();
+      return 'started';
+    } catch (cause) {
+      window.__zzDailyResult = { ok: false, error: msgOf(cause) };
+      return 'ERR ' + msgOf(cause);
+    }
+  }
+
+  /** 兼容旧调用：只领当前页签。 */
+  function claimDailyTasks() {
+    try { return claimCurrentTab(); } catch (cause) { return { ok: false, error: msgOf(cause) }; }
   }
 
   /** 直接飞到/闪到指定坐标。mode = instant（瞬移）| fly（飞过去，播过场）。 */
@@ -4128,6 +4181,7 @@ RUNTIME_JS = r"""
     monsters: monsterList,
     openDailyTasks,
     claimDailyTasks,
+    claimAllDailyTabs,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },
