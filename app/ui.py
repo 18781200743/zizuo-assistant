@@ -444,13 +444,8 @@ class AppUI:
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self._switch_mode("home")
 
-        if self.dev_mode:
-            log_frame = ttk.LabelFrame(self.root, text="日志", padding=4)
-            log_frame.pack(fill=tk.BOTH, expand=False, padx=8, pady=(0, 8))
-            self.log = tk.Text(log_frame, height=6, wrap=tk.WORD)
-            self.log.pack(fill=tk.BOTH, expand=True)
-        else:
-            self.log = None
+        # 日志框已去掉（用户要求）
+        self.log = None
 
         self.root.after(200, self._tick_cursor)
 
