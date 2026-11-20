@@ -65,6 +65,14 @@ GACHA_POOL = [
     (84011, "谢必安"), (84014, "莉娜"), (84019, "甘道夫"),
 ]
 
+# 品级（游戏 yx_mulu 里读出来的）：6 = 红，5 = 橙。红卡第一屏那 8 个
+GACHA_QUALITY = {
+    84007: 6, 84008: 6, 84013: 6, 84016: 6, 84017: 6, 84018: 6,
+    85001: 6, 85002: 6,
+    82005: 5, 83003: 5, 83027: 5, 83030: 5, 83031: 5,
+    84003: 5, 84005: 5, 84009: 5, 84011: 5, 84014: 5, 84019: 5,
+}
+
 DEFAULT_FIXED_HEROES = [
     (84007, "敖丙"),
     (84008, "雅丽娜"),
@@ -779,7 +787,9 @@ class AppUI:
             head2, textvariable=self.gacha_hero_count, bg=page_bg, fg="#111827",
             font=("Microsoft YaHei UI", 10, "bold"),
         ).pack(side=tk.LEFT)
-        tk.Label(head2, text="出现 / 中 / 碎片", bg=page_bg, fg=sub).pack(side=tk.RIGHT)
+        tk.Label(
+            head2, text="出现 / 中 / 碎片（红=品级6+）", bg=page_bg, fg=sub
+        ).pack(side=tk.RIGHT)
 
         holder = tk.Frame(parent, bg=page_bg)
         holder.pack(fill=tk.BOTH, expand=True)
@@ -3196,21 +3206,27 @@ class AppUI:
         self._hero_name_cache = {hid: name for hid, name in rows}
         checked = self._fixed_checked_ids()
         for index, (hero_id, name) in enumerate(rows):
+            # 红卡（品级 6+）=红底，其余=黄底
+            if GACHA_QUALITY.get(int(hero_id), 5) >= 6:
+                card_bg, card_line, name_fg = "#fdecea", "#f0c4be", "#b3261e"
+            else:
+                card_bg, card_line, name_fg = "#fff8e1", "#efe0b4", "#8a6100"
             cell = tk.Frame(
-                self._gacha_hero_inner, bg="#ffffff",
-                highlightbackground="#e3e8ef", highlightthickness=1,
+                self._gacha_hero_inner, bg=card_bg,
+                highlightbackground=card_line, highlightthickness=1,
             )
             cell.grid(row=index // 2, column=index % 2, sticky="ew", padx=3, pady=1)
             var = tk.BooleanVar(value=(hero_id in checked))
             tk.Checkbutton(
                 cell, text=name, variable=var, command=self._update_hero_count,
-                bg="#ffffff", activebackground="#ffffff", selectcolor="#ffffff",
+                bg=card_bg, fg=name_fg, activebackground=card_bg,
+                activeforeground=name_fg, selectcolor="#ffffff",
                 bd=0, highlightthickness=0, anchor="w",
-                font=("Microsoft YaHei UI", 10),
+                font=("Microsoft YaHei UI", 10, "bold"),
             ).pack(side=tk.LEFT, padx=(6, 0), pady=2)
             counter = tk.StringVar(value="0/0/0")
             tk.Label(
-                cell, textvariable=counter, bg="#ffffff", fg="#6b7280",
+                cell, textvariable=counter, bg=card_bg, fg=name_fg,
             ).pack(side=tk.RIGHT, padx=(0, 8))
             self._gacha_hero_vars[hero_id] = var
             self._gacha_hero_counter_vars[hero_id] = counter
