@@ -368,7 +368,7 @@ class AppUI:
             padding=(0, 14),
         )
 
-    DARK_PAGE = "#0f1a2b"
+    DARK_PAGE = "#1D2D4F"
     DARK_CARD = "#16233c"
     DARK_LINE = "#2a3b5c"
     DARK_TXT = "#e6ebf5"
@@ -1232,22 +1232,22 @@ class AppUI:
 
         def _tag(text, color, bg=None):
             tk.Label(
-                legend, text=text, fg=color, bg=bg or "#0f1a2b",
+                legend, text=text, fg=color, bg=bg or "#1D2D4F",
                 font=("Microsoft YaHei UI", 9, bg and "bold" or "normal"),
                 padx=2,
             ).pack(side=tk.LEFT)
 
         tk.Label(
-            legend, text="安全等级", fg="#9fb0c9", bg="#0f1a2b",
+            legend, text="安全等级", fg="#9fb0c9", bg="#1D2D4F",
             font=("Microsoft YaHei UI", 9),
         ).pack(side=tk.LEFT, padx=(0, 6))
         _tag("绿", "#4ade80")
-        tk.Label(legend, text="→", fg="#7f8ea8", bg="#0f1a2b").pack(side=tk.LEFT)
+        tk.Label(legend, text="→", fg="#7f8ea8", bg="#1D2D4F").pack(side=tk.LEFT)
         _tag("黄", "#fbbf24")
-        tk.Label(legend, text="→", fg="#7f8ea8", bg="#0f1a2b").pack(side=tk.LEFT)
+        tk.Label(legend, text="→", fg="#7f8ea8", bg="#1D2D4F").pack(side=tk.LEFT)
         _tag("红", "#f87171")
         tk.Label(
-            legend, text="  红色最危险", fg="#9fb0c9", bg="#0f1a2b",
+            legend, text="  红色最危险", fg="#9fb0c9", bg="#1D2D4F",
             font=("Microsoft YaHei UI", 9),
         ).pack(side=tk.LEFT)
 
