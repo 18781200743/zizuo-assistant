@@ -285,6 +285,7 @@ class AppUI:
             on_step=self._on_instruction_step,
             on_finished=self._on_instruction_finished,
         )
+        self._cmd_events: "queue.Queue[tuple]" = queue.Queue()
         self.cmd_library: Dict[str, Any] = load_library()
         self.cmd_category: int = CATEGORY_ALL
         self.cmd_rows: List[Dict[str, Any]] = []
@@ -298,6 +299,10 @@ class AppUI:
         self._gold_base = None
 
         self._build()
+        try:
+            self.root.after(150, self._pump_cmd_events)
+        except tk.TclError:
+            pass
         self.refresh_slot_list(select=int(self.config.get("selected_slot", 1)) - 1)
         self.refresh_gacha_templates()
         self.bind_hotkeys()
@@ -967,10 +972,8 @@ class AppUI:
         self._tool_sections = {}
         self._tool_current = None
         tool_items = [
-            ("地图刷新", "map"),
-            ("红包 / 祈愿", "red"),
-            ("快速复活", "revive"),
-            ("闪现寻怪", "blink"),
+            ("地图 / 红包", "map"),
+            ("复活 / 闪现", "revive"),
             ("日常任务", "daily"),
             ("战斗参数", "combat"),
             ("抽卡", "gacha"),
@@ -1050,6 +1053,12 @@ class AppUI:
         ttk.Label(
             revive, textvariable=self.assist_revive_status, foreground="#666", wraplength=330
         ).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
+        ttk.Button(revive, text="清除卡图", width=9, command=self.clear_stuck).grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, pady=(8, 0)
+        )
+        ttk.Label(
+            revive, text="复活/传送没反应时点一下", foreground="#666"
+        ).grid(row=2, column=2, columnspan=3, sticky=tk.W, padx=(6, 0), pady=(8, 0))
 
         # ---------- 闪现寻怪 ----------
         blink = ttk.LabelFrame(parent, text="闪现寻怪", padding=6)
@@ -1200,9 +1209,17 @@ class AppUI:
         if key == self._tool_current:
             self._tool_current = None
             return
-        widget = sections.get(key)
-        if widget is not None:
-            widget.pack(fill=tk.X, pady=(0, 8))
+        group = {
+            "map": ("map", "red"),
+            "revive": ("revive", "blink"),
+        }.get(key, (key,))
+        shown = False
+        for name in group:
+            widget = sections.get(name)
+            if widget is not None:
+                widget.pack(fill=tk.X, pady=(0, 8))
+                shown = True
+        if shown:
             self._tool_current = key
 
     def _build_commands_tab(self, parent: ttk.Frame) -> None:
@@ -1219,8 +1236,9 @@ class AppUI:
         ).pack(side=tk.LEFT)
         self.cmd_status = tk.StringVar(value="选一条指令，点「运行」")
         tk.Label(bar, textvariable=self.cmd_status, bg=c["page"], fg="#1a4d8f").pack(side=tk.LEFT, padx=12)
-        ttk.Button(bar, text="停止", width=8, command=self.stop_instruction).pack(side=tk.RIGHT)
-        self.cmd_run_btn = ttk.Button(bar, text="运行", width=10, style="Accent.TButton", command=self.run_instruction)
+        self.cmd_run_btn = ttk.Button(
+            bar, text="运行", width=10, style="Accent.TButton", command=self.toggle_instruction
+        )
         self.cmd_run_btn.pack(side=tk.RIGHT, padx=6)
 
         cats = tk.Frame(parent, bg=c["page"])
@@ -1288,6 +1306,7 @@ class AppUI:
         text_frame.columnconfigure(0, weight=1)
         self.cmd_text.grid(row=0, column=0, sticky="nsew")
         text_sb.grid(row=0, column=1, sticky="ns")
+        self.cmd_text.tag_configure("run", background="#fff3cd")
         self.cmd_text.configure(state=tk.DISABLED)
 
         row = ttk.Frame(right)
@@ -1298,16 +1317,13 @@ class AppUI:
         ttk.Button(row, text="编辑", command=self.edit_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
-        ttk.Button(row, text="保存为我的", command=self.save_instruction).pack(
+        ttk.Button(row, text="复制", command=self.copy_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
         row2 = ttk.Frame(right)
         row2.pack(fill=tk.X, pady=(4, 0))
         ttk.Button(row2, text="还原", command=self.restore_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(row2, text="复制", command=self.copy_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
         ttk.Button(row2, text="删除", command=self.delete_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
@@ -1507,15 +1523,53 @@ class AppUI:
         self.refresh_command_list(select_title=str(item.get("title") or ""))
         self.cmd_status.set("已还原：%s" % (item.get("title") or ""))
 
+    def toggle_instruction(self) -> None:
+        """一个按钮：没跑就运行，跑着就停止。"""
+        if self.instruction_runner.running:
+            self.stop_instruction()
+        else:
+            self.run_instruction()
+
+    def _set_run_button(self, running: bool) -> None:
+        try:
+            self.cmd_run_btn.configure(text="停止" if running else "运行")
+        except tk.TclError:
+            pass
+
+    def _highlight_step(self, raw: str) -> None:
+        """把当前执行的那一行标黄（重复的行接着上次往下找）。"""
+        try:
+            text = self.cmd_text
+            last = int(str(text.index("end-1c")).split(".")[0])
+            start = getattr(self, "_cmd_step_line", 1)
+            found = 0
+            for lineno in range(start, last + 1):
+                if text.get("%d.0" % lineno, "%d.end" % lineno).strip() == raw.strip():
+                    found = lineno
+                    break
+            if not found:
+                for lineno in range(1, start):
+                    if text.get("%d.0" % lineno, "%d.end" % lineno).strip() == raw.strip():
+                        found = lineno
+                        break
+            text.tag_remove("run", "1.0", tk.END)
+            if found:
+                text.tag_add("run", "%d.0" % found, "%d.end" % found)
+                text.see("%d.0" % found)
+                self._cmd_step_line = found + 1
+        except tk.TclError:
+            pass
+
     def run_instruction(self) -> None:
         item = self._selected_command()
         if not item:
-            messagebox.showinfo("运行指令", "先在左边选一条指令")
+            messagebox.showinfo("运行指令", "先从列表里选一条指令")
             return
         if self.instruction_runner.running:
-            messagebox.showinfo("运行指令", "上一条还在跑，先点「停止」")
+            self.cmd_status.set("上一条还在跑，先点「停止」")
             return
         content = format_content(str(item.get("content") or ""))
+        self._cmd_step_line = 1
         try:
             self.instruction_runner.start(
                 str(item.get("title") or script_title(content) or "指令"), content, load_mapping()
@@ -1523,6 +1577,7 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("运行指令", str(exc))
             return
+        self._set_run_button(True)
         self.cmd_status.set("运行中…")
 
     def stop_instruction(self) -> None:
@@ -1531,20 +1586,36 @@ class AppUI:
             self.cmd_status.set("正在停止…")
 
     def _on_instruction_step(self, index: int, total: int, text: str) -> None:
-        def _do() -> None:
-            self.cmd_status.set("运行中 %d/%d：%s" % (index, total, text))
-
-        try:
-            self.root.after(0, _do)
-        except tk.TclError:
-            pass
+        """运行器线程回调：只丢队列，界面由主线程 _pump_cmd_events 更新。"""
+        self._cmd_events.put(("step", index, total, text))
 
     def _on_instruction_finished(self, ok: bool, message: str) -> None:
-        def _do() -> None:
-            self.cmd_status.set(("完成：" if ok else "已停：") + message)
+        self._cmd_events.put(("done", ok, message))
 
+    def _pump_cmd_events(self) -> None:
+        """主线程定时取指令事件，更新状态条、当前行高亮、按钮文字。"""
+        while True:
+            try:
+                event = self._cmd_events.get_nowait()
+            except queue.Empty:
+                break
+            if not event:
+                continue
+            kind = event[0]
+            try:
+                if kind == "step":
+                    _, index, total, raw = event
+                    self.cmd_status.set("运行中 %d/%d：%s" % (index, total, raw))
+                    self._highlight_step(str(raw))
+                elif kind == "done":
+                    _, ok, message = event
+                    self._set_run_button(False)
+                    self.cmd_status.set(("✔ " if ok else "■ ") + str(message or ""))
+                    self.cmd_text.tag_remove("run", "1.0", tk.END)
+            except tk.TclError:
+                pass
         try:
-            self.root.after(0, _do)
+            self.root.after(150, self._pump_cmd_events)
         except tk.TclError:
             pass
 
@@ -1556,27 +1627,6 @@ class AppUI:
         self.root.clipboard_clear()
         self.root.clipboard_append(content)
         self.cmd_status.set("已复制到剪贴板")
-
-    def save_instruction(self) -> None:
-        item = self._selected_command()
-        if not item:
-            return
-        default = str(item.get("title") or "")
-        name = simpledialog.askstring("保存为我的指令", "指令名称：", initialvalue=default, parent=self.root)
-        if not name:
-            return
-        content = self.cmd_text.get("1.0", tk.END).strip() if hasattr(self, "cmd_text") else ""
-        if not content:
-            content = str(item.get("content") or "")
-        try:
-            save_user_instruction(
-                name.strip(), content, old_title=str(item.get("title") or "") if item.get("custom") else None
-            )
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("保存指令", str(exc))
-            return
-        self.refresh_command_list()
-        self.cmd_status.set("已保存：%s" % name.strip())
 
     def delete_instruction(self) -> None:
         item = self._selected_command()
