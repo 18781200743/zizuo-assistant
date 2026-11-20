@@ -1917,7 +1917,13 @@ class AppUI:
 
     def _poll_picked(self, attempt: int = 0) -> None:
         picked = self.assist.picked_coord()
-        if picked and (picked.get("x") is not None or picked.get("error")):
+        armed_at = 0
+        try:
+            armed_at = int(self.assist.bridge.eval_js("String(window.__zzPickArmedAt || 0)") or 0)
+        except Exception:  # noqa: BLE001
+            armed_at = 0
+        fresh = bool(picked) and int(picked.get("at") or 0) >= armed_at
+        if picked and (fresh or picked.get("error")):
             if picked.get("error"):
                 self.assist_daily_status.set("取坐标出错：%s" % picked["error"])
                 return

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 116
+RUNTIME_VERSION = 117
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 116
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 116;
+  const VERSION = 117;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2721,6 +2721,7 @@ RUNTIME_JS = r"""
     try {
       if (window.__zzPickOff) { try { window.__zzPickOff(); } catch (_) {} }
       window.__zzPick = null;
+      window.__zzPickArmedAt = Date.now();
       const canvas = window.cc && window.cc.game && window.cc.game.canvas;
       if (!canvas) return { ok: false, error: '找不到画布' };
       const handler = function (ev) {
@@ -2744,7 +2745,7 @@ RUNTIME_JS = r"""
             const w = cam.screenToWorld(v3);
             if (w) { wx = Math.round(w.x); wy = Math.round(w.y); }
           }
-          window.__zzPick = { x: wx, y: wy, screen: [Math.round(sx), Math.round(sy)],
+          window.__zzPick = { x: wx, y: wy, at: Date.now(), screen: [Math.round(sx), Math.round(sy)],
             client: [Math.round(ev.clientX), Math.round(ev.clientY)] };
         } catch (e) {
           window.__zzPick = { error: String((e && e.message) || e) };
