@@ -1064,37 +1064,122 @@ class AppUI:
         self._frosted_cache = cache
         return photo
 
-    def _hex_glow(self, w: int, h: int, box):
-        """六边形外发光（模糊后的青色描边），按尺寸缓存。"""
+    @staticmethod
+    def _offset_polygon(pts, d):
+        """把凸多边形向内收缩 d（用于双描边的内框）。"""
+        import math
+
+        n = len(pts)
+        cx = sum(p[0] for p in pts) / n
+        cy = sum(p[1] for p in pts) / n
+        lines = []
+        for i in range(n):
+            x1, y1 = pts[i]
+            x2, y2 = pts[(i + 1) % n]
+            dx, dy = x2 - x1, y2 - y1
+            length = math.hypot(dx, dy) or 1
+            nx, ny = -dy / length, dx / length
+            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+            if (mx + nx - cx) ** 2 + (my + ny - cy) ** 2 > (mx - cx) ** 2 + (my - cy) ** 2:
+                nx, ny = -nx, -ny
+            lines.append(((x1 + nx * d, y1 + ny * d), (x2 + nx * d, y2 + ny * d)))
+        out = []
+        for i in range(n):
+            (ax, ay), (bx, by) = lines[i - 1]
+            (cx1, cy1), (dx1, dy1) = lines[i]
+            den = (ax - bx) * (cy1 - dy1) - (ay - by) * (cx1 - dx1)
+            if abs(den) < 1e-6:
+                out.append((bx, by))
+                continue
+            t = ((ax - cx1) * (cy1 - dy1) - (ay - cy1) * (cx1 - dx1)) / den
+            out.append((ax + (bx - ax) * t, ay + (by - ay) * t))
+        return out
+
+    def _hex_photo(self, hexw: int, hexh: int):
+        """辅助工具六边形按钮：双描边 + 玻璃填充 + 底部光带 + 两侧细线。"""
         cache = getattr(self, "_hex_cache", {})
-        key = tuple(int(v) for v in box) + (int(w), int(h))
+        key = (int(hexw), int(hexh))
         if key in cache:
             return cache[key]
-        photo = None
+        result = None
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
-            x0, y0, x1, y1 = box
-            pad = 26
-            W = int(x1 - x0 + pad * 2)
-            H = int(y1 - y0 + pad * 2)
-            ss = 2
+            ss = 3
+            margin = 40
+            W = int(hexw + margin * 2)
+            H = int(hexh + margin * 2)
             img = Image.new("RGBA", (W * ss, H * ss), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            cut = (y1 - y0) * 0.62
-            pts = [
-                (pad + cut, pad), (W - pad - cut, pad), (W - pad, H / 2),
-                (W - pad - cut, H - pad), (pad + cut, H - pad), (pad, H / 2),
+            mx, my = margin * ss, margin * ss
+            hw, hh = hexw * ss, hexh * ss
+            cy = my + hh / 2
+            cut = hh * 0.58
+            outer = [
+                (mx, cy),
+                (mx + cut, my),
+                (mx + hw - cut, my),
+                (mx + hw, cy),
+                (mx + hw - cut, my + hh),
+                (mx + cut, my + hh),
             ]
-            pts = [(x * ss, y * ss) for x, y in pts]
-            d.line(pts + [pts[0]], fill=(80, 230, 255, 220), width=7 * ss, joint="curve")
-            img = img.filter(ImageFilter.GaussianBlur(9 * ss))
-            photo = ImageTk.PhotoImage(img.resize((W, H), Image.LANCZOS))
+            inner = self._offset_polygon(outer, 7 * ss)
+
+            # 外发光
+            glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(glow).line(
+                outer + [outer[0]], fill=(80, 230, 255, 230), width=6 * ss, joint="curve"
+            )
+            glow = glow.filter(ImageFilter.GaussianBlur(8 * ss))
+            glow = Image.alpha_composite(glow, glow)
+            img = Image.alpha_composite(img, glow)
+
+            # 玻璃填充 + 上方柔光
+            fill = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(fill).polygon(outer, fill=(9, 44, 54, 215))
+            light = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(light).ellipse(
+                [mx + hw * 0.05, my - hh * 0.35, mx + hw * 0.75, my + hh * 0.9],
+                fill=(120, 235, 245, 60),
+            )
+            light = light.filter(ImageFilter.GaussianBlur(9 * ss))
+            mask = Image.new("L", img.size, 0)
+            ImageDraw.Draw(mask).polygon(outer, fill=255)
+            light.putalpha(
+                Image.composite(light.getchannel("A"), Image.new("L", img.size, 0), mask)
+            )
+            img = Image.alpha_composite(img, fill)
+            img = Image.alpha_composite(img, light)
+
+            # 双描边
+            d = ImageDraw.Draw(img)
+            d.line(outer + [outer[0]], fill=(150, 245, 255, 255), width=2 * ss, joint="curve")
+            d.line(inner + [inner[0]], fill=(120, 225, 245, 175), width=1 * ss, joint="curve")
+
+            # 底部光带
+            streak = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(streak).ellipse(
+                [mx + hw * 0.10, my + hh - 10 * ss, mx + hw * 0.90, my + hh + 14 * ss],
+                fill=(140, 248, 255, 235),
+            )
+            streak = streak.filter(ImageFilter.GaussianBlur(5 * ss))
+            img = Image.alpha_composite(img, streak)
+
+            # 两侧细线
+            lines = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ld = ImageDraw.Draw(lines)
+            ld.line([(0, cy), (mx - 2 * ss, cy)], fill=(120, 230, 250, 130), width=max(1, ss))
+            ld.line(
+                [(mx + hw + 2 * ss, cy), (W * ss, cy)],
+                fill=(120, 230, 250, 130), width=max(1, ss),
+            )
+            img = Image.alpha_composite(img, lines)
+
+            result = (ImageTk.PhotoImage(img.resize((W, H), Image.LANCZOS)), margin, margin)
         except Exception:  # noqa: BLE001
-            photo = None
-        cache[key] = photo
+            result = None
+        cache[key] = result
         self._hex_cache = cache
-        return photo
+        return result
 
     def _build_home_tab(self, parent: tk.Frame) -> None:
         """首页：原画背景 + 卡片 + 发光按钮。"""
@@ -1229,32 +1314,36 @@ class AppUI:
         hx0, hx1 = sx(150), sx(1000)
         hy0, hy1 = sy(1145), sy(1345)
         mid = (hy0 + hy1) / 2
-        cut = sx(58)
-        glow = self._hex_glow(w, h, (hx0, hy0, hx1, hy1))
-        if glow is not None:
-            c.create_image(hx0 - 26, hy0 - 26, image=glow, anchor="nw")
-            self._hex_photo = glow
-        hexa = [
-            hx0 + cut, hy0, hx1 - cut, hy0, hx1, mid,
-            hx1 - cut, hy1, hx0 + cut, hy1, hx0, mid,
-        ]
-        c.create_polygon(
-            hexa, fill="#0e3b45", outline="#16b8cf", width=5, tags=("home_assist",)
-        )
-        c.create_polygon(
-            hexa, fill="", outline="#a5f3ff", width=1, tags=("home_assist",)
+        hexw, hexh = int(hx1 - hx0), int(hy1 - hy0)
+        art = self._hex_photo(hexw, hexh)
+        if art is not None:
+            photo, dx, dy = art
+            self._hex_photo_ref = photo
+            c.create_image(hx0 - dx, hy0 - dy, image=photo, anchor="nw", tags=("home_assist",))
+        else:
+            cut = hexw * 0.3
+            hexa = [
+                hx0 + cut, hy0, hx1 - cut, hy0, hx1, mid,
+                hx1 - cut, hy1, hx0 + cut, hy1, hx0, mid,
+            ]
+            c.create_polygon(
+                hexa, fill="#0e3b45", outline="#a5f3ff", width=2, tags=("home_assist",)
+            )
+        c.create_text(
+            hx0 - 14, mid, text="«", fill="#f97316",
+            font=(ui_font, 18, "bold"), tags=("home_assist",),
         )
         c.create_text(
-            hx0 - 2, mid, text="«", fill="#f59e0b",
-            font=(ui_font, 16, "bold"), tags=("home_assist",),
+            hx1 + 14, mid, text="»", fill="#f97316",
+            font=(ui_font, 18, "bold"), tags=("home_assist",),
         )
         c.create_text(
-            hx1 + 2, mid, text="»", fill="#f59e0b",
-            font=(ui_font, 14, "bold"), tags=("home_assist",),
+            (hx0 + hx1) / 2, mid + 1, text="辅助工具", fill="#0b2f38",
+            font=(ui_font, 20, "bold"), tags=("home_assist",),
         )
         c.create_text(
             (hx0 + hx1) / 2, mid, text="辅助工具", fill="#ffffff",
-            font=(ui_font, 17, "bold"), tags=("home_assist",),
+            font=(ui_font, 20, "bold"), tags=("home_assist",),
         )
         c.tag_bind("home_assist", "<Button-1>", lambda _e: self._switch_mode("assist"))
         c.tag_bind("home_assist", "<Enter>", lambda _e: c.configure(cursor="hand2"))
