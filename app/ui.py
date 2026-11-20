@@ -341,13 +341,18 @@ class AppUI:
         style.configure("TCombobox", padding=2)
         style.configure("TSeparator", background=c["line"])
         style.configure("Treeview", background=c["card"], fieldbackground=c["card"], rowheight=24)
+        style.configure(
+            "Home.TButton",
+            font=("Microsoft YaHei UI", 14),
+            padding=(0, 14),
+        )
 
     def _build(self) -> None:
         self._setup_style()
         c = self.colors
         # 顶部标题
         head = tk.Frame(self.root, bg=c["page"])
-        head.pack(fill=tk.X, padx=12, pady=(12, 4))
+        # head 不再显示（首页自己画标题）
         tk.Label(
             head,
             text="百炼英雄 · 助手",
@@ -358,7 +363,7 @@ class AppUI:
 
         # 模式切换（胶囊样式）
         mode_bar = tk.Frame(self.root, bg=c["page"])
-        mode_bar.pack(fill=tk.X, padx=12, pady=(4, 0))
+        # mode_bar 不再显示（导航在页面内）
         self.mode_var = tk.StringVar(value="home")
         self._mode_btn_home = tk.Button(
             mode_bar,
@@ -405,7 +410,7 @@ class AppUI:
             command=lambda: self._switch_mode("commands"),
         )
         self._mode_btn_commands.pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Separator(self.root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=12, pady=(8, 0))
+        # 分隔线也不显示
 
         # 窗口参数：变量始终创建（保存/读取要用），控件只在开发模式显示
         self.window_var = tk.StringVar(
@@ -610,6 +615,11 @@ class AppUI:
         return card
 
     def _build_gacha_tab(self, parent: ttk.Frame) -> None:
+        nav = ttk.Frame(parent)
+        nav.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(nav, text="‹ 返回首页", command=lambda: self._switch_mode("home")).pack(side=tk.LEFT)
+        ttk.Button(nav, text="辅助工具", command=lambda: self._switch_mode("assist")).pack(side=tk.RIGHT)
+
         gacha = normalize_gacha(self.config.get("gacha"))
         enabled = set(gacha.get("enabled_cards") or [])
 
@@ -743,48 +753,56 @@ class AppUI:
 
     # ---------------- 游戏辅助 ----------------
     def _build_home_tab(self, parent: ttk.Frame) -> None:
-        """首页：只放开游戏/连接说明，具体功能收进「功能」页。"""
-        ttk.Label(parent, text="紫作助手", font=("Microsoft YaHei UI", 17, "bold")).pack(
-            anchor=tk.W, pady=(8, 0)
-        )
-        ttk.Label(parent, text="百炼英雄 · 电脑版", foreground="#666").pack(anchor=tk.W, pady=(2, 0))
+        """首页：只有 标题 / 打开游戏 / 辅助工具 / 说明。"""
+        top = ttk.Frame(parent)
+        top.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(top, text="百炼助手", font=("Microsoft YaHei UI", 16, "bold")).pack(side=tk.LEFT)
+        ttk.Button(top, text="关于", command=self._show_about).pack(side=tk.RIGHT)
 
-        card = ttk.LabelFrame(parent, text="本机游戏", padding=10)
-        card.pack(fill=tk.X, pady=(12, 8))
-        self.home_status_var = tk.StringVar(value="未打开（点下面「打开游戏窗口」）")
-        ttk.Label(card, textvariable=self.home_status_var, foreground="#333", wraplength=360, justify=tk.LEFT).pack(
-            anchor=tk.W
-        )
-        row = ttk.Frame(card)
-        row.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(row, text="打开游戏窗口", command=self.ask_open_game).pack(side=tk.LEFT, expand=True, fill=tk.X)
-        ttk.Button(row, text="重新连接", command=self.reconnect_assist).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0)
-        )
+        body = ttk.Frame(parent)
+        body.pack(fill=tk.BOTH, expand=True)
 
-        entry = ttk.Frame(parent)
-        entry.pack(fill=tk.X, pady=(10, 0))
-        ttk.Button(entry, text="功能", command=lambda: self._switch_mode("assist")).pack(
-            side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(entry, text="抽卡", command=lambda: self._switch_mode("gacha")).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=8
+        ttk.Button(body, text="打开游戏", style="Home.TButton", command=self.ask_open_game).pack(
+            fill=tk.X, pady=(70, 0)
         )
         ttk.Button(
-            entry, text="运行指令", command=lambda: self._switch_mode("commands")
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X)
+            body, text="辅助工具", style="Home.TButton",
+            command=lambda: self._switch_mode("assist"),
+        ).pack(fill=tk.X, pady=(36, 0))
 
+        self.home_status_var = tk.StringVar(value="")
+        ttk.Label(body, textvariable=self.home_status_var, foreground="#667085", wraplength=400).pack(
+            pady=(18, 0)
+        )
         ttk.Label(
-            parent,
-            text="打开游戏 → 验证码登录 → 进入主界面后自动连接。\n"
-            "具体功能（红包 / 复活 / 刷新 / 闪现 / 取坐标）都在「功能」里。",
-            foreground="#666",
-            wraplength=360,
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(12, 0))
+            body,
+            text="说明：使用脚本，封号自己负责",
+            foreground="#c0392b",
+            wraplength=400,
+        ).pack(side=tk.BOTTOM, pady=(0, 24))
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(
+            "关于",
+            "百炼助手\n\n"
+            "游戏辅助工具（安卓 / 电脑同一套运行时）\n"
+            "功能：红包、复活、地图刷新、闪现、取坐标、日常任务\n\n"
+            "说明：使用脚本，封号自己负责。",
+        )
 
     def _build_assist_tab(self, parent: ttk.Frame) -> None:
         assist = normalize_assist(self.config.get("assist"))
+
+        nav = ttk.Frame(parent)
+        nav.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(nav, text="‹ 返回", command=lambda: self._switch_mode("home")).pack(side=tk.LEFT)
+        ttk.Label(nav, text="辅助工具", font=("Microsoft YaHei UI", 11, "bold")).pack(
+            side=tk.LEFT, padx=8
+        )
+        ttk.Button(nav, text="抽卡", command=lambda: self._switch_mode("gacha")).pack(side=tk.RIGHT)
+        ttk.Button(nav, text="运行指令", command=lambda: self._switch_mode("commands")).pack(
+            side=tk.RIGHT, padx=6
+        )
 
         # 顶部状态条
         bar = ttk.Frame(parent)
@@ -987,6 +1005,11 @@ class AppUI:
     # ---------------------------------------------------------------- 运行指令
 
     def _build_commands_tab(self, parent: ttk.Frame) -> None:
+        nav = ttk.Frame(parent)
+        nav.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(nav, text="‹ 返回首页", command=lambda: self._switch_mode("home")).pack(side=tk.LEFT)
+        ttk.Button(nav, text="辅助工具", command=lambda: self._switch_mode("assist")).pack(side=tk.RIGHT)
+
         c = self.colors
         bar = tk.Frame(parent, bg=c["page"])
         bar.pack(fill=tk.X, pady=(0, 6))
