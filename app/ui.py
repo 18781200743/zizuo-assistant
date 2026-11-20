@@ -579,6 +579,8 @@ class AppUI:
         hb = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=canvas.xview)
         inner = ttk.Frame(canvas)
 
+        shown = {"v": True, "h": False}
+
         def _sync(_e=None):
             canvas.configure(scrollregion=canvas.bbox("all"))
             width = max(canvas.winfo_width(), inner.winfo_reqwidth())
@@ -587,10 +589,21 @@ class AppUI:
             height = max(inner.winfo_reqheight(), canvas.winfo_height())
             canvas.itemconfigure(win, height=height)
             try:
-                if inner.winfo_reqwidth() > canvas.winfo_width() + 1:
-                    hb.pack(side=tk.BOTTOM, fill=tk.X)
-                else:
-                    hb.pack_forget()
+                # 滚动条只在放不下时才出现，能放下就收起来
+                need_v = inner.winfo_reqheight() > canvas.winfo_height() + 1
+                if need_v != shown["v"]:
+                    shown["v"] = need_v
+                    if need_v:
+                        sb.pack(side=tk.RIGHT, fill=tk.Y)
+                    else:
+                        sb.pack_forget()
+                need_h = inner.winfo_reqwidth() > canvas.winfo_width() + 1
+                if need_h != shown["h"]:
+                    shown["h"] = need_h
+                    if need_h:
+                        hb.pack(side=tk.BOTTOM, fill=tk.X)
+                    else:
+                        hb.pack_forget()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -668,6 +681,27 @@ class AppUI:
         )
         self._gacha_hero_canvas.create_window((0, 0), window=self._gacha_hero_inner, anchor="nw")
         self._gacha_hero_canvas.configure(yscrollcommand=hero_sb.set)
+
+        hero_shown = {"v": True}
+
+        def _sync_hero_sb(_e=None):
+            # 名单能一屏放完就不要滚动条
+            try:
+                need = (
+                    self._gacha_hero_inner.winfo_reqheight()
+                    > self._gacha_hero_canvas.winfo_height() + 1
+                )
+                if need != hero_shown["v"]:
+                    hero_shown["v"] = need
+                    if need:
+                        hero_sb.pack(side=tk.RIGHT, fill=tk.Y)
+                    else:
+                        hero_sb.pack_forget()
+            except tk.TclError:
+                pass
+
+        self._gacha_hero_inner.bind("<Configure>", _sync_hero_sb, add="+")
+        self._gacha_hero_canvas.bind("<Configure>", _sync_hero_sb)
         self._gacha_hero_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         hero_sb.pack(side=tk.RIGHT, fill=tk.Y)
         self._gacha_hero_vars: Dict[int, tk.BooleanVar] = {}
@@ -684,49 +718,13 @@ class AppUI:
         self.gacha_cdp_delay_var = tk.StringVar(value=str(gacha.get("cdp_delay_ms", 1200)))
         self.gacha_cdp_refresh_var = tk.BooleanVar(value=bool(gacha.get("cdp_refresh", False)))
         self.gacha_cdp_green_var = tk.StringVar(value=str(gacha.get("cdp_max_green", 0)))
-        self.gacha_cdp_maxbet_var = tk.BooleanVar(value=bool(gacha.get("cdp_max_bet", True)))
-        self.gacha_cdp_abandon_var = tk.BooleanVar(value=bool(gacha.get("cdp_always_abandon", True)))
+        # 这两项不再给用户调：固定「有目标就用最大倍率抽」「抽中也放弃，一直抽」
+        self.gacha_cdp_maxbet_var = tk.BooleanVar(value=True)
+        self.gacha_cdp_abandon_var = tk.BooleanVar(value=True)
         self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
         self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
 
-        if self.dev_mode:
-            row1 = ttk.Frame(cdp_box)
-            row1.pack(fill=tk.X, pady=(0, 4))
-            ttk.Label(row1, text="目标英雄(名字或编号，逗号分隔)").pack(anchor=tk.W)
-            ttk.Entry(row1, textvariable=self.gacha_cdp_targets_var).pack(
-                fill=tk.X, pady=(2, 0)
-            )
-
-            row2 = ttk.Frame(cdp_box)
-            row2.pack(fill=tk.X, pady=(0, 4))
-            ttk.Checkbutton(row2, text="只保留红色", variable=self.gacha_cdp_red_var).pack(side=tk.LEFT)
-            ttk.Label(row2, text="最大抽数").pack(side=tk.LEFT, padx=(8, 2))
-            ttk.Entry(row2, textvariable=self.gacha_cdp_max_var, width=5).pack(side=tk.LEFT)
-            ttk.Label(row2, text="间隔ms").pack(side=tk.LEFT, padx=(8, 2))
-            ttk.Entry(row2, textvariable=self.gacha_cdp_delay_var, width=5).pack(side=tk.LEFT)
-            ttk.Button(cdp_box, text="列出可选英雄", command=self.list_gacha_heroes).pack(
-                anchor=tk.W, pady=(0, 4)
-            )
-
-            row3 = ttk.Frame(cdp_box)
-            row3.pack(fill=tk.X, pady=(0, 4))
-            ttk.Checkbutton(
-                row3, text="先刷新候选池，出目标再抽", variable=self.gacha_cdp_refresh_var
-            ).pack(side=tk.LEFT)
-            ttk.Label(row3, text="绿钻预算").pack(side=tk.LEFT, padx=(8, 2))
-            ttk.Entry(row3, textvariable=self.gacha_cdp_green_var, width=5).pack(side=tk.LEFT)
-            ttk.Checkbutton(
-                cdp_box, text="有目标就用最大倍率抽", variable=self.gacha_cdp_maxbet_var
-            ).pack(anchor=tk.W)
-
-        opt_row = ttk.Frame(cdp_box)
-        opt_row.pack(fill=tk.X, pady=(2, 4))
-        ttk.Checkbutton(
-            opt_row,
-            text="抽中目标也放弃，一直抽（只攒碎片；不勾=保留并停止）",
-            variable=self.gacha_cdp_abandon_var,
-        ).pack(side=tk.LEFT)
-
+        # 参数行不再显示（值保留在 config 里，按默认走）；腾出高度让 19 个英雄一屏全显示
         btns = ttk.Frame(cdp_box)
         btns.pack(fill=tk.X, pady=(2, 4))
         self.gacha_cdp_btn = ttk.Button(
@@ -3076,7 +3074,7 @@ class AppUI:
             messagebox.showerror("参数错误", "抽卡参数格式不对")
             return
         if not targets and not keep_quality:
-            messagebox.showinfo("提示", "请勾选目标英雄，或勾选「只保留红色」")
+            messagebox.showinfo("提示", "请先勾选要保留的目标英雄")
             return
 
         # 勾选状态落盘，下次打开还在
