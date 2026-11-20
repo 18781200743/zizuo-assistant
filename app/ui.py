@@ -1720,8 +1720,8 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log("采集失败：%s" % exc)
 
-    def _auto_daily_hop_to(self, x: float, y: float, tries: int = 8) -> bool:
-        """分段瞬移过去（一次瞬移太远游戏会丢掉）。"""
+    def _auto_daily_hop_to(self, x: float, y: float, tries: int = 20) -> bool:
+        """分段瞬移过去（一次瞬移太远游戏会丢掉）；最远约 20 跳 ≈ 2 万米。"""
         for _ in range(tries):
             pos = self.assist.player_pos()
             if len(pos) != 2:
@@ -1730,7 +1730,7 @@ class AppUI:
             dist = (dx * dx + dy * dy) ** 0.5
             if dist < 220:
                 return True
-            step = min(dist - 100, 900)
+            step = min(dist - 100, 1200)
             self.assist.teleport_to(pos[0] + dx / dist * step, pos[1] + dy / dist * step)
             time.sleep(0.7)
         return False
@@ -1787,7 +1787,7 @@ class AppUI:
                 self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
                 time.sleep(8.0)
             else:
-                self._auto_daily_log("自动做日常：没看到 %s，走一圈找" % boss_name)
+                self._auto_daily_log("自动做日常：全图没刷出 %s，朝任务方向走一段" % boss_name)
                 if self._auto_daily_walk_search(boss_name):
                     time.sleep(8.0)
                 else:
