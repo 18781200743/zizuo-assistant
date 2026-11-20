@@ -845,28 +845,23 @@ class AppUI:
         self.assist_damage_status = tk.StringVar(value="尚未开启")
         ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=560).grid(row=0, column=4, sticky=tk.W)
 
-        ttk.Label(combat, text="视野").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        self.assist_vision_var = tk.StringVar(value=_vision_text(assist.get("vision_mode", -1)))
-        self.assist_vision_box = ttk.Combobox(combat, textvariable=self.assist_vision_var, values=VISION_CHOICES, width=20, state="readonly")
-        self.assist_vision_box.grid(row=1, column=1, columnspan=2, sticky=tk.W, padx=8, pady=(6, 0))
-        self.assist_vision_btn = ttk.Button(combat, text="应用", width=10, command=lambda: self.toggle_combat("vision"))
-        self.assist_vision_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
-        self.assist_vision_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
-
-        ttk.Label(combat, text="技能冷却").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, text="技能冷却").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
-        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=2, column=1, padx=(8, 2), pady=(6, 0))
-        ttk.Label(combat, text="秒").grid(row=2, column=2, sticky=tk.W, pady=(6, 0))
+        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(combat, text="秒").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("cooldown"))
-        self.assist_cooldown_btn.grid(row=2, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_cooldown_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
         self.assist_cooldown_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(
             parent,
-            text="提示：倍伤 / 视野 / 冷却会改动战斗数值，可能被判定异常；开着它们时不能开地图刷新。",
+            text=(
+                "提示：倍伤 / 冷却会改动战斗数值，可能被判定异常；开着它们时不能开地图刷新。"
+                "　（「视野」已移除：视野值会进每帧哈希，改了一定被服务端对出来）"
+            ),
             foreground="#c62828",
+            wraplength=980,
         ).pack(anchor=tk.W, pady=(2, 6))
 
         if self.dev_mode:
@@ -1517,16 +1512,9 @@ class AppUI:
                 "英雄倍伤",
             )
         elif name == "vision":
-            mode = _vision_mode(self.assist_vision_var.get())
-            if mode < 0 and not enabled:
-                self.append_log("视野已经是关闭状态")
-                return
-            send = mode
-            btn, status, label = (
-                self.assist_vision_btn,
-                self.assist_vision_status,
-                "视野修改",
-            )
+            # 视野功能已移除：视野值会进每帧哈希，改了一定会被服务端校验出来
+            messagebox.showinfo("视野修改", "这个功能已移除（会被服务器检测）。野外刷 BOSS 不需要它。")
+            return
         else:
             try:
                 value = float(self.assist_cooldown_var.get().strip())
@@ -1688,7 +1676,7 @@ class AppUI:
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
-                       self.assist_damage_btn, self.assist_vision_btn,
+                       self.assist_damage_btn,
                        self.assist_cooldown_btn, self.assist_revive_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
@@ -1697,7 +1685,6 @@ class AppUI:
         self.assist_red_btn.configure(text="关闭" if red.get("enabled") else "开启")
         self.assist_wish_btn.configure(text="关闭" if wish.get("enabled") else "开启")
         self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
-        self.assist_vision_btn.configure(text="恢复" if vision.get("enabled") else "应用")
         self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
@@ -1705,7 +1692,6 @@ class AppUI:
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
         self.assist_damage_status.set(str(damage.get("reason") or ("需要版本映射" if gap else "尚未开启")))
-        self.assist_vision_status.set(str(vision.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_cooldown_status.set(str(cooldown.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         revive_reason = str(revive.get("reason") or ("需要版本映射" if gap else "尚未开启"))
         if revive.get("count"):
