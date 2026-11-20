@@ -251,6 +251,12 @@
     setOn("fRevive", rv.enabled, "复活");
     setOn("fMob", mob.enabled, "小怪刷新");
     setOn("fBoss", boss.enabled, "BOSS刷新");
+    var wish = state.wish || {};
+    var wishBtn = $("fWish");
+    if (wishBtn) {
+      wishBtn.classList.toggle("on", !!wish.enabled);
+      wishBtn.textContent = "祈愿领取" + (wish.enabled ? " · 开" : "");
+    }
 
     var bits = [];
     if (red.reason) bits.push("红包：" + red.reason);
@@ -403,6 +409,50 @@
     $("fMob").onclick = function () { toggle("mob"); };
     $("fBoss").onclick = function () { toggle("boss"); };
     $("fMonsters").onclick = openMonsters;
+    var wishBtn = $("fWish");
+    if (wishBtn) wishBtn.onclick = function () { toggle("wish"); };
+
+    var reBtn = $("btnReconnect");
+    if (reBtn) reBtn.onclick = function () {
+      injected = false;
+      injectTries = 0;
+      setStatus("正在重新连接游戏窗口…");
+      inject();
+    };
+
+    var stopBtn = $("btnStopAll");
+    if (stopBtn) stopBtn.onclick = function () {
+      evalGame("(window.__zzAssist&&window.__zzAssist.stopAll&&window.__zzAssist.stopAll(),'ok')");
+      setStatus("已全部关闭");
+      render();
+    };
+
+    var cats = [
+      ["catMap", "secMap"],
+      ["catRevive", "secRevive"],
+      ["catDaily", "secDaily"],
+      ["catCombat", "secCombat"],
+      ["catGacha", "secGacha"],
+      ["catCmd", "secCmd"]
+    ];
+    cats.forEach(function (pair) {
+      var btn = $(pair[0]);
+      var sec = $(pair[1]);
+      if (!btn || !sec) return;
+      btn.onclick = function () {
+        var willOpen = !sec.classList.contains("open");
+        cats.forEach(function (p2) {
+          var b2 = $(p2[0]);
+          var s2 = $(p2[1]);
+          if (s2) s2.classList.remove("open");
+          if (b2) b2.classList.remove("sel");
+        });
+        if (willOpen) {
+          sec.classList.add("open");
+          btn.classList.add("sel");
+        }
+      };
+    });
     $("fClear").onclick = function () { send("clearStuck", 1); };
     $("btnListBack").onclick = function () { showPage("pageFunc"); };
     $("btnListRefresh").onclick = openMonsters;
