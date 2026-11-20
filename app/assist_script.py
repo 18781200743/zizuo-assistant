@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 119
+RUNTIME_VERSION = 120
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 119
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 119;
+  const VERSION = 120;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4539,6 +4539,12 @@ RUNTIME_JS = r"""
     clickTeleportTrack,
     set,
     diagnose,
+    // 外部（Python 通过 CDP）直接推进红包扫描：页面定时器被浏览器节流时靠这个兜底。
+    // CDP 的 Runtime.evaluate 不走页面定时器，窗口最小化也照常执行。
+    __redTick: () => {
+      try { tickRed(); } catch (cause) { state.red.reason = '红包异常：' + msgOf(cause); }
+      return state.red.enabled ? 1 : 0;
+    },
     refresh: () => { state.nextProbeAt = 0; probe(); },
     // 只给自测用：直接塞一次「刚死亡」事件，下一轮扫描就按真实死亡走
     // 「等待 N 秒 → 重进地图」。不碰游戏数据，可以在任何场景里验证整条链路。

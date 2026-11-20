@@ -323,6 +323,8 @@ class GameAssist:
         self.names: Dict[str, Any] = {}
 
         self._thread: Optional[threading.Thread] = None
+        self._red_thread: Optional[threading.Thread] = None
+        self._red_fast = False
         self._stop = threading.Event()
         self._queue: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
         self._desired: Dict[str, Any] = {}
@@ -341,6 +343,9 @@ class GameAssist:
         self.running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        if self._red_thread is None or not self._red_thread.is_alive():
+            self._red_thread = threading.Thread(target=self._red_fast_loop, daemon=True)
+            self._red_thread.start()
 
     def stop(self) -> None:
         # 先把页面里开着的功能关掉，否则关掉助手后游戏里还在自动跑
@@ -353,6 +358,28 @@ class GameAssist:
         self.running = False
         self._desired.clear()
         self.bridge.close()
+
+    def _red_fast_loop(self) -> None:
+        """红包兜底：用 CDP 直接推进页面里的扫描，绕开浏览器的后台定时器节流。
+
+        浏览器会把后台窗口的 setInterval 压到 1 秒（甚至更久），光靠页面定时器
+        切走窗口就会变慢。Runtime.evaluate 不是页面定时器，不受这个限制。
+        两套同时跑不会重复领：页面里 tickRed 自己按 50ms 间隔 + 已领 id 去重。
+        """
+        expr = (
+            "window.__zzAssist && window.__zzAssist.__redTick"
+            " ? (window.__zzAssist.__redTick(), 1) : 0"
+        )
+        while self.running:
+            if self._red_fast and (self.state or {}).get("ready"):
+                try:
+                    self.bridge.eval_js(expr)
+                    time.sleep(0.09)
+                except Exception:  # noqa: BLE001
+                    # 连接断了：别每 90ms 去重连，歇半秒等主线程把状态改掉
+                    time.sleep(0.5)
+            else:
+                time.sleep(0.2)
 
     def _status_log(self, text: str) -> None:
         """连接状态只在变化时写一行：界面不会刷屏，也不会一直停在旧提示上。"""
@@ -374,6 +401,10 @@ class GameAssist:
 
     def set_feature(self, feature: str, value: Any) -> None:
         """只排队，真正的调用在轮询线程里做，UI 永远不会卡。"""
+        if feature == "redPacket":
+            self._red_fast = bool(value)
+        elif feature == "stopAll" and value:
+            self._red_fast = False
         self._desired[feature] = value
         self._queue.put((feature, value))
         self._optimistic(feature, value)

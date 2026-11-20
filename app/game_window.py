@@ -106,15 +106,31 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
     import os
 
     # 供助手通过 CDP 真实点击（解决系统模拟点击在 WebView2 上无效）
-    # 后三个参数关掉后台节流：窗口最小化/被遮住时 setTimeout 会被降到 1 秒一次，
-    # 抢红包就废了；关掉之后 60ms 的轮询在后台也能照跑。
-    os.environ.setdefault(
-        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    # 下面几个参数专门关掉后台节流：
+    #   --disable-background-timer-throttling   后台 setInterval 不再压到 1 秒
+    #   --disable-backgrounding-occluded-windows 窗口被遮住不算「后台」
+    #   --disable-renderer-backgrounding        渲染进程不降优先级
+    #   --disable-features=IntensiveWakeUpThrottling  藏了 5 分钟后不再压到 1 分钟一次
+    #   --disable-features=CalculateNativeWinOcclusion 不让 Windows 把窗口判成不可见
+    # 注意：Chrome 只认最后一个 --disable-features，所以两个特性写在同一个参数里。
+    browser_args = (
         "--remote-debugging-port=9229 --remote-allow-origins=*"
         " --disable-background-timer-throttling"
         " --disable-backgrounding-occluded-windows"
-        " --disable-renderer-backgrounding",
+        " --disable-renderer-backgrounding"
+        " --disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion"
     )
+    existing = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "").strip()
+    if "--remote-debugging-port" in existing:
+        # 已经有人设过（比如用户自己加了参数）：保留，但把节流参数补上
+        for flag in browser_args.split():
+            if flag not in existing:
+                existing += " " + flag
+        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = existing
+    else:
+        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+            (existing + " " + browser_args).strip() if existing else browser_args
+        )
 
     try:
         import webview
@@ -219,6 +235,7 @@ def _launch_mac_chromium(
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
+        "--disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion",
         f"--user-agent={user_agent}",
     ]
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
