@@ -2309,7 +2309,10 @@ class AppUI:
                 pass
 
         try:
-            self._game_proc = open_game_window(url=url, width=width, height=height)
+            self._game_proc = open_game_window(
+                url=url, width=width, height=height,
+                browser=str(self.config.get("browser_path") or "").strip() or None,
+            )
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("打开失败", f"无法打开游戏窗口：{exc}")
             return

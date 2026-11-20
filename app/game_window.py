@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from .platform_compat import IS_MAC, mac_chromium_path
+from .platform_compat import IS_MAC, mac_chromium_candidates, mac_chromium_path
 
 GAME_WINDOW_TITLE = "Zizuo游戏窗"
 
@@ -186,13 +186,17 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
 
 
 def _launch_mac_chromium(
-    url: str, width: int, height: int, user_agent: str
+    url: str, width: int, height: int, user_agent: str, browser: Optional[str] = None
 ) -> subprocess.Popen:
     """macOS：没有 WebView2，直接开 Chrome/Edge 的独立窗口 + 9229 调试端口。"""
-    exe = mac_chromium_path()
-    if not exe:
+    exe = (browser or "").strip() or mac_chromium_path()
+    if not exe or not Path(exe).exists():
+        tried = "\n".join("- " + item for item in mac_chromium_candidates()[:6])
         raise RuntimeError(
-            "没有找到 Chrome 或 Edge。请先安装 Google Chrome，再点「打开游戏窗口」。"
+            "没有找到 Chrome 或 Edge。\n"
+            "请先安装 Google Chrome / Microsoft Edge，再点「打开游戏窗口」。\n"
+            "如果已经装了，可以在 config.json 里把 browser_path 填成浏览器的可执行文件路径。\n"
+            "已检查：\n" + tried
         )
     from .config_store import project_root
 
@@ -217,10 +221,11 @@ def open_game_window(
     width: int = 390,
     height: int = 844,
     user_agent: Optional[str] = None,
+    browser: Optional[str] = None,
 ) -> subprocess.Popen:
     """用独立进程打开游戏窗，不阻塞主界面。"""
     if IS_MAC:
-        return _launch_mac_chromium(url, width, height, user_agent or MOBILE_UA)
+        return _launch_mac_chromium(url, width, height, user_agent or MOBILE_UA, browser)
     from .config_store import project_root
 
     ua = user_agent or MOBILE_UA

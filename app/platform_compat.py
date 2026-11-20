@@ -24,22 +24,78 @@ def require_windows() -> None:
         raise RuntimeError(WIN_ONLY_MESSAGE)
 
 
+MAC_BROWSER_NAMES = (
+    "Google Chrome",
+    "Microsoft Edge",
+    "Chromium",
+    "Brave Browser",
+    "Vivaldi",
+    "Arc",
+    "Google Chrome Beta",
+    "Google Chrome Canary",
+)
+
+MAC_BUNDLE_IDS = (
+    "com.google.Chrome",
+    "com.microsoft.edgemac",
+    "org.chromium.Chromium",
+    "com.brave.Browser",
+    "com.vivaldi.Vivaldi",
+    "company.thebrowser.Browser",
+    "com.google.Chrome.beta",
+    "com.google.Chrome.canary",
+)
+
+
+def mac_chromium_candidates() -> List[str]:
+    """所有可能装 Chromium 系浏览器的地方（给诊断/兜底用）。"""
+    home = Path.home()
+    dirs = [Path("/Applications"), Path("/Applications/Utilities"), home / "Applications"]
+    out: List[str] = []
+    for base in dirs:
+        for name in MAC_BROWSER_NAMES:
+            exe = base / (name + ".app") / "Contents" / "MacOS" / name
+            out.append(str(exe))
+    return out
+
+
+def _spotlight_browsers() -> List[str]:
+    """用 Spotlight 找已安装的 Chromium 系浏览器（能覆盖改了名的 .app）。"""
+    import os
+    import subprocess
+
+    found: List[str] = []
+    for bundle_id in MAC_BUNDLE_IDS:
+        try:
+            proc = subprocess.run(
+                ["mdfind", "kMDItemCFBundleIdentifier == '%s'" % bundle_id],
+                capture_output=True, text=True, timeout=6,
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        for line in (proc.stdout or "").splitlines():
+            app = Path(line.strip())
+            exe_dir = app / "Contents" / "MacOS"
+            if not exe_dir.is_dir():
+                continue
+            try:
+                for child in exe_dir.iterdir():
+                    if child.is_file() and os.access(str(child), os.X_OK):
+                        found.append(str(child))
+                        break
+            except OSError:
+                continue
+    return found
+
+
 def mac_chromium_path() -> Optional[str]:
     """找 macOS 上的 Chrome / Edge / Chromium 可执行文件。"""
     if not IS_MAC:
         return None
-    candidates: List[Path] = [
-        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
-        Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
-        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        Path.home() / "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    ]
-    for path in candidates:
+    for candidate in mac_chromium_candidates() + _spotlight_browsers():
         try:
-            if path.exists():
-                return str(path)
+            if Path(candidate).exists():
+                return candidate
         except OSError:
             continue
     return None
