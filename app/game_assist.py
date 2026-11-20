@@ -241,14 +241,34 @@ class AssistBridge:
 
     # ---- 运行时 ----
 
+    def _detect_build(self) -> str:
+        """当前页面加载的是哪个客户端版本（index.<build>.js）。"""
+        try:
+            return str(self.eval_js(
+                "(()=>{try{for(const r of performance.getEntriesByType('resource')){"
+                "const m=/mainScripts\\/index\\.([0-9a-z]+)\\.js/i.exec(r.name);"
+                "if(m)return m[1];}}catch(e){}"
+                "return (window.__zzAssist&&window.__zzAssist.build)||'';})()"
+            ) or "")
+        except RuntimeError:
+            return ""
+
     def ensure_runtime(self, names: Optional[Dict[str, Any]] = None) -> str:
-        """返回 'installed' / 'ok' / 'fail:<原因>'。
+        """返回 'installed' / 'ok' / 'waiting:...' / 'fail:<原因>'。
 
         页面里已有运行时也可能已经过期（改了注入代码、换了映射表但没关窗口），
-        所以这里比对「代码版本 + 映射内容」的指纹，不一致就重装。
+        所以这里比对「代码版本 + 映射内容 + 翻译后的运行时」的指纹，不一致就重装。
         """
         mapping_json = json.dumps(load_mapping(), ensure_ascii=False, sort_keys=True)
-        stamp = hashlib.md5((str(RUNTIME_VERSION) + '|' + mapping_json).encode('utf-8')).hexdigest()
+        build = self._detect_build()
+        if not build:
+            # 页面还没加载完：这时候装进去的话，写死的内部名没法翻译（复活会找不到 ZAVH），
+            # 所以先等着，下一轮再装。
+            return "waiting:游戏页面还没加载出脚本版本，稍后自动重试"
+        runtime_js = apply_runtime_names(RUNTIME_JS, build)
+        stamp = hashlib.md5(
+            (str(RUNTIME_VERSION) + '|' + mapping_json + '|' + runtime_js).encode('utf-8')
+        ).hexdigest()
         try:
             fresh = self.eval_js(
                 "(window.__zzAssist && window.__zzAssist.version === %d"
@@ -263,17 +283,6 @@ class AssistBridge:
                 return 'ok'
         except RuntimeError:
             return 'fail:' + self.last_error
-
-        # 先看当前页面是哪个 build，把运行时里写死的内部名换成新名字
-        try:
-            build = str(self.eval_js(
-                "(()=>{try{for(const r of performance.getEntriesByType('resource')){"
-                "const m=/mainScripts\\/index\\.([0-9a-z]+)\\.js/i.exec(r.name);"
-                "if(m)return m[1];}}catch(e){}return '';})()"
-            ) or "")
-        except RuntimeError:
-            build = ""
-        runtime_js = apply_runtime_names(RUNTIME_JS, build)
 
         prefix = (
             "window.__zzAssistMapping = %s;\n"
