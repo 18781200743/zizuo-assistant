@@ -1119,7 +1119,7 @@ class AppUI:
         sub_txt = "#4b5768"
 
         # ---------- 本机游戏卡片 ----------
-        x0, y0, x1, y1 = sx(50), sy(515), sx(1105), sy(1085)
+        x0, y0, x1, y1 = sx(47), sy(531), sx(1106), sy(1126)
         card_img = self._frosted(
             w, h, (x0, y0, x1, y1), "#ffffff", 0.88, sx(30), "card"
         )
@@ -1135,11 +1135,11 @@ class AppUI:
             fill="", outline=card_line,
         )
         c.create_text(
-            sx(84), sy(558), anchor="w", text="本机游戏",
+            sx(84), sy(582), anchor="w", text="本机游戏",
             fill=dark_txt, font=(ui_font, 12, "bold"),
         )
         self._home_status_item = c.create_text(
-            sx(84), sy(648), anchor="nw", text=self.home_status_var.get(),
+            sx(84), sy(668), anchor="nw", text=self.home_status_var.get(),
             fill=sub_txt, width=x1 - sx(130), font=(ui_font, 11), justify="left",
         )
 
