@@ -45,6 +45,13 @@ COLLECT_KEYWORDS = {
     "活动": ("*",),
 }
 
+# 「日常那种」资源：树、木头、矿、灌木、草、肉、藤。
+# 采集(活动) 会把它们排除掉，只采活动专属的采集物（宝箱、光球、活动道具等）。
+DAILY_RESOURCE_WORDS = ("树", "木", "矿", "灌木", "草", "肉", "藤", "仙人掌")
+
+# 采集(活动) 只在角色周围这个半径内找（游戏坐标）；找不到就原地不动，不为了采一棵树飞很远。
+DEFAULT_COLLECT_RADIUS = 900
+
 
 def _config_path() -> Path:
     return Path(__file__).resolve().parent / "automation_config.json"
@@ -366,21 +373,28 @@ def _js_collect_hits() -> str:
     return "String(window.__zzCollectHits || 0)"
 
 
-def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
-    """在当前地图找最近的资源点（按名字关键字），返回坐标（不瞬移）。"""
+def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius: float = DEFAULT_COLLECT_RADIUS) -> str:
+    """在角色附近找资源点（按名字关键字），返回坐标（不瞬移）。
+
+    - 只找半径 radius 以内的，远的不去（避免为了采一棵树满地图飞）。
+    - 关键字是「活动」时排除日常资源（树/木/矿/灌木/草/肉/藤），只认活动专属采集物。
+    - 已经采过的（AINJ 为真）直接跳过。
+    """
     words = list(COLLECT_KEYWORDS.get(keyword, (keyword,)))
+    is_activity = "*" in words
     return r"""
 (function () {
   try {
     var words = %s;
     var skip = %s;
+    var radius = %s;
+    var daily = %s;
     var m = window.__zzAssistMapping || { builds: {} };
     var b = (m.builds || {})[m.current] || {};
     var mc = b.map || {};
     var u = mc.unit || {};
     var world = window[mc.holder || 'VKXX'];
     var core = world[mc.core || 'ZRRU'];
-    var holder = core;
     var units = null;
     var ids = [];
     try {
@@ -406,10 +420,20 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
         : words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
       if (!hit) return false;
       try { if (typeof unit.QATG === 'function' && !unit.QATG()) return false; } catch (e) {}
+      // 已经采完/被采掉的不要
+      try { if (typeof unit.AINJ === 'function' && unit.AINJ()) return false; } catch (e) {}
+      var d = Math.hypot(unit.ADUX - lx, unit.WUZI - ly);
+      // 超出角色附近范围的不采
+      if (d > radius) return false;
+      // 采集(活动)：跳过日常资源（树/木/矿/灌木/草/肉/藤）
+      if (anyKind) {
+        for (var j = 0; j < daily.length; j += 1) {
+          if (text.indexOf(String(daily[j])) >= 0) return false;
+        }
+      }
       for (var i = 0; i < skip.length; i += 1) {
         if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
       }
-      var d = Math.hypot(unit.ADUX - lx, unit.WUZI - ly);
       if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, name: name, d: d };
       return false;
     };
@@ -418,7 +442,7 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None) -> str:
     return JSON.stringify({name: best.name, x: Math.round(best.x), y: Math.round(best.y)});
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % (_js(words), _js(skip or []))
+""" % (_js(words), _js(skip or []), _js(float(radius)), _js(list(DAILY_RESOURCE_WORDS)))
 
 
 def _js_map_state(mapping: Dict[str, Any]) -> str:
@@ -908,6 +932,11 @@ class InstructionRunner:
     def _collect(self, args: List[str]) -> None:
         keyword = str(args[0]).strip() if args else "活动"
         mapping = getattr(self, "_mapping", None) or {}
+        try:
+            cfg = load_automation_config()
+            radius = float(cfg.get("collect_radius") or DEFAULT_COLLECT_RADIUS)
+        except (TypeError, ValueError):
+            radius = DEFAULT_COLLECT_RADIUS
         if mapping:
             try:
                 self._eval(_js_collect_hook(mapping))
@@ -918,7 +947,7 @@ class InstructionRunner:
         for _ in range(10):
             if self._stop.is_set():
                 raise _Stopped()
-            result = self._eval(_js_collect_target(keyword, tried))
+            result = self._eval(_js_collect_target(keyword, tried, radius))
             text = str(result)
             if text.startswith("ERR"):
                 raise RuntimeError("采集失败：%s" % text[4:])
@@ -955,7 +984,7 @@ class InstructionRunner:
         if got:
             self._log_line("    共采到 %d 次" % got)
         else:
-            self._log_line("    附近没有可采的「%s」" % keyword)
+            self._log_line("    角色附近 %d 米内没有可采的「%s」，原地不动" % (int(radius), keyword))
 
     def _pos(self) -> Optional[tuple]:
         try:

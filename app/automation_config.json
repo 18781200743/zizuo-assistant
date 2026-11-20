@@ -861,5 +861,6 @@
    "teleport_id": 15,
    "name": "海心圣域-静谧森林"
   }
- }
+ },
+ "collect_radius": 900
 }
