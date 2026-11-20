@@ -5,6 +5,9 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     # macos-13 已于 2025-12 下线，Intel 构建机改用 macos-15-intel（可用到 2027-08）
@@ -25,3 +28,12 @@ jobs:
           name: Zizuo-mac-x86_64
           path: dist/Zizuo助手-mac.zip
           if-no-files-found: error
+
+      - name: Publish release (方便用加速镜像下载)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp "dist/Zizuo助手-mac.zip" "dist/Zizuo-mac.zip"
+          gh release view mac-latest >/dev/null 2>&1 || \
+            gh release create mac-latest --title "Mac 最新版" --notes "自动构建（含内置 Chrome，未签名）"
+          gh release upload mac-latest dist/Zizuo-mac.zip --clobber
