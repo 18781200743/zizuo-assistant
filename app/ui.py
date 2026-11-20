@@ -1064,6 +1064,38 @@ class AppUI:
         self._frosted_cache = cache
         return photo
 
+    def _hex_glow(self, w: int, h: int, box):
+        """六边形外发光（模糊后的青色描边），按尺寸缓存。"""
+        cache = getattr(self, "_hex_cache", {})
+        key = tuple(int(v) for v in box) + (int(w), int(h))
+        if key in cache:
+            return cache[key]
+        photo = None
+        try:
+            from PIL import Image, ImageDraw, ImageFilter, ImageTk
+
+            x0, y0, x1, y1 = box
+            pad = 26
+            W = int(x1 - x0 + pad * 2)
+            H = int(y1 - y0 + pad * 2)
+            ss = 2
+            img = Image.new("RGBA", (W * ss, H * ss), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            cut = (y1 - y0) * 0.62
+            pts = [
+                (pad + cut, pad), (W - pad - cut, pad), (W - pad, H / 2),
+                (W - pad - cut, H - pad), (pad + cut, H - pad), (pad, H / 2),
+            ]
+            pts = [(x * ss, y * ss) for x, y in pts]
+            d.line(pts + [pts[0]], fill=(80, 230, 255, 220), width=7 * ss, joint="curve")
+            img = img.filter(ImageFilter.GaussianBlur(9 * ss))
+            photo = ImageTk.PhotoImage(img.resize((W, H), Image.LANCZOS))
+        except Exception:  # noqa: BLE001
+            photo = None
+        cache[key] = photo
+        self._hex_cache = cache
+        return photo
+
     def _build_home_tab(self, parent: tk.Frame) -> None:
         """首页：原画背景 + 卡片 + 发光按钮。"""
         parent.configure(bg=self.BG_TOP)
@@ -1129,7 +1161,7 @@ class AppUI:
         )
 
         # ---------- 本机游戏卡片 ----------
-        x0, y0, x1, y1 = sx(47), sy(531), sx(1106), sy(1126)
+        x0, y0, x1, y1 = sx(50), sy(510), sx(1105), sy(1085)
         card_img = self._frosted(
             w, h, (x0, y0, x1, y1), "#ffffff", 0.85, sx(30), "card"
         )
@@ -1145,11 +1177,11 @@ class AppUI:
             fill="", outline=card_line,
         )
         c.create_text(
-            sx(84), sy(586), anchor="w", text="本机游戏",
+            sx(84), sy(577), anchor="w", text="本机游戏",
             fill=dark_txt, font=(ui_font, 13, "bold"),
         )
         self._home_status_item = c.create_text(
-            sx(84), sy(672), anchor="nw", text=self.home_status_var.get(),
+            sx(84), sy(648), anchor="nw", text=self.home_status_var.get(),
             fill="#26303f", width=x1 - sx(130), font=(ui_font, 12), justify="left",
         )
 
@@ -1195,25 +1227,30 @@ class AppUI:
 
         # ---------- 辅助工具（发光六边形） ----------
         hx0, hx1 = sx(150), sx(1000)
-        hy0, hy1 = sy(1150), sy(1350)
+        hy0, hy1 = sy(1145), sy(1345)
         mid = (hy0 + hy1) / 2
         cut = sx(58)
+        glow = self._hex_glow(w, h, (hx0, hy0, hx1, hy1))
+        if glow is not None:
+            c.create_image(hx0 - 26, hy0 - 26, image=glow, anchor="nw")
+            self._hex_photo = glow
         hexa = [
             hx0 + cut, hy0, hx1 - cut, hy0, hx1, mid,
             hx1 - cut, hy1, hx0 + cut, hy1, hx0, mid,
         ]
-        c.create_polygon(hexa, fill="", outline="#0d5f6e", width=14, tags=("home_assist",))
-        c.create_polygon(hexa, fill="", outline="#16b8cf", width=6, tags=("home_assist",))
         c.create_polygon(
-            hexa, fill="#0d3b46", outline="#7ff0ff", width=2, tags=("home_assist",)
+            hexa, fill="#0e3b45", outline="#16b8cf", width=5, tags=("home_assist",)
+        )
+        c.create_polygon(
+            hexa, fill="", outline="#a5f3ff", width=1, tags=("home_assist",)
         )
         c.create_text(
-            hx0 + sx(20), mid, text="«", fill="#f59e0b",
-            font=(ui_font, 15, "bold"), tags=("home_assist",),
+            hx0 - 2, mid, text="«", fill="#f59e0b",
+            font=(ui_font, 16, "bold"), tags=("home_assist",),
         )
         c.create_text(
-            hx1 - sx(20), mid, text="»", fill="#f59e0b",
-            font=(ui_font, 15, "bold"), tags=("home_assist",),
+            hx1 + 2, mid, text="»", fill="#f59e0b",
+            font=(ui_font, 14, "bold"), tags=("home_assist",),
         )
         c.create_text(
             (hx0 + hx1) / 2, mid, text="辅助工具", fill="#ffffff",
@@ -1224,7 +1261,7 @@ class AppUI:
         c.tag_bind("home_assist", "<Leave>", lambda _e: c.configure(cursor=""))
 
         # ---------- 使用说明 ----------
-        ix0, iy0, ix1, iy1 = sx(50), sy(1420), sx(1105), sy(1790)
+        ix0, iy0, ix1, iy1 = sx(50), sy(1430), sx(1105), sy(1790)
         info_img = self._frosted(
             w, h, (ix0, iy0, ix1, iy1), "#223154", 0.86, sx(30), "info"
         )
