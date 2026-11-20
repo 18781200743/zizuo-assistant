@@ -671,6 +671,25 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return False
 
+    def pick_coord(self) -> dict:
+        """开始取坐标：等玩家在游戏画面上点一下。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.pickCoord "
+                "? window.__zzAssist.pickCoord() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def picked_coord(self) -> dict:
+        """取上一次点到的坐标。"""
+        try:
+            raw = self.bridge.eval_js("JSON.stringify(window.__zzPick || null)")
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def task_go(self, task_name: str) -> dict:
         """任务面板里点指定任务的「前往」（面板刚打开时行还没渲染，重试几次）。"""
         result: dict = {}

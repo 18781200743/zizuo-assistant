@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 115
+RUNTIME_VERSION = 116
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 115
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 115;
+  const VERSION = 116;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2713,6 +2713,52 @@ RUNTIME_JS = r"""
     }
   }
 
+  /**
+   * 取坐标：装一个一次性点击监听，把点到的屏幕位置换算成世界坐标。
+   * 结果写进 window.__zzPick = {x, y, screen:[sx,sy]}。
+   */
+  function pickCoord() {
+    try {
+      if (window.__zzPickOff) { try { window.__zzPickOff(); } catch (_) {} }
+      window.__zzPick = null;
+      const canvas = window.cc && window.cc.game && window.cc.game.canvas;
+      if (!canvas) return { ok: false, error: '找不到画布' };
+      const handler = function (ev) {
+        try {
+          // 找 Canvas 相机
+          let cam = null;
+          const scene = window.cc.director.getScene();
+          (function walk(n, d) {
+            if (!n || cam || d > 10) return;
+            const c = n.getComponent(window.cc.Canvas);
+            if (c && c.cameraComponent) cam = c.cameraComponent;
+            (n.children || []).forEach(k => walk(k, d + 1));
+          })(scene, 0);
+          const rect = canvas.getBoundingClientRect();
+          const vp = window.cc.view.getVisibleSizeInPixel();
+          const sx = (ev.clientX - rect.left) * vp.width / rect.width;
+          const sy = vp.height - (ev.clientY - rect.top) * vp.height / rect.height;
+          let wx = null, wy = null;
+          if (cam && typeof cam.screenToWorld === 'function') {
+            const v3 = window.cc.v3 ? window.cc.v3(sx, sy, 0) : { x: sx, y: sy, z: 0 };
+            const w = cam.screenToWorld(v3);
+            if (w) { wx = Math.round(w.x); wy = Math.round(w.y); }
+          }
+          window.__zzPick = { x: wx, y: wy, screen: [Math.round(sx), Math.round(sy)],
+            client: [Math.round(ev.clientX), Math.round(ev.clientY)] };
+        } catch (e) {
+          window.__zzPick = { error: String((e && e.message) || e) };
+        }
+        try { window.__zzPickOff(); } catch (_) {}
+      };
+      canvas.addEventListener('pointerdown', handler, { once: true });
+      window.__zzPickOff = function () { canvas.removeEventListener('pointerdown', handler); window.__zzPickOff = null; };
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /** 在任务面板里找到指定名字的任务行，点它的「前往」。 */
   function clickTaskGo(taskName) {
     try {
@@ -4383,6 +4429,7 @@ RUNTIME_JS = r"""
     shareGame,
     reloadMapNow,
     clickTaskGo,
+    pickCoord,
     clickTeleportTrack,
     set,
     diagnose,

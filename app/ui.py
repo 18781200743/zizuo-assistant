@@ -871,6 +871,7 @@ class AppUI:
         ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
         ttk.Button(daily_row, text="一键完成(任务卡)", width=16, command=self.complete_daily).pack(side=tk.LEFT, padx=4)
         ttk.Button(daily_row, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
+        ttk.Button(daily_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
         ttk.Label(daily_row, textvariable=self.assist_daily_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
@@ -1902,6 +1903,35 @@ class AppUI:
             self._auto_daily_log("自动做日常出错：%s" % exc)
         finally:
             self._auto_daily_busy = False
+
+    def pick_coord(self) -> None:
+        """取坐标：先点按钮，再在游戏画面上点一下要记录的位置。"""
+        if not self.assist.running:
+            self.start_assist()
+        result = self.assist.pick_coord()
+        if not result.get("ok"):
+            self.assist_daily_status.set("取坐标失败：%s" % (result.get("error") or "未知原因"))
+            return
+        self.assist_daily_status.set("请到游戏画面上点一下要记录的位置…")
+        self.root.after(700, self._poll_picked)
+
+    def _poll_picked(self, attempt: int = 0) -> None:
+        picked = self.assist.picked_coord()
+        if picked and (picked.get("x") is not None or picked.get("error")):
+            if picked.get("error"):
+                self.assist_daily_status.set("取坐标出错：%s" % picked["error"])
+                return
+            text = "坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
+            self.assist_daily_status.set(text + "  已复制")
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append("%s,%s" % (picked.get("x"), picked.get("y")))
+            except tk.TclError:
+                pass
+            self.append_log("取坐标：" + text)
+            return
+        if attempt < 60:
+            self.root.after(500, lambda: self._poll_picked(attempt + 1))
 
     def complete_daily(self) -> None:
         """用任务卡把没做完的日常任务秒完成（会消耗任务卡）。"""
