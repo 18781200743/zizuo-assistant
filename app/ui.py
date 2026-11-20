@@ -1330,14 +1330,6 @@ class AppUI:
                 hexa, fill="#0e3b45", outline="#a5f3ff", width=2, tags=("home_assist",)
             )
         c.create_text(
-            hx0 - 14, mid, text="«", fill="#f97316",
-            font=(ui_font, 18, "bold"), tags=("home_assist",),
-        )
-        c.create_text(
-            hx1 + 14, mid, text="»", fill="#f97316",
-            font=(ui_font, 18, "bold"), tags=("home_assist",),
-        )
-        c.create_text(
             (hx0 + hx1) / 2, mid + 1, text="辅助工具", fill="#0b2f38",
             font=(ui_font, 20, "bold"), tags=("home_assist",),
         )
