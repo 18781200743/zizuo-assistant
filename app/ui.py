@@ -1294,29 +1294,32 @@ class AppUI:
 
         row = ttk.Frame(right)
         row.pack(fill=tk.X, pady=(2, 0))
-        ttk.Button(row, text="编辑", style="Accent.TButton", command=self.edit_instruction).pack(
+        ttk.Button(row, text="新建", style="Accent.TButton", command=self.new_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X
         )
-        ttk.Button(row, text="还原", command=self.restore_instruction).pack(
+        ttk.Button(row, text="编辑", command=self.edit_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
-        ttk.Button(row, text="复制", command=self.copy_instruction).pack(
+        ttk.Button(row, text="保存为我的", command=self.save_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
         row2 = ttk.Frame(right)
         row2.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(row2, text="导出指令码", command=self.export_instruction).pack(
+        ttk.Button(row2, text="还原", command=self.restore_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X
         )
-        ttk.Button(row2, text="导入指令码", command=self.import_instruction).pack(
+        ttk.Button(row2, text="复制", command=self.copy_instruction).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
+        )
+        ttk.Button(row2, text="删除", command=self.delete_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
         row3 = ttk.Frame(right)
         row3.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(row3, text="保存为我的", command=self.save_instruction).pack(
+        ttk.Button(row3, text="导出指令码", command=self.export_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X
         )
-        ttk.Button(row3, text="删除", command=self.delete_instruction).pack(
+        ttk.Button(row3, text="导入指令码", command=self.import_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
 
@@ -1377,23 +1380,23 @@ class AppUI:
         self.cmd_text.insert("1.0", format_content(str(item.get("content") or "")))
         self.cmd_text.configure(state=tk.DISABLED)
 
-    def edit_instruction(self) -> None:
-        """编辑被选中的指令（内置的自己改过的也直接改本体，不用先另存一份）。"""
-        item = self._selected_command()
-        if not item:
-            messagebox.showinfo("编辑指令", "先在左边选一条指令")
-            return
-        title = str(item.get("title") or "未命名")
+    def _instruction_editor(self, title: str, content: str, on_save, heading: str) -> None:
+        """通用指令编辑器：on_save(正文) 负责保存；返回 False 表示失败、别关窗。"""
         win = tk.Toplevel(self.root)
-        win.title("编辑指令 - %s" % title)
+        win.title(heading)
         win.transient(self.root)
-        win.geometry("640x560")
-        win.minsize(480, 360)
+        win.geometry("640x620")
+        win.minsize(480, 420)
 
         ttk.Label(
             win,
-            text="一行一条：# 开头的行是注释；支持 等待/点击/滚轮/移动/传送/回城/采集/开宝箱/跳转",
+            text=(
+                "一行一条：# 开头是注释。支持 传送(章节,地图[,大陆]) / 移动(方向,秒) / "
+                "采集(活动) / 等待(秒) / 回城() / 点击(X,Y) / 滚轮(上|下,量[,X,Y]) / 停止()"
+            ),
             foreground="#6b7280",
+            wraplength=600,
+            justify=tk.LEFT,
         ).pack(anchor=tk.W, padx=12, pady=(10, 4))
 
         frame = ttk.Frame(win)
@@ -1407,7 +1410,7 @@ class AppUI:
         sb_x.grid(row=1, column=0, sticky="ew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        text.insert("1.0", format_content(str(item.get("content") or "")))
+        text.insert("1.0", format_content(content))
         text.focus_set()
 
         note = tk.StringVar(value="")
@@ -1417,28 +1420,84 @@ class AppUI:
         btns.pack(fill=tk.X, padx=12, pady=10)
 
         def _save() -> None:
-            content = text.get("1.0", tk.END).strip()
-            if not content:
+            body = text.get("1.0", tk.END).strip()
+            if not body:
                 note.set("内容不能为空")
                 return
             try:
-                if item.get("custom"):
-                    save_user_instruction(
-                        title, content, int(item.get("category_id") or 3), old_title=title
-                    )
-                else:
-                    save_instruction_override(item.get("id"), content)
+                if on_save(body) is False:
+                    return
             except Exception as exc:  # noqa: BLE001
-                messagebox.showerror("编辑指令", str(exc), parent=win)
+                messagebox.showerror("保存指令", str(exc), parent=win)
                 return
             win.destroy()
-            self.refresh_command_list(select_title=title)
-            self.cmd_status.set("已保存修改：%s" % title)
 
         ttk.Button(btns, text="保存", style="Accent.TButton", command=_save).pack(side=tk.RIGHT, padx=4)
         ttk.Button(btns, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
         win.bind("<Escape>", lambda _e: win.destroy())
         win.grab_set()
+
+    def edit_instruction(self) -> None:
+        """编辑被选中的指令（内置的自己改过的也直接改本体，不用先另存一份）。"""
+        item = self._selected_command()
+        if not item:
+            messagebox.showinfo("编辑指令", "先从列表里选一条指令")
+            return
+        title = str(item.get("title") or "未命名")
+
+        def _on_save(body: str) -> None:
+            if item.get("custom"):
+                save_user_instruction(title, body, int(item.get("category_id") or 3), old_title=title)
+            else:
+                save_instruction_override(item.get("id"), body)
+            self.refresh_command_list(select_title=title)
+            self.cmd_status.set("已保存修改：%s" % title)
+
+        self._instruction_editor(
+            title, str(item.get("content") or ""), _on_save, "编辑指令 - %s" % title
+        )
+
+    NEW_INSTRUCTION_TEMPLATE = (
+        "# 我的指令（把下面几行改成你要的步骤；# 开头的行不会执行）\n"
+        "# 传送(3,2)\n"
+        "# 移动(上,3)\n"
+        "# 等待(2)\n"
+        "# 采集(活动)\n"
+        "# 回城()\n"
+    )
+
+    def new_instruction(self) -> None:
+        """新建一条空白指令（存在「我的」里）。"""
+        name = simpledialog.askstring(
+            "新建指令", "指令名称（例如：我的刷怪路线）：", parent=self.root
+        )
+        if not name or not name.strip():
+            return
+        title = name.strip()
+        existing = {
+            str(row.get("title") or "")
+            for row in (load_library().get("instructions") or [])
+        }
+        if title in existing:
+            messagebox.showinfo("新建指令", "已经有同名指令了，换个名字。")
+            return
+
+        category = 3
+        current = getattr(self, "cmd_category", CATEGORY_ALL)
+        if current not in (CATEGORY_ALL, -1, None):
+            try:
+                category = int(current)
+            except (TypeError, ValueError):
+                category = 3
+
+        def _on_save(body: str) -> None:
+            save_user_instruction(title, body, category)
+            self.refresh_command_list(select_title=title)
+            self.cmd_status.set("已新建：%s" % title)
+
+        self._instruction_editor(
+            title, self.NEW_INSTRUCTION_TEMPLATE, _on_save, "新建指令 - %s" % title
+        )
 
     def restore_instruction(self) -> None:
         """把改过的内置指令还原成原版。"""
