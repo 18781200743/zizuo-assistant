@@ -979,10 +979,19 @@ class AppUI:
             ("抽卡", "gacha"),
             ("运行指令", "commands"),
         ]
+        # 按钮配色：战斗参数=红（会被服务端校验），复活/闪现=黄
+        styles = {
+            "combat": ("#fdecea", "#b3261e", "#f8d7d3"),
+            "revive": ("#fff6da", "#8a6100", "#fbeabb"),
+        }
         for index, (text, key) in enumerate(tool_items):
-            ttk.Button(menu, text=text, command=lambda k=key: self._show_tool(k)).grid(
-                row=index // 2, column=index % 2, sticky="ew", padx=4, pady=4
-            )
+            bg, fg, active = styles.get(key, ("#eef1f6", "#1f2937", "#e2e8f0"))
+            tk.Button(
+                menu, text=text, command=lambda k=key: self._show_tool(k),
+                relief=tk.FLAT, bd=0, bg=bg, fg=fg, activebackground=active,
+                activeforeground=fg, font=("Microsoft YaHei UI", 10),
+                padx=6, pady=7, cursor="hand2",
+            ).grid(row=index // 2, column=index % 2, sticky="ew", padx=4, pady=4)
 
         # ---------- 地图刷新 ----------
         refresh = ttk.LabelFrame(parent, text="地图刷新", padding=6)
