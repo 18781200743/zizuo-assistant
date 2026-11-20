@@ -1,7 +1,9 @@
 {
-  "@platforms": ["android"],
-  "id": "com.zizuo.assist",
-  "name": "紫作助手",
+  "@platforms": [
+    "android"
+  ],
+  "id": "H519A18D3",
+  "name": "百炼助手",
   "version": {
     "name": "1.0.0",
     "code": "1"
@@ -33,7 +35,12 @@
         ]
       },
       "apple": {},
-      "orientation": ["portrait"]
+      "orientation": [
+        "portrait-primary"
+      ]
     }
-  }
+  },
+  "screenOrientation": [
+    "portrait"
+  ]
 }
