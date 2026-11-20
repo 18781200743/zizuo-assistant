@@ -1118,6 +1118,16 @@ class AppUI:
         dark_txt = "#1f2937"
         sub_txt = "#4b5768"
 
+        # ---------- 标题 ----------
+        c.create_text(
+            sx(52), sy(243), anchor="w", text="百炼英雄 · 助手",
+            fill="#ffffff", font=(ui_font, 19, "bold"),
+        )
+        c.create_text(
+            sx(52), sy(332), anchor="w", text="百炼英雄 · 电脑版",
+            fill="#dbe3f5", font=(ui_font, 9),
+        )
+
         # ---------- 本机游戏卡片 ----------
         x0, y0, x1, y1 = sx(47), sy(531), sx(1106), sy(1126)
         card_img = self._frosted(
@@ -1169,10 +1179,15 @@ class AppUI:
         c.tag_bind("home_open", "<Button-1>", lambda _e: self.ask_open_game())
         c.tag_bind("home_reconnect", "<Button-1>", lambda _e: self.reconnect_assist())
 
-        # ---------- 关于（背景图上的按钮位置） ----------
-        c.create_rectangle(
-            sx(959), sy(108), sx(1117), sy(195),
-            fill="", outline="", tags=("home_about",),
+        # ---------- 关于 ----------
+        ax0, ay0, ax1, ay1 = sx(959), sy(108), sx(1117), sy(195)
+        c.create_polygon(
+            self._round_points(ax0, ay0, ax1, ay1, sx(14)),
+            fill="#ffffff", outline="#e6ecf7", tags=("home_about",),
+        )
+        c.create_text(
+            (ax0 + ax1) / 2, (ay0 + ay1) / 2, text="关于", fill="#1c4f9c",
+            font=(ui_font, 10, "bold"), tags=("home_about",),
         )
         c.tag_bind("home_about", "<Button-1>", lambda _e: self._show_about())
         c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
@@ -1238,6 +1253,12 @@ class AppUI:
                 sx(84), sy(1560 + i * 78), anchor="w", text=line,
                 fill="#dbe4f5", font=(ui_font, 10),
             )
+
+        # ---------- 底部说明 ----------
+        c.create_text(
+            w / 2, sy(1912), text="说明：使用脚本，封号自己负责",
+            fill="#f97316", font=(ui_font, 10),
+        )
 
     def _show_about(self) -> None:
         messagebox.showinfo(
