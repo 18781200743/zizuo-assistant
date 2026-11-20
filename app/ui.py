@@ -307,6 +307,7 @@ class AppUI:
         self._frag_base: Dict[str, int] = {}
         self._gold_base = None
 
+        self._init_dark_styles()
         self._build()
         try:
             self.root.after(150, self._pump_cmd_events)
@@ -366,6 +367,103 @@ class AppUI:
             font=("Microsoft YaHei UI", 14),
             padding=(0, 14),
         )
+
+    DARK_PAGE = "#0f1a2b"
+    DARK_CARD = "#16233c"
+    DARK_LINE = "#2a3b5c"
+    DARK_TXT = "#e6ebf5"
+    DARK_SUB = "#9fb0c9"
+
+    def _init_dark_styles(self) -> None:
+        """深色控件样式（只给要用深色的页面套）。"""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        dark, card, txt, sub, line = (
+            self.DARK_PAGE, self.DARK_CARD, self.DARK_TXT, self.DARK_SUB, self.DARK_LINE,
+        )
+        style.configure("Dark.TFrame", background=dark)
+        style.configure("Dark.TLabel", background=dark, foreground=txt)
+        style.configure(
+            "Dark.TLabelframe", background=dark, bordercolor=line, relief="solid", borderwidth=1
+        )
+        style.configure("Dark.TLabelframe.Label", background=dark, foreground="#8ecbff")
+        style.configure(
+            "Dark.TButton", background=card, foreground=txt, bordercolor=line,
+            focusthickness=0, relief="flat", padding=(6, 3),
+        )
+        style.map("Dark.TButton", background=[("active", "#24365a")])
+        style.configure(
+            "Dark.Accent.TButton", background="#2f7fe8", foreground="#ffffff",
+            bordercolor="#2f7fe8",
+        )
+        style.map("Dark.Accent.TButton", background=[("active", "#2568c7")])
+        style.configure("Dark.TCheckbutton", background=dark, foreground=txt)
+        style.map("Dark.TCheckbutton", background=[("active", dark)])
+        style.configure(
+            "Dark.TEntry", fieldbackground="#1b2a44", background="#1b2a44",
+            foreground=txt, insertcolor=txt, bordercolor=line,
+            lightcolor=line, darkcolor=line,
+        )
+        style.map(
+            "Dark.TEntry",
+            fieldbackground=[("disabled", "#16233c"), ("readonly", "#16233c")],
+            foreground=[("disabled", sub)],
+        )
+        style.configure(
+            "Dark.TCombobox", fieldbackground="#1b2a44", background="#1b2a44",
+            foreground=txt, arrowcolor=txt, bordercolor=line,
+            lightcolor=line, darkcolor=line,
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", "#1b2a44")],
+            background=[("readonly", "#1b2a44"), ("active", "#24365a")],
+            foreground=[("readonly", txt)],
+            selectbackground=[("readonly", "#1b2a44")],
+            selectforeground=[("readonly", txt)],
+            arrowcolor=[("readonly", txt)],
+        )
+        style.configure(
+            "Dark.Vertical.TScrollbar", background="#24365a", troughcolor=dark,
+            bordercolor=dark, arrowcolor=sub,
+        )
+        style.configure(
+            "Dark.Horizontal.TScrollbar", background="#24365a", troughcolor=dark,
+            bordercolor=dark, arrowcolor=sub,
+        )
+        style.configure("Dark.TPanedwindow", background=dark)
+
+    def _apply_dark(self, widget) -> None:
+        """把某个页面里所有 ttk 控件换成深色样式。"""
+        for child in widget.winfo_children():
+            try:
+                cls = child.winfo_class()
+                if cls == "TScrollbar":
+                    orient = str(child.cget("orient"))
+                    child.configure(
+                        style="Dark.Vertical.TScrollbar"
+                        if orient == "vertical"
+                        else "Dark.Horizontal.TScrollbar"
+                    )
+                elif cls == "TButton":
+                    current = str(child.cget("style") or "")
+                    child.configure(
+                        style="Dark.Accent.TButton" if "Accent" in current else "Dark.TButton"
+                    )
+                elif cls in ("TFrame", "TLabel", "TLabelframe", "TCheckbutton",
+                             "TEntry", "TCombobox", "TPanedwindow"):
+                    child.configure(style="Dark." + cls)
+                elif cls == "Listbox":
+                    child.configure(
+                        bg="#1b2a44", fg=self.DARK_TXT,
+                        selectbackground="#2f7fe8", selectforeground="#ffffff",
+                    )
+            except tk.TclError:
+                pass
+            self._apply_dark(child)
 
     def _build(self) -> None:
         self._setup_style()
@@ -458,7 +556,11 @@ class AppUI:
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
         self._build_slots_tab(self._page_slots)
         self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
-        self._build_assist_tab(self._make_scroll(self._page_assist, "assist"))
+        self._page_assist.configure(style="Dark.TFrame")
+        self._build_assist_tab(
+            self._make_scroll(self._page_assist, "assist", bg=self.DARK_PAGE)
+        )
+        self._apply_dark(self._page_assist)
         self._build_commands_tab(self._page_commands)
         self._build_home_tab(self._page_home)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
@@ -584,9 +686,9 @@ class AppUI:
         )
         ttk.Button(run_box2, text="保存配置", command=self.save_all).pack(side=tk.LEFT, padx=2)
 
-    def _make_scroll(self, parent: ttk.Frame, key: str) -> ttk.Frame:
+    def _make_scroll(self, parent: ttk.Frame, key: str, bg: str = "#ffffff") -> ttk.Frame:
         """给页面套一个可滚动容器，返回里面真正放内容的 frame。"""
-        canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg="#ffffff")
+        canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=bg)
         sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
         hb = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=canvas.xview)
         inner = ttk.Frame(canvas)
@@ -1115,7 +1217,7 @@ class AppUI:
         bar.pack(fill=tk.X, pady=(0, 8))
         self.assist_message_var = tk.StringVar(value="辅助已自动连接，等待游戏窗口…")
         ttk.Label(
-            bar, textvariable=self.assist_message_var, foreground="#1a4d8f",
+            bar, textvariable=self.assist_message_var, foreground="#7cc4ff",
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         btns = ttk.Frame(bar)
@@ -1130,22 +1232,22 @@ class AppUI:
 
         def _tag(text, color, bg=None):
             tk.Label(
-                legend, text=text, fg=color, bg=bg or "#ffffff",
+                legend, text=text, fg=color, bg=bg or "#0f1a2b",
                 font=("Microsoft YaHei UI", 9, bg and "bold" or "normal"),
                 padx=2,
             ).pack(side=tk.LEFT)
 
         tk.Label(
-            legend, text="安全等级", fg="#6b7280", bg="#ffffff",
+            legend, text="安全等级", fg="#9fb0c9", bg="#0f1a2b",
             font=("Microsoft YaHei UI", 9),
         ).pack(side=tk.LEFT, padx=(0, 6))
-        _tag("绿", "#1b7f3b")
-        tk.Label(legend, text="→", fg="#9ca3af", bg="#ffffff").pack(side=tk.LEFT)
-        _tag("黄", "#a06a00")
-        tk.Label(legend, text="→", fg="#9ca3af", bg="#ffffff").pack(side=tk.LEFT)
-        _tag("红", "#b3261e")
+        _tag("绿", "#4ade80")
+        tk.Label(legend, text="→", fg="#7f8ea8", bg="#0f1a2b").pack(side=tk.LEFT)
+        _tag("黄", "#fbbf24")
+        tk.Label(legend, text="→", fg="#7f8ea8", bg="#0f1a2b").pack(side=tk.LEFT)
+        _tag("红", "#f87171")
         tk.Label(
-            legend, text="  红色最危险", fg="#6b7280", bg="#ffffff",
+            legend, text="  红色最危险", fg="#9fb0c9", bg="#0f1a2b",
             font=("Microsoft YaHei UI", 9),
         ).pack(side=tk.LEFT)
 
@@ -1188,30 +1290,36 @@ class AppUI:
         ttk.Label(refresh, text="秒").grid(row=0, column=2, sticky=tk.W)
         self.assist_mob_btn = ttk.Button(refresh, text="开启", width=10, command=lambda: self.toggle_assist("mob"))
         self.assist_mob_btn.grid(row=0, column=3, padx=(6, 4))
-        self.assist_mob_status = tk.StringVar(value="")
-        ttk.Label(refresh, textvariable=self.assist_mob_status, foreground="#666").grid(row=0, column=4, sticky=tk.W)
+        self.assist_mob_status = tk.StringVar(value="待接入")
+        ttk.Label(
+            refresh, textvariable=self.assist_mob_status, foreground="#9fb0c9",
+            wraplength=420, justify=tk.LEFT,
+        ).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
 
-        ttk.Label(refresh, text="BOSS 死亡后等待").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Label(refresh, text="BOSS 死亡后等待").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_boss_var = tk.StringVar(value=_seconds_text(assist.get("boss_seconds", 3)))
-        ttk.Entry(refresh, textvariable=self.assist_boss_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
-        ttk.Label(refresh, text="秒").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
+        ttk.Entry(refresh, textvariable=self.assist_boss_var, width=6, justify="center").grid(row=2, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(refresh, text="秒").grid(row=2, column=2, sticky=tk.W, pady=(6, 0))
         self.assist_boss_btn = ttk.Button(refresh, text="开启", width=10, command=lambda: self.toggle_assist("boss"))
-        self.assist_boss_btn.grid(row=1, column=3, padx=(6, 4), pady=(6, 0))
-        self.assist_boss_status = tk.StringVar(value="")
-        ttk.Label(refresh, textvariable=self.assist_boss_status, foreground="#666").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        self.assist_boss_btn.grid(row=2, column=3, padx=(6, 4), pady=(6, 0))
+        self.assist_boss_status = tk.StringVar(value="待接入")
+        ttk.Label(
+            refresh, textvariable=self.assist_boss_status, foreground="#9fb0c9",
+            wraplength=420, justify=tk.LEFT,
+        ).grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
         self.assist_gold_var = tk.StringVar(value="BOSS 金币 0")
-        ttk.Label(refresh, textvariable=self.assist_gold_var, foreground="#a35a00").grid(
-            row=3, column=0, columnspan=2, sticky=tk.W, pady=(6, 0)
+        ttk.Label(refresh, textvariable=self.assist_gold_var, foreground="#fbbf24").grid(
+            row=5, column=0, columnspan=2, sticky=tk.W, pady=(6, 0)
         )
         ttk.Button(refresh, text="清除卡图", width=10, command=self.clear_stuck).grid(
-            row=2, column=0, sticky=tk.W, pady=(8, 0)
+            row=4, column=0, sticky=tk.W, pady=(8, 0)
         )
         ttk.Label(
             refresh,
             text="传送/回城没反应时点一下",
-            foreground="#666",
+            foreground="#9fb0c9",
             wraplength=200,
-        ).grid(row=2, column=1, columnspan=4, sticky=tk.W, padx=(8, 0), pady=(8, 0))
+        ).grid(row=4, column=1, columnspan=4, sticky=tk.W, padx=(8, 0), pady=(8, 0))
 
         # ---------- 红包 / 祈愿 ----------
         free = ttk.LabelFrame(parent, text="红包 / 祈愿", padding=6)
@@ -1219,23 +1327,23 @@ class AppUI:
 
         ttk.Label(free, text="快速抢红包").grid(row=0, column=0, sticky=tk.W)
         self.assist_green_var = tk.StringVar(value="已领 0 个红包 · 0 绿钻")
-        ttk.Label(free, textvariable=self.assist_green_var, foreground="#0a7a2f", wraplength=160).grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=6)
+        ttk.Label(free, textvariable=self.assist_green_var, foreground="#4ade80", wraplength=160).grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=6)
         self.assist_red_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("redPacket"))
         self.assist_red_btn.grid(row=0, column=3, padx=(6, 4))
         self.assist_red_status = tk.StringVar(value="尚未开启")
-        ttk.Label(free, textvariable=self.assist_red_status, foreground="#666").grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(free, textvariable=self.assist_red_status, foreground="#9fb0c9").grid(row=0, column=4, sticky=tk.W)
 
         ttk.Label(free, text="祈愿领取").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_wish_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("wish"))
         self.assist_wish_btn.grid(row=1, column=3, padx=(6, 4), pady=(6, 0))
         self.assist_wish_status = tk.StringVar(value="未检查")
-        ttk.Label(free, textvariable=self.assist_wish_status, foreground="#666").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(free, textvariable=self.assist_wish_status, foreground="#9fb0c9").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
 
         # ---------- 快速复活 ----------
         revive = ttk.LabelFrame(parent, text="快速复活", padding=6)
         revive.columnconfigure(4, weight=1)
         ttk.Label(revive, text="快速复活").grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(revive, text="免费·原地", foreground="#0a7d2c").grid(
+        ttk.Label(revive, text="免费·原地", foreground="#4ade80").grid(
             row=0, column=1, columnspan=2, sticky=tk.W, padx=8
         )
         self._revive_click_job = None
@@ -1245,13 +1353,13 @@ class AppUI:
         self.assist_revive_btn.grid(row=0, column=3, padx=(6, 4))
         self.assist_revive_status = tk.StringVar(value="尚未开启（点1次=复活1次；点2次=一直开）")
         ttk.Label(
-            revive, textvariable=self.assist_revive_status, foreground="#666", wraplength=330
+            revive, textvariable=self.assist_revive_status, foreground="#9fb0c9", wraplength=330
         ).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
         ttk.Button(revive, text="清除卡图", width=9, command=self.clear_stuck).grid(
             row=2, column=0, columnspan=2, sticky=tk.W, pady=(8, 0)
         )
         ttk.Label(
-            revive, text="复活/传送没反应时点一下", foreground="#666"
+            revive, text="复活/传送没反应时点一下", foreground="#9fb0c9"
         ).grid(row=2, column=2, columnspan=3, sticky=tk.W, padx=(6, 0), pady=(8, 0))
 
         # ---------- 闪现寻怪 ----------
@@ -1277,7 +1385,7 @@ class AppUI:
         self.assist_blink_btn.grid(row=0, column=5, padx=(6, 4))
         self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
         ttk.Label(
-            blink, textvariable=self.assist_blink_status, foreground="#666", wraplength=330,
+            blink, textvariable=self.assist_blink_status, foreground="#9fb0c9", wraplength=330,
             justify=tk.LEFT,
         ).grid(row=1, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
 
@@ -1301,7 +1409,7 @@ class AppUI:
             value="点「取坐标」，再到游戏画面上点一下；取到后点「飞过去」"
         )
         ttk.Label(
-            coord, textvariable=self.assist_coord_status, foreground="#666", wraplength=280
+            coord, textvariable=self.assist_coord_status, foreground="#9fb0c9", wraplength=280
         ).pack(side=tk.LEFT, padx=6)
 
         # ---------- 日常任务 ----------
@@ -1310,7 +1418,7 @@ class AppUI:
         ttk.Button(daily, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
         self.assist_daily_status = tk.StringVar(value="自动领日常")
         ttk.Label(
-            daily, textvariable=self.assist_daily_status, foreground="#666", wraplength=200
+            daily, textvariable=self.assist_daily_status, foreground="#9fb0c9", wraplength=200
         ).pack(side=tk.LEFT, padx=6)
 
         # ---------- 战斗参数（保留，默认关；实测会被服务端校验）----------
@@ -1324,7 +1432,7 @@ class AppUI:
         self.assist_damage_btn = ttk.Button(combat, text="开启", width=6, command=lambda: self.toggle_combat("damage"))
         self.assist_damage_btn.grid(row=0, column=3, padx=(6, 4))
         self.assist_damage_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=320).grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#9fb0c9", wraplength=320).grid(row=0, column=4, sticky=tk.W)
 
         ttk.Label(combat, text="英雄免伤").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_shield_var = tk.StringVar(value=_seconds_text(assist.get("shield_percent", 100)))
@@ -1333,7 +1441,7 @@ class AppUI:
         self.assist_shield_btn = ttk.Button(combat, text="开启", width=6, command=lambda: self.toggle_combat("shield"))
         self.assist_shield_btn.grid(row=1, column=3, padx=(6, 4), pady=(6, 0))
         self.assist_shield_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#666", wraplength=320).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#9fb0c9", wraplength=320).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(combat, text="技能冷却").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
@@ -1342,7 +1450,7 @@ class AppUI:
         self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=6, command=lambda: self.toggle_combat("cooldown"))
         self.assist_cooldown_btn.grid(row=2, column=3, padx=(6, 4), pady=(6, 0))
         self.assist_cooldown_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=320).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#9fb0c9", wraplength=320).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(combat, text="视野").grid(row=3, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_vision_var = tk.StringVar(value=_vision_text(assist.get("vision_mode", -1)))
@@ -1351,7 +1459,7 @@ class AppUI:
         self.assist_vision_btn = ttk.Button(combat, text="应用", width=6, command=lambda: self.toggle_combat("vision"))
         self.assist_vision_btn.grid(row=3, column=3, padx=(6, 4), pady=(6, 0))
         self.assist_vision_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#666", wraplength=320).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
+        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#9fb0c9", wraplength=320).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(
             combat,
@@ -1360,7 +1468,7 @@ class AppUI:
                 "用了会弹「战斗数据与服务器不一致」。功能默认关闭，要不要开你自己决定；"
                 "开着时不能开地图刷新。"
             ),
-            foreground="#c62828",
+            foreground="#f87171",
             wraplength=432,
         ).grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
 
