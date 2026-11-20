@@ -326,7 +326,8 @@
       "TDKW",
       "PPMU",
       "MDAY"
-     ]
+     ],
+     "target": "KXRF"
     },
     "cooldown": {
      "readModule": "NBTP",

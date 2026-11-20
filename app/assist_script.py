@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 98
+RUNTIME_VERSION = 100
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 98
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 98;
+  const VERSION = 100;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -134,6 +134,7 @@ RUNTIME_JS = r"""
     // 战斗参数（参考工具同款）：默认全关，开了就要自己承担风险
     combat: {
       damage: { enabled: false, value: 1, reason: '尚未开启' },
+      shield: { enabled: false, value: 0, reason: '尚未开启' },
       vision: { enabled: false, value: -1, reason: '尚未开启' },
       cooldown: { enabled: false, value: 0, reason: '尚未开启' },
     },
@@ -1042,7 +1043,10 @@ RUNTIME_JS = r"""
    * ------------------------------------------------------------------ */
 
   const combat = {
-    damage: { hook: null, context: null, seen: null, value: 1, enabled: false, reason: '' },
+    damage: {
+      hook: null, context: null, seen: null, value: 1, enabled: false, reason: '',
+      shieldEnabled: false, shieldValue: 0,
+    },
     vision: { written: [], core: null, target: null, enabled: false, reason: '' },
     cooldown: { written: [], config: null, enabled: false, reason: '' },
   };
@@ -1199,53 +1203,103 @@ RUNTIME_JS = r"""
     box.seen.add(packet);
   }
 
+  /**
+   * 英雄免伤：同一个伤害包里，被打的是我方英雄（KXRF）就按比例削减。
+   * 只削减伤害数值，不改任何单位属性，也不碰血条以外的逻辑。
+   * 判定只看「这是不是英雄」，不依赖当前队伍的实体列表——这样切图后也继续生效。
+   */
+  function damageShield(box, packet) {
+    const fields = box.context.fields;
+    if (!packet || typeof packet !== 'object') return;
+    const key = fields.target || 'KXRF';
+    const target = packet[key];
+    if (!target) return;
+    if (typeof target[fields.hero] !== 'function' || target[fields.hero]() !== true) return;
+    const keep = Math.max(0, Math.min(1, 1 - (box.shieldValue || 0) / 100));
+    const values = [];
+    for (const name of fields.numbers) {
+      if (!writableNumber(packet, name)) throw Error('伤害字段不可写，已停止免伤');
+      values.push(keep <= 0 ? 0 : packet[name] * keep);
+    }
+    fields.numbers.forEach((name, index) => { packet[name] = values[index]; });
+    if (packet.UEAT !== undefined && keep <= 0) packet.UEAT = 0;
+  }
+
+  /** 装伤害结算钩子（倍伤 / 免伤 共用同一个，避免重复包一层）。 */
+  function ensureDamageHook(cfg) {
+    const box = combat.damage;
+    if (box.hook && box.hook.owner[box.hook.key] === box.hook.wrapper) return box.context;
+    const context = damageContext(cfg);
+    box.seen = new WeakSet();
+    const wrapper = function (packet) {
+      if (box.enabled) {
+        try {
+          damageMultiply(box, packet);
+        } catch (cause) {
+          box.enabled = false;
+          state.combat.damage.enabled = false;
+          state.combat.damage.reason = '已停止：' + msgOf(cause);
+        }
+      }
+      if (box.shieldEnabled) {
+        try {
+          damageShield(box, packet);
+        } catch (cause) {
+          box.shieldEnabled = false;
+          state.combat.shield.enabled = false;
+          state.combat.shield.reason = '已停止：' + msgOf(cause);
+        }
+      }
+      // 辅助自己出错也照常执行游戏原来的结算流程
+      return Reflect.apply(context.descriptor.value, this, arguments);
+    };
+    Object.defineProperty(context.owner, cfg.damage.receive, { ...context.descriptor, value: wrapper });
+    box.hook = { owner: context.owner, key: cfg.damage.receive, descriptor: context.descriptor, wrapper };
+    box.context = context;
+    return context;
+  }
+
   function setDamage(cfg, value) {
     const box = combat.damage;
     const range = (cfg.ranges && cfg.ranges.damage) || [1, 70000];
     if (!(value >= range[0] && value <= range[1])) {
       throw Error('倍率需要在 ' + range[0] + ' - ' + range[1] + ' 之间');
     }
-    let context = box.context;
-    if (!context || context.owner[cfg.damage.receive] !== context.descriptor.value) {
-      context = damageContext(cfg);
-    }
-    const current = context.owner[cfg.damage.receive];
-    if (current !== (box.hook ? box.hook.wrapper : context.descriptor.value)) {
-      throw Error('伤害结算入口已被替换，请重新打开游戏窗口');
-    }
-    if (!box.hook) {
-      box.seen = new WeakSet();
-      const wrapper = function (packet) {
-        if (box.enabled) {
-          try {
-            damageMultiply(box, packet);
-          } catch (cause) {
-            box.enabled = false;
-            state.combat.damage.enabled = false;
-            state.combat.damage.reason = '已停止：' + msgOf(cause);
-          }
-        }
-        // 辅助自己出错也照常执行游戏原来的结算流程
-        return Reflect.apply(context.descriptor.value, this, arguments);
-      };
-      Object.defineProperty(context.owner, cfg.damage.receive, { ...context.descriptor, value: wrapper });
-      box.hook = { owner: context.owner, key: cfg.damage.receive, descriptor: context.descriptor, wrapper };
-    }
-    box.context = context;
+    const context = ensureDamageHook(cfg);
     box.value = value;
     box.enabled = true;
     return { multiplier: value, heroes: context.heroes().length };
   }
 
-  function stopDamage() {
+  function setShield(cfg, percent) {
     const box = combat.damage;
-    box.enabled = false;
+    if (!(percent > 0 && percent <= 100)) throw Error('免伤比例需要在 1 - 100 之间');
+    const context = ensureDamageHook(cfg);
+    box.shieldValue = percent;
+    box.shieldEnabled = true;
+    return { percent, heroes: context.heroes().length };
+  }
+
+  /** 倍伤和免伤共用同一个钩子：两个都关了才还原。 */
+  function stopDamageHook() {
+    const box = combat.damage;
+    if (box.enabled || box.shieldEnabled) return;
     const hook = box.hook;
     if (hook && hook.owner[hook.key] === hook.wrapper) {
       try { Object.defineProperty(hook.owner, hook.key, hook.descriptor); } catch (_) { /* 外部锁定就等换页恢复 */ }
     }
     box.hook = null;
     box.context = null;
+  }
+
+  function stopDamage() {
+    combat.damage.enabled = false;
+    stopDamageHook();
+  }
+
+  function stopShield() {
+    combat.damage.shieldEnabled = false;
+    stopDamageHook();
   }
 
   /* ---- 视野（初始索敌半径） ---- */
@@ -1371,6 +1425,12 @@ RUNTIME_JS = r"""
       item.reason = '已关闭';
       return;
     }
+    if (name === 'shield') {
+      stopShield();
+      item.enabled = false;
+      item.reason = '已关闭';
+      return;
+    }
     try { box.written = combatRestore(box.written); } catch (_) { /* 留到下一轮再试 */ }
     if (name === 'vision') box.core = null;
     else box.config = null;
@@ -1383,7 +1443,8 @@ RUNTIME_JS = r"""
   function setCombat(name, value) {
     const cfg = combatConfig();
     const item = state.combat[name];
-    if (state.mob.enabled || state.boss.enabled) {
+    // 免伤只改伤害数值，不碰单位属性，可以和地图刷新一起开
+    if (name !== 'shield' && (state.mob.enabled || state.boss.enabled)) {
       throw Error('请先关闭小怪和 BOSS 地图刷新，再修改战斗参数');
     }
     const number = Number(value);
@@ -1401,6 +1462,13 @@ RUNTIME_JS = r"""
       item.enabled = true;
       item.value = number;
       item.reason = '已开启：我方英雄伤害 ×' + number + '（队伍 ' + info.heroes + ' 人）';
+      return { ok: true, message: item.reason };
+    }
+    if (name === 'shield') {
+      const info = setShield(cfg, number);
+      item.enabled = true;
+      item.value = number;
+      item.reason = '已开启：我方英雄受到伤害 -' + number + '%（队伍 ' + info.heroes + ' 人）';
       return { ok: true, message: item.reason };
     }
     if (name === 'vision') {
@@ -1422,6 +1490,7 @@ RUNTIME_JS = r"""
   }
 
   function combatActive() {
+    // 免伤不算「会改战斗数值」的那类：它只削伤害数字，不和地图刷新冲突
     return ['damage', 'vision', 'cooldown'].some(name => state.combat[name].enabled);
   }
 
@@ -1439,12 +1508,20 @@ RUNTIME_JS = r"""
       }
     }
 
-    if (state.combat.damage.enabled) {
+    if (state.combat.damage.enabled || state.combat.shield.enabled) {
       const box = combat.damage;
       if (!box.hook || box.hook.owner[box.hook.key] !== box.hook.wrapper) {
-        stopDamage();
-        state.combat.damage.enabled = false;
-        state.combat.damage.reason = '已停止：游戏重新加载了伤害结算入口，请重新开启';
+        const text = '已停止：游戏重新加载了伤害结算入口，请重新开启';
+        if (state.combat.damage.enabled) {
+          stopDamage();
+          state.combat.damage.enabled = false;
+          state.combat.damage.reason = text;
+        }
+        if (state.combat.shield.enabled) {
+          stopShield();
+          state.combat.shield.enabled = false;
+          state.combat.shield.reason = text;
+        }
       }
     }
 
@@ -3493,6 +3570,11 @@ RUNTIME_JS = r"""
           value: state.combat.damage.value,
           reason: state.combat.damage.reason,
         },
+        shield: {
+          enabled: state.combat.shield.enabled,
+          value: state.combat.shield.value,
+          reason: state.combat.shield.reason,
+        },
         vision: {
           enabled: state.combat.vision.enabled,
           value: state.combat.vision.value,
@@ -3528,7 +3610,7 @@ RUNTIME_JS = r"""
       state.red.reason = '已关闭';
       wishStop('已关闭');
       mapStop('已关闭');
-      for (const name of ['damage', 'vision', 'cooldown']) {
+      for (const name of ['damage', 'shield', 'vision', 'cooldown']) {
         try { stopCombat(name); } catch (_) { /* 单项失败不影响其它 */ }
       }
       state.revive.enabled = false;
@@ -3679,8 +3761,8 @@ RUNTIME_JS = r"""
       return { ok: true, message: '快速复活已开启（' + label + '，延迟 ' + seconds + ' 秒）' };
     }
 
-    if (feature === 'damage' || feature === 'vision' || feature === 'cooldown') {
-      const label = { damage: '英雄倍伤', vision: '视野修改', cooldown: '技能冷却' }[feature];
+    if (feature === 'damage' || feature === 'shield' || feature === 'vision' || feature === 'cooldown') {
+      const label = { damage: '英雄倍伤', shield: '英雄免伤', vision: '视野修改', cooldown: '技能冷却' }[feature];
       try {
         return setCombat(feature, value);
       } catch (cause) {
