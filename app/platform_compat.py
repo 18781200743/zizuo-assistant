@@ -88,10 +88,42 @@ def _spotlight_browsers() -> List[str]:
     return found
 
 
+def _bundled_chromium() -> Optional[str]:
+    """打包在 .app 里的 Chrome for Testing（装完就能用，不需要用户装浏览器）。"""
+    if not getattr(sys, "frozen", False):
+        return None
+    roots = []
+    try:
+        roots.append(Path(sys._MEIPASS))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        exe = Path(sys.executable).resolve()
+        roots.append(exe.parent.parent / "Resources")
+        roots.append(exe.parent.parent)
+    except Exception:  # noqa: BLE001
+        pass
+    for root in roots:
+        for folder in ("chrome-mac-x64", "chrome-mac-arm64", "chrome-mac"):
+            base = root / folder
+            for app_name in ("Google Chrome for Testing", "Google Chrome", "Chromium"):
+                for exe_name in (app_name, "Google Chrome for Testing"):
+                    candidate = base / (app_name + ".app") / "Contents" / "MacOS" / exe_name
+                    try:
+                        if candidate.exists():
+                            return str(candidate)
+                    except OSError:
+                        continue
+    return None
+
+
 def mac_chromium_path() -> Optional[str]:
     """找 macOS 上的 Chrome / Edge / Chromium 可执行文件。"""
     if not IS_MAC:
         return None
+    bundled = _bundled_chromium()
+    if bundled:
+        return bundled
     for candidate in mac_chromium_candidates() + _spotlight_browsers():
         try:
             if Path(candidate).exists():
