@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 111
+RUNTIME_VERSION = 113
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 111
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 111;
+  const VERSION = 113;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2654,9 +2654,9 @@ RUNTIME_JS = r"""
         for (let index = 0; index < rows.length; index += 1) {
           const task = rows[index];
           if (!task) continue;
-          const have = (task.GPIC && task.GPIC.WZMG) || 0;
-          const need = task.DHDO || task.RSHY || 0;
-          if (!task.KLBW && need > 0 && have >= need) {
+          // ROPG/GXFI：1=进行中，2=已完成待领取，3=已领取
+          const status = task.ROPG !== undefined ? task.ROPG : task.GXFI;
+          if (status === 2) {
             try {
               svc.ROGV(group.id, index);
               claimed += 1;
@@ -2689,10 +2689,8 @@ RUNTIME_JS = r"""
       for (let i = 0; i < rows.length; i += 1) {
         const task = rows[i];
         if (!task) continue;
-        if (task.KLBW) continue;
-        const have = (task.GPIC && task.GPIC.WZMG) || 0;
-        const need = task.DHDO || task.RSHY || 0;
-        if (need > 0 && have >= need) continue;
+        const status = task.ROPG !== undefined ? task.ROPG : task.GXFI;
+        if (status === 2 || status === 3) continue;   // 已完成待领 / 已领取都跳过
         try { svc.KYFH(task.UHNB, 1); used += 1; ids.push(task.UHNB); } catch (_) { failed += 1; }
       }
       return { ok: true, used, failed, ids };
@@ -2708,7 +2706,21 @@ RUNTIME_JS = r"""
         const ex = pair[1];
         if (!ex || typeof ex !== 'object') continue;
         if (typeof ex.XYIY === 'function') {
-          try { ex.XYIY(); return { ok: true }; } catch (cause) { return { ok: false, error: msgOf(cause) }; }
+          try { ex.XYIY(); return { ok: true, via: 'export' }; } catch (cause) { return { ok: false, error: msgOf(cause) }; }
+        }
+        for (const key of Object.keys(ex)) {
+          let v; try { v = ex[key]; } catch (_) { continue; }
+          if (typeof v === 'function' && typeof v.XYIY === 'function') {
+            try { v.XYIY(); return { ok: true, via: key }; } catch (cause) { return { ok: false, error: msgOf(cause) }; }
+          }
+          if (v && typeof v === 'object') {
+            if (typeof v.XYIY === 'function') {
+              try { v.XYIY(); return { ok: true, via: key + '.obj' }; } catch (_) { /* 试下一个 */ }
+            }
+            if (v.AWXW && typeof v.AWXW.XYIY === 'function') {
+              try { v.AWXW.XYIY(); return { ok: true, via: key + '.AWXW' }; } catch (_) { /* 试下一个 */ }
+            }
+          }
         }
       }
       return { ok: false, error: '没找到分享入口（XYIY）' };
