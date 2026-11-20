@@ -887,16 +887,8 @@ class AppUI:
 
         coord_row = ttk.Frame(tools)
         coord_row.grid(row=4, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
-        ttk.Label(coord_row, text="坐标").pack(side=tk.LEFT)
-        self.assist_coord_x_var = tk.StringVar(value="")
-        self.assist_coord_y_var = tk.StringVar(value="")
-        tk.Entry(coord_row, textvariable=self.assist_coord_x_var, width=9, justify="center").pack(side=tk.LEFT, padx=(6, 2))
-        ttk.Label(coord_row, text="X").pack(side=tk.LEFT)
-        tk.Entry(coord_row, textvariable=self.assist_coord_y_var, width=9, justify="center").pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Label(coord_row, text="Y").pack(side=tk.LEFT)
-        ttk.Button(coord_row, text="读当前", width=8, command=self.fill_current_coord).pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Button(coord_row, text="飞过去", width=8, command=self.fly_to_coord).pack(side=tk.LEFT, padx=2)
-        self.assist_coord_status = tk.StringVar(value="读当前=填角色坐标；飞过去=按 X/Y 瞬移（和闪现同一个功能）")
+        ttk.Button(coord_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT)
+        self.assist_coord_status = tk.StringVar(value="点「取坐标」，再到游戏画面上点一下，坐标会复制并显示在这里")
         ttk.Label(coord_row, textvariable=self.assist_coord_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
         daily_row = ttk.Frame(tools)
@@ -1962,33 +1954,6 @@ class AppUI:
         finally:
             self._auto_daily_busy = False
 
-    def fill_current_coord(self) -> None:
-        """读角色当前坐标，填到输入框。"""
-        if not self.assist.running:
-            self.start_assist()
-        pos = self.assist.player_pos()
-        if len(pos) != 2:
-            self.assist_coord_status.set("读不到角色坐标（先进入地图）")
-            return
-        self.assist_coord_x_var.set(str(int(pos[0])))
-        self.assist_coord_y_var.set(str(int(pos[1])))
-        self.assist_coord_status.set("当前坐标 (%d, %d)" % (int(pos[0]), int(pos[1])))
-
-    def fly_to_coord(self) -> None:
-        """按输入框里的 X/Y 瞬移过去。"""
-        try:
-            x = float(str(self.assist_coord_x_var.get()).strip())
-            y = float(str(self.assist_coord_y_var.get()).strip())
-        except (TypeError, ValueError):
-            self.assist_coord_status.set("坐标要填数字，比如 1290 8707")
-            return
-        if not self.assist.running:
-            self.start_assist()
-        mode = "fly" if self.assist_blink_mode_var.get() == "飞过去" else "instant"
-        self.assist.set_feature("blinkTo", {"x": x, "y": y, "mode": mode})
-        self.assist_coord_status.set("正在飞过去…" if mode == "fly" else "正在瞬移…")
-        self.append_log("已发送：飞到坐标 (%d, %d)" % (int(x), int(y)))
-
     def pick_coord(self) -> None:
         """取坐标：先点按钮，再在游戏画面上点一下要记录的位置。"""
         if not self.assist.running:
@@ -2013,13 +1978,8 @@ class AppUI:
                 self.assist_daily_status.set("取坐标出错：%s" % picked["error"])
                 return
             text = "坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
+            self.assist_coord_status.set(text + "  已复制")
             self.assist_daily_status.set(text + "  已复制")
-            try:
-                self.assist_coord_x_var.set(str(int(float(picked.get("x")))))
-                self.assist_coord_y_var.set(str(int(float(picked.get("y")))))
-                self.assist_coord_status.set(text + "（已填入，可直接飞过去）")
-            except (TypeError, ValueError):
-                pass
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append("%s,%s" % (picked.get("x"), picked.get("y")))
