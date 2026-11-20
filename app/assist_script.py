@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 101
+RUNTIME_VERSION = 102
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 101
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 101;
+  const VERSION = 102;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2436,6 +2436,9 @@ RUNTIME_JS = r"""
         if (typeof unit[u.monster] === 'function' && unit[u.monster]() !== true) return false;
         if (typeof unit[u.dead] === 'function' && unit[u.dead]()) return false;
         const point = unit[u.point] || {};
+        let hp = null, maxHp = null;
+        try { if (typeof unit.VTGJ === 'function') hp = unit.VTGJ(); } catch (_) { hp = null; }
+        try { if (typeof unit.NXDX === 'function') maxHp = unit.NXDX(); } catch (_) { maxHp = null; }
         out.push({
           x: Math.round(unit.ADUX),
           y: Math.round(unit.WUZI),
@@ -2443,6 +2446,8 @@ RUNTIME_JS = r"""
           cfg: unit[u.id],
           boss: bossOf(unit),
           d: Math.round(Math.hypot(unit.ADUX - lx, unit.WUZI - ly)),
+          hp: Number.isFinite(hp) ? Math.round(hp) : null,
+          maxHp: Number.isFinite(maxHp) ? Math.round(maxHp) : null,
         });
         return false;
       });

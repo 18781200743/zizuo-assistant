@@ -117,6 +117,19 @@ VISION_WIDE = "1 · 扩大索敌"
 VISION_CHOICES = [VISION_OFF, VISION_ZERO, VISION_WIDE]
 
 
+def _fmt_hp(value: Any) -> str:
+    """血量显示：1.2亿 / 15.8万 / 3780。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if number >= 1e8:
+        return "%.1f亿" % (number / 1e8)
+    if number >= 1e4:
+        return "%.1f万" % (number / 1e4)
+    return "%d" % number
+
+
 def _vision_text(mode: Any) -> str:
     try:
         number = int(mode)
@@ -1600,15 +1613,24 @@ class AppUI:
         for item in rows[:400]:
             name = str(item.get("name") or "怪")
             dist = int(item.get("d") or 0)
+            hp = item.get("hp")
+            max_hp = item.get("maxHp")
+            if isinstance(hp, (int, float)) and isinstance(max_hp, (int, float)) and max_hp > 0:
+                hp_text = "血量 %s/%s" % (_fmt_hp(hp), _fmt_hp(max_hp))
+            elif isinstance(hp, (int, float)):
+                hp_text = "血量 %s" % _fmt_hp(hp)
+            else:
+                hp_text = ""
+            tail = ("    " + hp_text if hp_text else "") + "    距离 %d" % dist
             if item.get("boss"):
                 bosses += 1
-                lb.insert(tk.END, f"★ {name}    距离 {dist}")
+                lb.insert(tk.END, "★ %s%s" % (name, tail))
                 try:
                     lb.itemconfig(tk.END, foreground="#c62828")
                 except tk.TclError:
                     pass
             else:
-                lb.insert(tk.END, f"{name}    距离 {dist}")
+                lb.insert(tk.END, "%s%s" % (name, tail))
         if rows:
             self.assist_blink_status.set(
                 f"当前地图 {len(rows)} 只活怪（BOSS {bosses} 只）：选一只点「过去」或双击"
