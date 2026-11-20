@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 91
+RUNTIME_VERSION = 92
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 91
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 91;
+  const VERSION = 92;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -844,14 +844,17 @@ RUNTIME_JS = r"""
 
     return Promise.resolve(fastEnterMap(world, cfg, mapId)).then(result => {
       if (result !== true) {
-        // 游戏没开始切图：保留这轮死亡计时，5 秒后自动重试（不再假装成功）
+        // 游戏没开始切图（多数是刚切过图的冷却）：退避重试，别 5 秒一次硬刷
         state.map.entering = false;
         state.map.pendingKind = '';
-        state.map.bossAt = now() + 5000;
-        state.map.mobAt = now() + 5000;
-        runMapReport('重进地图没生效（游戏拒绝切图），5 秒后重试');
+        state.map.reloadFails = (state.map.reloadFails || 0) + 1;
+        const waitMs = Math.min(120000, 20000 * state.map.reloadFails);
+        state.map.bossAt = now() + waitMs;
+        state.map.mobAt = now() + waitMs;
+        runMapReport('重进地图没生效（游戏拒绝切图），' + Math.round(waitMs / 1000) + ' 秒后重试');
         return '';
       }
+      state.map.reloadFails = 0;
       // 和参考工具一致：重进成功后清空这轮死亡计时；怪若还没活，下一轮会重新计时再重进
       state.map.deathSince = Object.create(null);
       state.map.enterBlocked = false;
