@@ -322,6 +322,68 @@
     return msg;
   }
 
+  var GACHA_HEROES = [
+    [84007, "敖丙", 6], [84008, "雅丽娜", 6], [84013, "乌瑟尔", 6], [84016, "卡卡西", 6],
+    [84017, "达斯坦", 6], [84018, "杜康", 6], [85001, "李白", 6], [85002, "玛法里奥", 6],
+    [82005, "莱特宁", 5], [83003, "王昭君", 5], [83027, "史矛革", 5], [83030, "卡尔", 5],
+    [83031, "吉尔", 5], [84003, "亚瑟", 5], [84005, "缘壹", 5], [84009, "拉斐尔", 5],
+    [84011, "谢必安", 5], [84014, "莉娜", 5], [84019, "甘道夫", 5]
+  ];
+  var gachaReady = false;
+
+  function buildHeroList() {
+    var box = $("gHeroes");
+    if (!box) return;
+    box.innerHTML = "";
+    GACHA_HEROES.forEach(function (row) {
+      var item = document.createElement("label");
+      item.className = "hero" + (row[2] >= 6 ? " red" : "");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = String(row[0]);
+      cb.className = "gHero";
+      var name = document.createElement("span");
+      name.textContent = row[1];
+      item.appendChild(cb);
+      item.appendChild(name);
+      box.appendChild(item);
+    });
+  }
+
+  function ensureGacha() {
+    if (gachaReady) return true;
+    var js = translateRuntime(window.ZZ_GACHA_RUNTIME || "", build);
+    if (!js) { setInfo("抽卡运行时空了"); return false; }
+    var mapping = JSON.stringify(window.ZZ_MAPPING || { builds: {} });
+    evalGame("window.__zzGachaMapping=" + mapping + ";" + js + ";" +
+      "JSON.stringify({ok:!!window.__zzGacha,version:(window.__zzGacha&&window.__zzGacha.version)||0})");
+    var chk = evalGame("JSON.stringify(!!(window.__zzGacha&&window.__zzGacha.start))");
+    gachaReady = chk.indexOf("true") >= 0;
+    return gachaReady;
+  }
+
+  function gachaStats() {
+    if (!gachaReady) return;
+    var raw = evalGame("JSON.stringify(window.__zzGacha?window.__zzGacha.snapshot():null)");
+    var snap = null;
+    try { snap = JSON.parse(raw); } catch (e) { snap = null; }
+    if (!snap) return;
+    var st = snap.stats || {};
+    var gold = snap.gold;
+    var el = $("gStats");
+    if (el) {
+      el.textContent = "总次数 " + (st.draws || 0) + " · 红出现 " + (st.redAppear || 0) +
+        " · 放弃 " + (st.abandoned || 0) + " · 绿钻 " + (st.greenSpent || 0) +
+        (gold === null || gold === undefined ? "" : " · 金币 " + gold);
+    }
+    var btn = $("gStart");
+    if (btn) {
+      btn.textContent = snap.running ? "招募中…" : "开始招募";
+      btn.classList.toggle("on", !!snap.running);
+    }
+    if (snap.action) setStatus(snap.action, "");
+  }
+
   function numVal(id, fallback) {
     var el = $(id);
     var v = el ? Number(el.value) : NaN;
@@ -496,6 +558,38 @@
       setTimeout(poll, 200);
     };
 
+    buildHeroList();
+
+    var gStart = $("gStart");
+    if (gStart) gStart.onclick = function () {
+      if (!game) { setInfo("先点「打开游戏」"); return; }
+      if (!ensureGacha()) { setInfo("抽卡运行时注入失败，请重新打开游戏"); return; }
+      var targets = [];
+      var boxes = document.querySelectorAll(".gHero");
+      for (var i = 0; i < boxes.length; i++) {
+        if (boxes[i].checked) targets.push(boxes[i].value);
+      }
+      if (!targets.length) { setInfo("先勾选要保留的英雄"); return; }
+      var opts = {
+        targets: targets, keepQuality: 0,
+        maxDraws: numVal("gMax", 0), delayMs: 1200,
+        refresh: false, maxGreen: numVal("gGreen", 0),
+        maxBet: true, alwaysAbandon: true
+      };
+      var raw = evalGame("JSON.stringify((window.__zzGacha&&window.__zzGacha.start)?window.__zzGacha.start(" +
+        JSON.stringify(opts) + "):{ok:false,message:'抽卡运行时未就绪'})");
+      var msg = "";
+      try { var o = JSON.parse(raw) || {}; msg = o.message || (o.ok ? "已开始" : ""); } catch (e) { msg = ""; }
+      setInfo(msg || "已开始招募");
+      gachaStats();
+    };
+
+    var gStop = $("gStop");
+    if (gStop) gStop.onclick = function () {
+      evalGame("(window.__zzGacha&&window.__zzGacha.stop)?window.__zzGacha.stop():'ok'");
+      gachaStats();
+    };
+
     var cats = [
       ["catMap", "secMap"],
       ["catRevive", "secRevive"],
@@ -519,6 +613,7 @@
         if (willOpen) {
           sec.classList.add("open");
           btn.classList.add("sel");
+          if (pair[0] === "catGacha") gachaStats();
         }
       };
     });

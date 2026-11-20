@@ -157,6 +157,17 @@
     body.day .sec-title { color: #1c4f9c; }
     .sec .grid .btn { padding: 14px 10px; font-size: 15px; }
     .sec.not-yet { padding: 16px; color: #e9e5ff; font-size: 14px; text-align: center; }
+    .heroes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 12px; }
+    .hero {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      padding: 8px 10px; border-radius: 10px; font-size: 14px;
+      background: rgba(10,30,45,.75); border: 1px solid rgba(110,190,220,.45); color: #e6fbff;
+    }
+    .hero.red { background: rgba(120,30,45,.55); border-color: rgba(255,140,160,.55); color: #ffd7de; }
+    .hero input { transform: scale(1.15); }
+    body.day .hero { background: #f7f9fc; border-color: #d6deea; color: #1f2937; }
+    body.day .hero.red { background: #fdecea; border-color: #e7b6b0; color: #b3261e; }
+
     .row { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
     .row span { font-size: 14px; color: #e9e5ff; flex: 0 0 auto; }
     .row .muted { color: #b9b3d6; font-size: 13px; }
@@ -349,7 +360,18 @@
       </div>
     </div>
 
-    <div class="sec not-yet" id="secGacha">安卓版暂不支持「抽卡」，请用电脑版</div>
+    <div class="sec" id="secGacha">
+      <div class="sec-title">英雄招募</div>
+      <div class="row"><span>抽奖次数</span><input class="num" id="gMax" type="number" value="0" min="0"><span>0 为无限</span></div>
+      <div class="row"><span>绿钻消耗</span><input class="num" id="gGreen" type="number" value="0" min="0"><span>0 为不花</span></div>
+      <div class="row"><span style="color:#8ecbff">最大倍数招募（勾选保留）</span></div>
+      <div class="heroes" id="gHeroes"></div>
+      <div class="row">
+        <button class="btn" id="gStart">开始招募</button>
+        <button class="btn danger" id="gStop">停止</button>
+      </div>
+      <div class="info" id="gStats">总次数 0 · 红出现 0 · 消耗 0</div>
+    </div>
     <div class="sec not-yet" id="secCmd">安卓版暂不支持「运行指令」，请用电脑版</div>
 
     <div class="info" id="info">—</div>
@@ -368,6 +390,7 @@
   <script src="js/mapping.js"></script>
   <script src="js/renames.js"></script>
   <script src="js/runtime.js"></script>
+  <script src="js/gacha.js"></script>
   <script src="js/app.js"></script>
   <script>
     (function () {
