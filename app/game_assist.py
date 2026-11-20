@@ -86,6 +86,10 @@ def load_mapping() -> Dict[str, Any]:
     return {"builds": builds if isinstance(builds, dict) else {}}
 
 
+def _today_text() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
 def _load_stats() -> Dict[str, Any]:
     try:
         data = json.loads(stats_path().read_text(encoding="utf-8"))
@@ -493,25 +497,34 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             pass
 
-    def display_stats(self) -> Tuple[int, int]:
-        """界面显示的今日红包数 / 金币：JS 与落盘值取大者。"""
+    def display_stats(self) -> Tuple[int, int, int]:
+        """界面显示的今日红包数 / 今日绿钻 / 金币：JS 与落盘值取大者。"""
         red = self.state.get("redPacket") or {}
         gold_state = self.state.get("gold") or {}
         return (
             self._pick_daily("redCount", red.get("date"), red.get("today")),
+            self._pick_daily("redGreen", red.get("date"), red.get("green")),
             self._pick_daily("gold", gold_state.get("date"), gold_state.get("today")),
         )
 
     def _pick_daily(self, key: str, date: Any, value: Any) -> int:
+        """当天值：JS 和落盘取大者；不是今天的一律当 0（否则会显示昨天的数）。"""
         try:
             js_value = max(0, int(value or 0))
         except (TypeError, ValueError):
             js_value = 0
         stored = self._stats.get(key) or {}
-        if not date:
-            return js_value or int(stored.get("value") or 0)
-        if stored.get("date") == date:
-            return max(int(stored.get("value") or 0), js_value)
+        try:
+            stored_value = max(0, int(stored.get("value") or 0))
+        except (TypeError, ValueError):
+            stored_value = 0
+        stored_date = str(stored.get("date") or "")
+        day = str(date or "")
+        if not day:
+            # 没带日期（旧运行时/页面还没加载完）：只有落盘值确实是今天的才用
+            return stored_value if stored_date == _today_text() else js_value
+        if stored_date == day:
+            return max(stored_value, js_value)
         return js_value
 
     def self_test(self, feature: str = "boss", seconds: float = 3.0) -> Dict[str, Any]:
@@ -840,6 +853,7 @@ class GameAssist:
         gold = snap.get("gold") or {}
         before = json.dumps(self._stats, sort_keys=True)
         _merge_daily(self._stats, "redCount", str(red.get("date") or ""), red.get("today"))
+        _merge_daily(self._stats, "redGreen", str(red.get("date") or ""), red.get("green"))
         _merge_daily(self._stats, "gold", str(gold.get("date") or ""), gold.get("today"))
         if json.dumps(self._stats, sort_keys=True) != before:
             _save_stats(self._stats)

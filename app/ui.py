@@ -806,7 +806,7 @@ class AppUI:
         free.columnconfigure(4, weight=1)
 
         ttk.Label(free, text="快速抢红包").grid(row=0, column=0, sticky=tk.W)
-        self.assist_green_var = tk.StringVar(value="已领 0 个红包")
+        self.assist_green_var = tk.StringVar(value="已领 0 个红包 · 0 绿钻")
         ttk.Label(free, textvariable=self.assist_green_var, foreground="#0a7a2f").grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=8)
         self.assist_red_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("redPacket"))
         self.assist_red_btn.grid(row=0, column=3, padx=(14, 10))
@@ -2067,8 +2067,8 @@ class AppUI:
             text="快速复活 · 自动开" if revive.get("enabled") else "快速复活"
         )
 
-        green, gold = self.assist.display_stats()
-        self.assist_green_var.set(f"已领 {green} 个红包")
+        green, green_gem, gold = self.assist.display_stats()
+        self.assist_green_var.set(f"已领 {green} 个红包 · {green_gem} 绿钻")
         build = str(state.get("build") or "")
         self.assist_gold_var.set(f"BOSS 金币 {gold}" + (f"（版本 {build}）" if build else ""))
 
