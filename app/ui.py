@@ -39,9 +39,7 @@ from .instruction_library import (
     CATEGORY_ALL,
     clear_instruction_override,
     delete_user_instruction,
-    export_code,
     format_content,
-    import_code,
     library_categories,
     library_instructions,
     load_library,
@@ -1314,14 +1312,7 @@ class AppUI:
         ttk.Button(row2, text="删除", command=self.delete_instruction).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
         )
-        row3 = ttk.Frame(right)
-        row3.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(row3, text="导出指令码", command=self.export_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(row3, text="导入指令码", command=self.import_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
-        )
+
 
         self.refresh_command_list()
         self._select_cmd_category(CATEGORY_ALL)
@@ -1565,37 +1556,6 @@ class AppUI:
         self.root.clipboard_clear()
         self.root.clipboard_append(content)
         self.cmd_status.set("已复制到剪贴板")
-
-    def export_instruction(self) -> None:
-        item = self._selected_command()
-        if not item:
-            return
-        code = export_code(str(item.get("title") or "指令"), format_content(str(item.get("content") or "")))
-        self.root.clipboard_clear()
-        self.root.clipboard_append(code)
-        messagebox.showinfo("导出指令码", "指令码已复制，发给别人后让对方点「导入指令码」粘贴。")
-
-    def import_instruction(self) -> None:
-        text = simpledialog.askstring(
-            "导入指令码", "粘贴指令码（或直接粘贴脚本正文）：", parent=self.root
-        )
-        if not text:
-            return
-        try:
-            title, content = import_code(text)
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("导入指令码", str(exc))
-            return
-        name = simpledialog.askstring("导入指令码", "保存成什么名字？", initialvalue=title, parent=self.root)
-        if not name:
-            return
-        try:
-            save_user_instruction(name.strip(), content)
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("导入指令码", str(exc))
-            return
-        self.refresh_command_list()
-        self.cmd_status.set("已导入：%s" % name.strip())
 
     def save_instruction(self) -> None:
         item = self._selected_command()
