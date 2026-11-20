@@ -629,6 +629,17 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return []
 
+    def share_game(self) -> dict:
+        """调游戏分享入口（分享任务用）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.shareGame "
+                "? window.__zzAssist.shareGame() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def goto_task_point(self, map_id: int, x: int, y: int) -> str:
         """按任务给的目标点传送过去（游戏自己的 NMKO）。"""
         js = (

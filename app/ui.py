@@ -136,7 +136,7 @@ DAILY_TASK_NAMES = {
 }
 
 # 这些任务不做（要花钱/要 SDK/用户不要）
-DAILY_TASK_SKIP = ("宝箱", "分享", "广告", "招募", "合成", "竞技", "试炼")
+DAILY_TASK_SKIP = ("宝箱", "广告", "招募", "合成", "竞技", "试炼")
 
 
 def _fmt_hp(value: Any) -> str:
@@ -1719,6 +1719,44 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log("采集失败：%s" % exc)
 
+    def _auto_daily_share(self) -> None:
+        """分享任务：调游戏分享入口 → 最小化/恢复窗口 → 等任务进度。"""
+        try:
+            self.assist.share_game()
+        except Exception as exc:  # noqa: BLE001
+            self.append_log("分享入口调用失败：%s" % exc)
+        # 模拟"分享出去再回来"：最小化再恢复游戏窗口
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            hwnd = 0
+
+            def _find(title_prefix: str) -> int:
+                found = []
+                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+                def cb(h, _):
+                    n = user32.GetWindowTextLengthW(h)
+                    if n:
+                        buf = ctypes.create_unicode_buffer(n + 1)
+                        user32.GetWindowTextW(h, buf, n + 1)
+                        if buf.value.startswith(title_prefix):
+                            found.append(h)
+                    return True
+
+                user32.EnumWindows(WNDENUMPROC(cb), 0)
+                return found[0] if found else 0
+
+            hwnd = _find("Zizuo游戏窗")
+            if hwnd:
+                user32.ShowWindow(hwnd, 6)   # 最小化
+                time.sleep(1.6)
+                user32.ShowWindow(hwnd, 9)   # 恢复
+        except Exception as exc:  # noqa: BLE001
+            self.append_log("最小化窗口失败：%s" % exc)
+        time.sleep(2.0)
+
     def _auto_daily_worker(self) -> None:
         deadline = time.monotonic() + 240
         try:
@@ -1736,6 +1774,9 @@ class AppUI:
                     if any(word in name for word in DAILY_TASK_SKIP):
                         continue
                     self._auto_daily_log("自动做日常：%s（%s/%s）" % (name, task.get("progress"), task.get("target")))
+                    if "分享" in name:
+                        self._auto_daily_share()
+                        continue
                     if "采集" in name:
                         self._auto_daily_collect()
                         continue
