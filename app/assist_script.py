@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 92
+RUNTIME_VERSION = 93
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 92
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 92;
+  const VERSION = 93;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2011,23 +2011,42 @@ RUNTIME_JS = r"""
     let raw = null;
     try { raw = holder[name](mapId); } catch (cause) { throw cause; }
     tick();
-    try { Promise.resolve(raw).catch(() => {}); } catch (_) { /* 忽略游戏自己的拒绝 */ }
+    // 旧版说明：XIPH 返回 Promise，成功 resolve true，并且 VKXX.ZRRU 会换成新对象。
+    // 两个信号谁先到都算成功；Promise 明确返回 false 才算失败，且等它结束再决定，避免重复调用。
+    let promiseResult = null;
+    let settled = false;
+    try {
+      if (raw && typeof raw.then === 'function') {
+        raw.then(v => { promiseResult = v === true; settled = true; },
+                 () => { promiseResult = false; settled = true; });
+      }
+    } catch (_) { /* ignore */ }
     return new Promise(resolve => {
       const t0 = now();
+      let done = false;
+      const finish = value => {
+        if (done) return;
+        done = true;
+        if (value) setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
+        resolve(value);
+      };
       const check = () => {
-        // 旧版实测依据：XIPH 成功后 VKXX.ZRRU（实体世界）会换成新对象，怪跟着重刷
+        if (done) return;
         let world = null;
         try { world = holder[mapCfg.core]; } catch (_) { world = null; }
-        if (world && world !== before) {
-          setTimeout(() => { try { hideMapTransition(); } catch (_) {} }, 300);
-          resolve(true);
+        if (world && world !== before) { finish(true); return; }
+        if (settled) {
+          if (promiseResult === true) {
+            // 游戏说成功但世界对象还没换：再等 2 秒看 ZRRU
+            if (now() - t0 > 12000) finish(true);
+            else setTimeout(check, 100);
+            return;
+          }
+          finish(false);
           return;
         }
-        if (now() - t0 > 9000) {
-          resolve(false);
-          return;
-        }
-        setTimeout(check, 80);
+        if (now() - t0 > 12000) { finish(false); return; }
+        setTimeout(check, 100);
       };
       setTimeout(check, 100);
     });
