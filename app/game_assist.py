@@ -530,13 +530,25 @@ class GameAssist:
             pass
 
     def display_stats(self) -> Tuple[int, int, int]:
-        """界面显示的今日红包数 / 今日绿钻 / 金币：JS 与落盘值取大者。"""
+        """界面显示的今日红包数 / 今日绿钻 / 金币。
+
+        页面连上时**只认页面里的数**（只会因为真的领到红包才 +1），
+        不用落盘值兜底 —— 否则旧文件/测试数据会让界面多出没抢过的数。
+        页面没连上时才显示落盘值（也必须是今天的）。
+        """
         red = self.state.get("redPacket") or {}
         gold_state = self.state.get("gold") or {}
+        if self.state.get("ready"):
+            def _num(value: Any) -> int:
+                try:
+                    return max(0, int(value or 0))
+                except (TypeError, ValueError):
+                    return 0
+            return _num(red.get("today")), _num(red.get("green")), _num(gold_state.get("today"))
         return (
-            self._pick_daily("redCount", red.get("date"), red.get("today")),
-            self._pick_daily("redGreen", red.get("date"), red.get("green")),
-            self._pick_daily("gold", gold_state.get("date"), gold_state.get("today")),
+            self._pick_daily("redCount", "", 0),
+            self._pick_daily("redGreen", "", 0),
+            self._pick_daily("gold", "", 0),
         )
 
     def _pick_daily(self, key: str, date: Any, value: Any) -> int:

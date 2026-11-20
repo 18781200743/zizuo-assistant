@@ -70,7 +70,8 @@
 
 - **快速抢红包**：60ms 一轮扫聊天里的红包（世界 / 跨服 / 公会三个频道全扫，每个频道最多 100 条），
   拿到就调原生领取接口，领取间隔 50ms；今日红包数和领到的绿钻（按绿钻余额增量算）
-  都记在页面 localStorage 里，刷新页面不清零，**过零点自动归零**。
+  都记在页面 localStorage 里，刷新页面不清零，**过零点自动归零**；界面只显示**实际领到**的数
+  （连上游戏时只认页面计数器，不拿旧文件兜底），每领到一个就在日志里记一行。
   后台节流两道保险：游戏窗口启动时关掉浏览器的定时器节流（`--disable-background-timer-throttling`
   + `--disable-features=IntensiveWakeUpThrottling`），即使参数没生效，Python 每 90ms 还会用 CDP
   直接调页面里的 `__redTick()` —— `Runtime.evaluate` 不走页面定时器，最小化/切后台都不掉速。
