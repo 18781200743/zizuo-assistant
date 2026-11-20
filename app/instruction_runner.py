@@ -411,30 +411,34 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius:
       if (!unit) return false;
       var point = unit[u.point || 'YLYI'] || {};
       var name = String(point.name || '');
-      if (!name) return false;
       var tag = String(unit[u.tag || 'CLRB'] || '');
       var text = (name + ' ' + tag).toLowerCase();
       var anyKind = words.indexOf('*') >= 0;
-      var hit = anyKind
-        ? (typeof unit.QATG === 'function' && !!unit.QATG())
-        : words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
-      if (!hit) return false;
-      try { if (typeof unit.QATG === 'function' && !unit.QATG()) return false; } catch (e) {}
+      var collectible = false;
+      try { collectible = typeof unit.QATG === 'function' && !!unit.QATG(); } catch (e) {}
+      if (!collectible) return false;
       // 已经采完/被采掉的不要
       try { if (typeof unit.AINJ === 'function' && unit.AINJ()) return false; } catch (e) {}
+      if (anyKind) {
+        // 活动：无名字的可采实体就是活动采集物（实测 efdx=5115601~5115603，采到会进背包）；
+        // 有名字的只排除日常资源（树/木/矿/灌木/草/肉/藤）。
+        if (name) {
+          for (var j = 0; j < daily.length; j += 1) {
+            if (text.indexOf(String(daily[j])) >= 0) return false;
+          }
+        }
+      } else {
+        if (!name) return false;
+        var hit = words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
+        if (!hit) return false;
+      }
       var d = Math.hypot(unit.ADUX - lx, unit.WUZI - ly);
       // 超出角色附近范围的不采
       if (d > radius) return false;
-      // 采集(活动)：跳过日常资源（树/木/矿/灌木/草/肉/藤）
-      if (anyKind) {
-        for (var j = 0; j < daily.length; j += 1) {
-          if (text.indexOf(String(daily[j])) >= 0) return false;
-        }
-      }
       for (var i = 0; i < skip.length; i += 1) {
         if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
       }
-      if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, name: name, d: d };
+      if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, d: d, name: name || '活动采集物' };
       return false;
     };
     if (units && typeof units[mc.each || 'OOIV'] === 'function') units[mc.each || 'OOIV'](visit);
