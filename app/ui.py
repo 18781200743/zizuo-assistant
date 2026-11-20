@@ -251,7 +251,8 @@ class AppUI:
             self.root.geometry("%dx%d+%d+%d" % (_w, _h, _x, _y))
         except Exception:  # noqa: BLE001
             self.root.geometry("480x760")
-        self.root.minsize(460, 640)
+        # 固定窗口大小：拉大后缩回来会错位，干脆不让拉伸
+        self.root.resizable(False, False)
 
         self.config: Dict[str, Any] = load_config()
         self.slots: List[List[str]] = load_slots()
