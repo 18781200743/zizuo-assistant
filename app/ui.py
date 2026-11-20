@@ -1737,7 +1737,7 @@ class AppUI:
     def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
         """击杀指定 BOSS：走游戏的「前往 → 传送并追踪」，过去之后再闪现贴脸打。"""
         task_id = task.get("id")
-        deadline = time.monotonic() + 150
+        deadline = time.monotonic() + 90
         tried_go = False
         while time.monotonic() < deadline:
             fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
@@ -1835,6 +1835,10 @@ class AppUI:
                 for task in pending:
                     if time.monotonic() > deadline:
                         break
+                    try:
+                        self.assist.claim_daily_tasks()
+                    except Exception:  # noqa: BLE001
+                        pass
                     name = DAILY_TASK_NAMES.get(task["id"], "任务%d" % task["id"])
                     if any(word in name for word in DAILY_TASK_SKIP):
                         continue
