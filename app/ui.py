@@ -243,7 +243,7 @@ def _hero_revive_mode(text: Any) -> str:
 class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("桌面找图助手")
+        self.root.title("百炼英雄 · 助手")
         self.root.geometry("480x920")
         self.root.minsize(460, 680)
 
@@ -751,7 +751,7 @@ class AppUI:
         """首页：只有 标题 / 打开游戏 / 辅助工具 / 说明。"""
         top = ttk.Frame(parent)
         top.pack(fill=tk.X, pady=(6, 0))
-        ttk.Label(top, text="百炼助手", font=("Microsoft YaHei UI", 16, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top, text="百炼英雄 · 助手", font=("Microsoft YaHei UI", 15, "bold")).pack(side=tk.LEFT)
         ttk.Button(top, text="关于", command=self._show_about).pack(side=tk.RIGHT)
 
         body = ttk.Frame(parent)
