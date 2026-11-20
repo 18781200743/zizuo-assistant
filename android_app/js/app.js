@@ -351,8 +351,6 @@
     $("fBoss").onclick = function () { toggle("boss"); };
     $("fMonsters").onclick = openMonsters;
     $("fClear").onclick = function () { send("clearStuck", 1); };
-    $("fPick").onclick = function () { startPick(); };
-    $("fFly").onclick = flyToPicked;
     $("btnListBack").onclick = function () { showPage("pageFunc"); };
     $("btnListRefresh").onclick = openMonsters;
 

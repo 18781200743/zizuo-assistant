@@ -890,7 +890,6 @@ class AppUI:
             ("红包 / 祈愿", "red"),
             ("快速复活", "revive"),
             ("闪现寻怪", "blink"),
-            ("取坐标", "coord"),
             ("日常任务", "daily"),
             ("战斗参数", "combat"),
             ("抽卡", "gacha"),
@@ -1097,7 +1096,6 @@ class AppUI:
             "red": free,
             "revive": revive,
             "blink": blink,
-            "coord": coord,
             "daily": daily,
             "combat": combat,
         }
