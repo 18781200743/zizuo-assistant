@@ -888,7 +888,7 @@ class AppUI:
         coord_row = ttk.Frame(tools)
         coord_row.grid(row=4, column=0, columnspan=6, sticky=tk.W, pady=(8, 0))
         ttk.Button(coord_row, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT)
-        self.assist_coord_status = tk.StringVar(value="点「取坐标」，再到游戏画面上点一下，坐标会复制并显示在这里")
+        self.assist_coord_status = tk.StringVar(value="点「取坐标」，鼠标在游戏画面上移动会显示百分比坐标/角度，点一下即复制")
         ttk.Label(coord_row, textvariable=self.assist_coord_status, foreground="#666").pack(side=tk.LEFT, padx=8)
 
         daily_row = ttk.Frame(tools)
@@ -1973,19 +1973,26 @@ class AppUI:
         except Exception:  # noqa: BLE001
             armed_at = 0
         fresh = bool(picked) and int(picked.get("at") or 0) >= armed_at
-        if picked and (fresh or picked.get("error")):
+        if picked and (fresh or picked.get("error") or picked.get("canceled")):
             if picked.get("error"):
                 self.assist_daily_status.set("取坐标出错：%s" % picked["error"])
                 return
-            text = "坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
+            if picked.get("canceled"):
+                self.assist_coord_status.set("已取消")
+                return
+            angle = picked.get("angle")
+            text = "录制坐标 (%s, %s)" % (picked.get("x"), picked.get("y"))
+            if angle is not None:
+                text += "  角度 %s°" % angle
             self.assist_coord_status.set(text + "  已复制")
             self.assist_daily_status.set(text + "  已复制")
+            copy_text = str(picked.get("text") or ("%s,%s" % (picked.get("x"), picked.get("y"))))
             try:
                 self.root.clipboard_clear()
-                self.root.clipboard_append("%s,%s" % (picked.get("x"), picked.get("y")))
+                self.root.clipboard_append(copy_text)
             except tk.TclError:
                 pass
-            self.append_log("取坐标：" + text)
+            self.append_log("取坐标：" + text + "（%s）" % copy_text)
             return
         if attempt < 60:
             self.root.after(500, lambda: self._poll_picked(attempt + 1))
