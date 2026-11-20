@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 105
+RUNTIME_VERSION = 106
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 105
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 105;
+  const VERSION = 106;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1466,16 +1466,8 @@ RUNTIME_JS = r"""
   }
 
   function setCombat(name, value) {
-    // 实测：视野、免伤、技能冷却改了都会弹「战斗数据与服务器不一致」，全部停用
-    const blocked = {
-      shield: '英雄免伤',
-      damage: '英雄倍伤',
-      cooldown: '技能冷却',
-      vision: '视野修改',
-    };
-    if (blocked[name]) {
-      throw Error(blocked[name] + '已停用：战斗数值会被服务端校验（实测弹「战斗数据与服务器不一致」）');
-    }
+    // 注意：实测倍伤 / 免伤 / 冷却 / 视野都会被服务端校验（弹「战斗数据与服务器不一致」），
+    // 功能保留但默认关，要不要开由使用者自己决定。
     const cfg = combatConfig();
     const item = state.combat[name];
     // 免伤只改伤害数值，不碰单位属性，可以和地图刷新一起开

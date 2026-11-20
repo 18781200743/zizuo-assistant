@@ -844,17 +844,56 @@ class AppUI:
         # 兼容旧配置（名字过滤），没有输入框也不会报错
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
-        # ---------- 战斗参数（已全部停用）----------
+        # ---------- 战斗参数（保留，默认关；实测会被服务端校验）----------
+        combat = ttk.LabelFrame(parent, text="战斗参数（改战斗数值，会被服务端校验，默认关）", padding=10)
+        combat.pack(fill=tk.X, pady=(0, 8))
+        combat.columnconfigure(4, weight=1)
+
+        ttk.Label(combat, text="英雄倍伤").grid(row=0, column=0, sticky=tk.W)
+        self.assist_damage_var = tk.StringVar(value=_seconds_text(assist.get("damage_value", 2)))
+        ttk.Entry(combat, textvariable=self.assist_damage_var, width=6, justify="center").grid(row=0, column=1, padx=(8, 2))
+        ttk.Label(combat, text="倍").grid(row=0, column=2, sticky=tk.W)
+        self.assist_damage_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("damage"))
+        self.assist_damage_btn.grid(row=0, column=3, padx=(14, 10))
+        self.assist_damage_status = tk.StringVar(value="尚未开启")
+        ttk.Label(combat, textvariable=self.assist_damage_status, foreground="#666", wraplength=560).grid(row=0, column=4, sticky=tk.W)
+
+        ttk.Label(combat, text="英雄免伤").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_shield_var = tk.StringVar(value=_seconds_text(assist.get("shield_percent", 100)))
+        ttk.Entry(combat, textvariable=self.assist_shield_var, width=6, justify="center").grid(row=1, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(combat, text="%").grid(row=1, column=2, sticky=tk.W, pady=(6, 0))
+        self.assist_shield_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("shield"))
+        self.assist_shield_btn.grid(row=1, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_shield_status = tk.StringVar(value="尚未开启")
+        ttk.Label(combat, textvariable=self.assist_shield_status, foreground="#666", wraplength=560).grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+
+        ttk.Label(combat, text="技能冷却").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_cooldown_var = tk.StringVar(value=_seconds_text(assist.get("cooldown_seconds", 3)))
+        ttk.Entry(combat, textvariable=self.assist_cooldown_var, width=6, justify="center").grid(row=2, column=1, padx=(8, 2), pady=(6, 0))
+        ttk.Label(combat, text="秒").grid(row=2, column=2, sticky=tk.W, pady=(6, 0))
+        self.assist_cooldown_btn = ttk.Button(combat, text="开启", width=10, command=lambda: self.toggle_combat("cooldown"))
+        self.assist_cooldown_btn.grid(row=2, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_cooldown_status = tk.StringVar(value="尚未开启")
+        ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#666", wraplength=560).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
+
+        ttk.Label(combat, text="视野").grid(row=3, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_vision_var = tk.StringVar(value=_vision_text(assist.get("vision_mode", -1)))
+        ttk.Combobox(combat, textvariable=self.assist_vision_var, values=VISION_CHOICES, width=18,
+                     state="readonly").grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=8, pady=(6, 0))
+        self.assist_vision_btn = ttk.Button(combat, text="应用", width=10, command=lambda: self.toggle_combat("vision"))
+        self.assist_vision_btn.grid(row=3, column=3, padx=(14, 10), pady=(6, 0))
+        self.assist_vision_status = tk.StringVar(value="尚未开启")
+        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#666", wraplength=560).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
+
         ttk.Label(
             parent,
             text=(
-                "战斗参数（英雄倍伤 / 免伤 / 技能冷却 / 视野）已全部停用：\n"
-                "实测这些改动都会让客户端数据和服务端对不上，游戏会弹「战斗数据与服务器不一致」。\n"
-                "安全可用的功能：刷新怪物（带血量）、闪现、免费复活、地图刷新、开宝箱、采集、运行指令。"
+                "⚠ 实测：倍伤 / 免伤 / 技能冷却 / 视野 都会被服务端校验，用了会弹「战斗数据与服务器不一致」。"
+                " 功能保留在这里，默认关闭；要不要开你自己决定。开着它们时不能开地图刷新。"
             ),
             foreground="#c62828",
             wraplength=980,
-        ).pack(anchor=tk.W, pady=(2, 8))
+        ).pack(anchor=tk.W, pady=(2, 6))
 
         if self.dev_mode:
             row = ttk.Frame(parent)
@@ -1253,6 +1292,7 @@ class AppUI:
                 continue
         for key, var, low, high in (
             ("damage_value", getattr(self, "assist_damage_var", None), 1.0, 70000.0),
+            ("shield_percent", getattr(self, "assist_shield_var", None), 1.0, 100.0),
             ("cooldown_seconds", getattr(self, "assist_cooldown_var", None), 0.1, 3600.0),
         ):
             if var is None:
@@ -1489,19 +1529,45 @@ class AppUI:
         enabled = bool(item.get("enabled"))
 
         if name == "damage":
-            messagebox.showinfo("英雄倍伤", "这个功能已停用：改伤害数值会被服务端校验（会弹「战斗数据与服务器不一致」）。")
-            return
+            try:
+                value = float(self.assist_damage_var.get().strip())
+            except (ValueError, AttributeError):
+                messagebox.showerror("参数错误", "倍率需要是数字")
+                return
+            if not 1 <= value <= 70000:
+                messagebox.showerror("参数错误", "倍率需要在 1 - 70000 之间")
+                return
+            send: Any = 0 if enabled else value
+            btn, status, label = (self.assist_damage_btn, self.assist_damage_status, "英雄倍伤")
         elif name == "shield":
-            # 免伤会改伤害数值，服务端校验必中（实测弹「战斗数据与服务器不一致」），已移除
-            messagebox.showinfo("英雄免伤", "这个功能已移除：伤害数值会被服务端校验（会弹「战斗数据与服务器不一致」）。")
-            return
+            try:
+                value = float(self.assist_shield_var.get().strip())
+            except (ValueError, AttributeError):
+                messagebox.showerror("参数错误", "免伤比例需要是数字")
+                return
+            if not 1 <= value <= 100:
+                messagebox.showerror("参数错误", "免伤比例需要在 1 - 100 之间")
+                return
+            send = 0 if enabled else value
+            btn, status, label = (self.assist_shield_btn, self.assist_shield_status, "英雄免伤")
         elif name == "vision":
-            # 视野功能已移除：视野值会进每帧哈希，改了一定会被服务端校验出来
-            messagebox.showinfo("视野修改", "这个功能已移除（会被服务器检测）。野外刷 BOSS 不需要它。")
-            return
+            mode = _vision_mode(self.assist_vision_var.get())
+            if mode < 0 and not enabled:
+                self.append_log("视野已经是关闭状态")
+                return
+            send = mode
+            btn, status, label = (self.assist_vision_btn, self.assist_vision_status, "视野修改")
         else:
-            messagebox.showinfo("技能冷却", "这个功能已停用：改冷却会被服务端校验（会弹「战斗数据与服务器不一致」）。")
-            return
+            try:
+                value = float(self.assist_cooldown_var.get().strip())
+            except (ValueError, AttributeError):
+                messagebox.showerror("参数错误", "冷却需要是数字")
+                return
+            if not 0.1 <= value <= 3600:
+                messagebox.showerror("参数错误", "冷却需要在 0.1 - 3600 秒之间")
+                return
+            send = 0 if enabled else value
+            btn, status, label = (self.assist_cooldown_btn, self.assist_cooldown_status, "技能冷却")
 
         self._read_assist_into_config()
         self.assist.set_feature(name, send)
@@ -1657,15 +1723,25 @@ class AppUI:
 
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
+                       self.assist_damage_btn, self.assist_shield_btn,
+                       self.assist_cooldown_btn, self.assist_vision_btn,
                        self.assist_revive_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
         self.assist_mob_btn.configure(text="关闭" if mob.get("enabled") else "开启")
         self.assist_boss_btn.configure(text="关闭" if boss.get("enabled") else "开启")
+        self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
+        self.assist_shield_btn.configure(text="关闭" if (combat.get("shield") or {}).get("enabled") else "开启")
+        self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
+        self.assist_vision_btn.configure(text="恢复" if vision.get("enabled") else "应用")
         self.assist_red_btn.configure(text="关闭" if red.get("enabled") else "开启")
         self.assist_wish_btn.configure(text="关闭" if wish.get("enabled") else "开启")
 
         self.assist_mob_status.set(str(mob.get("reason") or "待接入"))
+        self.assist_damage_status.set(str(damage.get("reason") or ("需要版本映射" if gap else "尚未开启")))
+        self.assist_shield_status.set(str((combat.get("shield") or {}).get("reason") or ("需要版本映射" if gap else "尚未开启")))
+        self.assist_cooldown_status.set(str(cooldown.get("reason") or ("需要版本映射" if gap else "尚未开启")))
+        self.assist_vision_status.set(str(vision.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
