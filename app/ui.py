@@ -844,6 +844,12 @@ class AppUI:
         # 兼容旧配置（名字过滤），没有输入框也不会报错
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
 
+        daily_row = ttk.Frame(tools)
+        daily_row.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(8, 0))
+        ttk.Button(daily_row, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
+        self.assist_daily_status = tk.StringVar(value="打开任务面板，把能领的日常奖励全部领掉")
+        ttk.Label(daily_row, textvariable=self.assist_daily_status, foreground="#666").pack(side=tk.LEFT, padx=8)
+
         # ---------- 战斗参数（保留，默认关；实测会被服务端校验）----------
         combat = ttk.LabelFrame(parent, text="战斗参数（改战斗数值，会被服务端校验，默认关）", padding=10)
         combat.pack(fill=tk.X, pady=(0, 8))
@@ -1658,6 +1664,28 @@ class AppUI:
             )
         else:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
+
+    def claim_daily(self) -> None:
+        """一键领日常：打开任务面板 → 把能领的奖励全部点掉。"""
+        if not self.assist.running:
+            self.start_assist()
+        result = self.assist.open_daily_tasks()
+        if not result.get("ok"):
+            self.assist_daily_status.set("打开任务面板失败：%s" % (result.get("error") or "未知原因"))
+            return
+        self.assist_daily_status.set("正在打开任务面板…")
+        self.root.after(1000, self._claim_daily_now)
+
+    def _claim_daily_now(self) -> None:
+        result = self.assist.claim_daily_tasks()
+        if not result.get("ok"):
+            self.assist_daily_status.set("领取失败：%s" % (result.get("error") or "未知原因"))
+            return
+        claimed = int(result.get("claimed") or 0)
+        waiting = int(result.get("waiting") or 0)
+        text = "已领取 %d 个，未完成 %d 个" % (claimed, waiting)
+        self.assist_daily_status.set(text)
+        self.append_log("一键领日常：" + text)
 
     def blink_assist(self) -> None:
         """过去：瞬移或飞过去（选列表里那只怪）。"""

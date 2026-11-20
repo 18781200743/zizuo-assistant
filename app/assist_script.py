@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 106
+RUNTIME_VERSION = 107
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 106
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 106;
+  const VERSION = 107;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2483,6 +2483,91 @@ RUNTIME_JS = r"""
     }
   }
 
+  /* ---- 日常任务（任务面板 UI） ---- */
+
+  /** 在场景里按名字找节点（浅层守卫，够用）。 */
+  function findNodeByName(name) {
+    try {
+      const scene = window.cc && window.cc.director && window.cc.director.getScene();
+      if (!scene) return null;
+      let hit = null;
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 8000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        if (String(n.name || '') === name) return n;
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** 当前渲染出来的日常任务行（每条一个 LYJP）。 */
+  function dailyTaskRows() {
+    const rows = [];
+    try {
+      const scene = window.cc.director.getScene();
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 8000) {
+        guard += 1;
+        const n = stack.pop();
+        if (!n) continue;
+        if (String(n.name || '') === 'DailyTasksListItemView' && n.activeInHierarchy) {
+          (n._components || []).forEach(c => {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(c) || ''; } catch (_) { cls = ''; }
+            if (cls === 'LYJP') rows.push(c);
+          });
+        }
+        const kids = n.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return rows;
+  }
+
+  /** 打开任务面板（右下「任务」按钮）并切到日常页。 */
+  function openDailyTasks() {
+    try {
+      if (dailyTaskRows().length) return { ok: true, opened: true, rows: dailyTaskRows().length };
+      const btn = findNodeByName('TasksBoardMenuIconView');
+      if (!btn) return { ok: false, error: '没找到任务按钮' };
+      btn.emit('click');
+      return { ok: true, opened: false, rows: 0 };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
+  /** 领取当前面板里所有可领取的日常奖励，返回领取数量。 */
+  function claimDailyTasks() {
+    try {
+      const rows = dailyTaskRows();
+      if (!rows.length) return { ok: false, error: '任务面板还没打开' };
+      let claimed = 0;
+      let waiting = 0;
+      const details = [];
+      for (const comp of rows) {
+        let can = false;
+        try { can = !!(comp.VRVD && comp.VRVD.node && comp.VRVD.node.active); } catch (_) { can = false; }
+        let desc = '';
+        try { desc = String((comp.QRDV && comp.QRDV.string) || '').slice(0, 24); } catch (_) { desc = ''; }
+        if (can && typeof comp.VPMG === 'function') {
+          try { comp.VPMG(); claimed += 1; details.push('领：' + desc); } catch (_) { waiting += 1; }
+        } else {
+          waiting += 1;
+        }
+      }
+      return { ok: true, claimed, waiting, rows: rows.length, details };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /** 直接飞到/闪到指定坐标。mode = instant（瞬移）| fly（飞过去，播过场）。 */
   function blinkToCoords(x, y, mode) {
     const box = state.blink;
@@ -4041,6 +4126,8 @@ RUNTIME_JS = r"""
     snapshot,
     heroes: heroList,
     monsters: monsterList,
+    openDailyTasks,
+    claimDailyTasks,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

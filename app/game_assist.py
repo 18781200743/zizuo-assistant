@@ -571,6 +571,28 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return []
 
+    def open_daily_tasks(self) -> dict:
+        """打开任务面板（日常页）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.openDailyTasks "
+                "? window.__zzAssist.openDailyTasks() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def claim_daily_tasks(self) -> dict:
+        """领取当前任务面板里所有可领取的日常奖励。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.claimDailyTasks "
+                "? window.__zzAssist.claimDailyTasks() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def list_heroes(self) -> list:
         """读游戏里拥有的英雄列表（编号/名字/品质）。"""
         try:
