@@ -1121,7 +1121,7 @@ class AppUI:
         # ---------- 本机游戏卡片 ----------
         x0, y0, x1, y1 = sx(47), sy(531), sx(1106), sy(1126)
         card_img = self._frosted(
-            w, h, (x0, y0, x1, y1), "#ffffff", 0.88, sx(30), "card"
+            w, h, (x0, y0, x1, y1), "#ffffff", 0.85, sx(30), "card"
         )
         if card_img is not None:
             c.create_image(x0, y0, image=card_img, anchor="nw")
@@ -1135,12 +1135,12 @@ class AppUI:
             fill="", outline=card_line,
         )
         c.create_text(
-            sx(84), sy(582), anchor="w", text="本机游戏",
-            fill=dark_txt, font=(ui_font, 12, "bold"),
+            sx(84), sy(586), anchor="w", text="本机游戏",
+            fill=dark_txt, font=(ui_font, 13, "bold"),
         )
         self._home_status_item = c.create_text(
-            sx(84), sy(668), anchor="nw", text=self.home_status_var.get(),
-            fill=sub_txt, width=x1 - sx(130), font=(ui_font, 11), justify="left",
+            sx(84), sy(672), anchor="nw", text=self.home_status_var.get(),
+            fill="#26303f", width=x1 - sx(130), font=(ui_font, 12), justify="left",
         )
 
         # 两个按钮
@@ -1153,7 +1153,7 @@ class AppUI:
         )
         c.create_text(
             (bx0 + bx1) / 2, (by0 + by1) / 2, text="打开游戏窗口", fill="#ffffff",
-            font=(ui_font, 10, "bold"), tags=("home_open",),
+            font=(ui_font, 11, "bold"), tags=("home_open",),
         )
         c.create_polygon(
             self._round_points(cx0, by0, cx1, by1, (by1 - by0) / 2),
@@ -1161,7 +1161,7 @@ class AppUI:
         )
         c.create_text(
             (cx0 + cx1) / 2, (by0 + by1) / 2, text="重新连接", fill="#374151",
-            font=(ui_font, 10), tags=("home_reconnect",),
+            font=(ui_font, 11), tags=("home_reconnect",),
         )
         for tag in ("home_open", "home_reconnect"):
             c.tag_bind(tag, "<Enter>", lambda _e: c.configure(cursor="hand2"))
@@ -1211,7 +1211,7 @@ class AppUI:
         # ---------- 使用说明 ----------
         ix0, iy0, ix1, iy1 = sx(50), sy(1420), sx(1105), sy(1790)
         info_img = self._frosted(
-            w, h, (ix0, iy0, ix1, iy1), "#223154", 0.88, sx(30), "info"
+            w, h, (ix0, iy0, ix1, iy1), "#223154", 0.86, sx(30), "info"
         )
         if info_img is not None:
             c.create_image(ix0, iy0, image=info_img, anchor="nw")
