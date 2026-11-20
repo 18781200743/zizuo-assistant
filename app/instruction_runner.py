@@ -343,34 +343,34 @@ def _js_teleport_unlocked(pairs: List[List[int]]) -> str:
 """ % _js(pairs)
 
 
-def _js_collect_hook(mapping: Dict[str, Any]) -> str:
-    """在采集事件分发器上装一个计数器：采一次 +1，用来判断「到底采到没有」。"""
+def _js_collect_state(entity: Any) -> str:
+    """采到没有：按目标实体自己的状态判断（采掉后 AINJ 变真，或者实体直接消失）。
+
+    不要用「事件计数」判断：映射里的 OHLC 是世界同步回调，每秒会触发好几次，
+    之前日志里的「采到 24 次」其实是同步次数，跟采集无关（实测踩坑）。
+    """
     return r"""
 (function () {
   try {
-    var m = %s;
-    var b = (m.builds || {})[m.current] || {};
-    var cc = b.collect || {};
-    var core = window[((b.map || {}).holder) || 'VKXX'].ZRRU;
-    var events = core[cc.queue || 'EENE']()[cc.dispatch || 'NCHO'];
-    if (!events) return 'no events';
-    if (events.__zzCollectCount) return 'already';
-    var entry = cc.entry || 'OHLC';
-    var orig = events[entry];
-    if (typeof orig !== 'function') return 'no entry';
-    events[entry] = function () {
-      try { window.__zzCollectHits = (window.__zzCollectHits || 0) + 1; } catch (e) {}
-      return orig.apply(this, arguments);
-    };
-    events.__zzCollectCount = true;
-    return 'ok';
+    var NB = %s;
+    var c = window.VKXX.ZRRU;
+    var mgr = c.PFTN();
+    var units = mgr.UFYI();
+    var hit = null;
+    units.OOIV(function (i, u) {
+      if (!u) return false;
+      if (u.NBDV === NB) { hit = u; return true; }
+      return false;
+    });
+    if (!hit) return 'gone';
+    var dead = false, collectible = true;
+    try { dead = !!hit.AINJ(); } catch (e) {}
+    try { collectible = typeof hit.QATG === 'function' ? !!hit.QATG() : true; } catch (e) {}
+    if (!collectible) return 'gone';
+    return dead ? 'dead' : 'alive';
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % _js(mapping)
-
-
-def _js_collect_hits() -> str:
-    return "String(window.__zzCollectHits || 0)"
+""" % _js(entity)
 
 
 def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius: float = DEFAULT_COLLECT_RADIUS) -> str:
@@ -438,12 +438,12 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius:
       for (var i = 0; i < skip.length; i += 1) {
         if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
       }
-      if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, d: d, name: name || '活动采集物' };
+      if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, d: d, nb: unit.NBDV, name: name || '活动采集物' };
       return false;
     };
     if (units && typeof units[mc.each || 'OOIV'] === 'function') units[mc.each || 'OOIV'](visit);
     if (!best) return 'none';
-    return JSON.stringify({name: best.name, x: Math.round(best.x), y: Math.round(best.y)});
+    return JSON.stringify({name: best.name, x: Math.round(best.x), y: Math.round(best.y), nb: best.nb});
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
 """ % (_js(words), _js(skip or []), _js(float(radius)), _js(list(DAILY_RESOURCE_WORDS)))
@@ -935,17 +935,11 @@ class InstructionRunner:
 
     def _collect(self, args: List[str]) -> None:
         keyword = str(args[0]).strip() if args else "活动"
-        mapping = getattr(self, "_mapping", None) or {}
         try:
             cfg = load_automation_config()
             radius = float(cfg.get("collect_radius") or DEFAULT_COLLECT_RADIUS)
         except (TypeError, ValueError):
             radius = DEFAULT_COLLECT_RADIUS
-        if mapping:
-            try:
-                self._eval(_js_collect_hook(mapping))
-            except Exception:  # noqa: BLE001
-                pass
         tried: List[tuple] = []
         got = 0
         for _ in range(10):
@@ -963,30 +957,30 @@ class InstructionRunner:
                 break
             tx = float(target.get("x") or 0)
             ty = float(target.get("y") or 0)
+            nb = target.get("nb")
             tried.append((tx, ty))
             self._log_line("    去采 %s（%d,%d）" % (target.get("name"), int(tx), int(ty)))
-            before = int(str(self._eval(_js_collect_hits()) or 0))
             # 站到资源旁边（不踩正中间，游戏是靠近就开始采）
             if not self._teleport_to(tx + 28, ty):
                 self._log_line("    瞬移没过去，换下一个")
                 continue
             self._sleep(3.2)
-            after = int(str(self._eval(_js_collect_hits()) or 0))
-            if after <= before:
+            state = str(self._eval(_js_collect_state(nb)) or "")
+            if state == "alive":
                 self._nudge_towards(target)
                 self._sleep(2.2)
-                after = int(str(self._eval(_js_collect_hits()) or 0))
-            if after <= before and self._teleport_to(tx, ty):
+                state = str(self._eval(_js_collect_state(nb)) or "")
+            if state == "alive" and self._teleport_to(tx, ty):
                 # 还是没采到：干脆站到资源点上再等
                 self._sleep(2.6)
-                after = int(str(self._eval(_js_collect_hits()) or 0))
-            if after > before:
-                got += after - before
-                self._log_line("    采到 %d 次" % (after - before))
+                state = str(self._eval(_js_collect_state(nb)) or "")
+            if state in ("dead", "gone"):
+                got += 1
+                self._log_line("    采到了")
             else:
                 self._log_line("    这个点没采到，换下一个")
         if got:
-            self._log_line("    共采到 %d 次" % got)
+            self._log_line("    共采到 %d 个点" % got)
         else:
             self._log_line("    角色附近 %d 米内没有可采的「%s」，原地不动" % (int(radius), keyword))
 
