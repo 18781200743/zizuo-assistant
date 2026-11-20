@@ -629,6 +629,28 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return []
 
+    def task_go(self, task_name: str) -> dict:
+        """任务面板里点指定任务的「前往」。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTaskGo "
+                "? window.__zzAssist.clickTaskGo(%s) : null)" % json.dumps(task_name, ensure_ascii=False)
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def task_teleport_track(self) -> dict:
+        """点弹窗里的「传送并追踪」。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.clickTeleportTrack "
+                "? window.__zzAssist.clickTeleportTrack() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def reload_map_now(self) -> bool:
         """立刻重进当前地图（刷怪）。"""
         try:

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 114
+RUNTIME_VERSION = 115
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 114
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 114;
+  const VERSION = 115;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2713,6 +2713,75 @@ RUNTIME_JS = r"""
     }
   }
 
+  /** 在任务面板里找到指定名字的任务行，点它的「前往」。 */
+  function clickTaskGo(taskName) {
+    try {
+      const scene = window.cc.director.getScene();
+      const rows = [];
+      (function walk(n, d) {
+        if (!n || d > 25) return;
+        if (String(n.name || '') === 'DailyTasksListItemView' && n.activeInHierarchy) rows.push(n);
+        (n.children || []).forEach(k => walk(k, d + 1));
+      })(scene, 0);
+      for (const row of rows) {
+        let target = '';
+        let go = null;
+        (function walk(n, d) {
+          if (!n || d > 6) return;
+          (n._components || []).forEach(c => {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(c) || ''; } catch (_) { cls = ''; }
+            if (cls === 'cc.Label' && String(n.name || '') === 'TargetLabel') target = String(c.string || '');
+          });
+          if (String(n.name || '') === 'GoBtn') go = n;
+          (n.children || []).forEach(k => walk(k, d + 1));
+        })(row, 0);
+        if (target.indexOf(taskName) < 0 || !go) continue;
+        go.emit('click');
+        return { ok: true, target };
+      }
+      return { ok: false, error: '任务面板里没找到「' + taskName + '」' };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
+  /** 点弹窗里的「传送并追踪」。 */
+  function clickTeleportTrack() {
+    try {
+      const scene = window.cc.director.getScene();
+      let hit = null;
+      (function walk(n, d) {
+        if (!n || hit || d > 25) return;
+        (n._components || []).forEach(c => {
+          let cls = '';
+          try { cls = window.cc.js.getClassName(c) || ''; } catch (_) { cls = ''; }
+          if (cls === 'cc.Label' && String(c.string || '').indexOf('传送并追踪') >= 0) hit = n;
+        });
+        (n.children || []).forEach(k => walk(k, d + 1));
+      })(scene, 0);
+      if (!hit) return { ok: false, error: '没有「传送并追踪」按钮' };
+      let p = hit;
+      for (let i = 0; i < 6 && p; i += 1) {
+        let clicked = false;
+        (p._components || []).forEach(c => {
+          let cls = '';
+          try { cls = window.cc.js.getClassName(c) || ''; } catch (_) { cls = ''; }
+          if (cls === 'UXXM') {
+            try { c._onTouchBegan({}); c._onTouchEnded({}); } catch (_) { /* ignore */ }
+            p.emit('click');
+            clicked = true;
+          }
+        });
+        if (clicked) return { ok: true };
+        p = p.parent;
+      }
+      return { ok: false, error: '没找到可点的按钮' };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /** 调游戏自己的分享入口（任务「分享游戏1次」用）。 */
   function shareGame() {
     try {
@@ -4313,6 +4382,8 @@ RUNTIME_JS = r"""
     completeDailyWithCards,
     shareGame,
     reloadMapNow,
+    clickTaskGo,
+    clickTeleportTrack,
     set,
     diagnose,
     refresh: () => { state.nextProbeAt = 0; probe(); },

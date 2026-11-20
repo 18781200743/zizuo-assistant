@@ -1720,13 +1720,27 @@ class AppUI:
             self.append_log("采集失败：%s" % exc)
 
     def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
-        """击杀指定 BOSS：在当前地图里按名字找它，闪现过去打；找不到就重进地图刷。"""
+        """击杀指定 BOSS：走游戏的「前往 → 传送并追踪」，过去之后再闪现贴脸打。"""
         task_id = task.get("id")
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + 150
+        tried_go = False
         while time.monotonic() < deadline:
             fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
             if int(fresh.get("progress") or 0) >= int(fresh.get("target") or 1):
                 return
+            # 第一次：开面板 → 前往 → 传送并追踪
+            if not tried_go:
+                tried_go = True
+                self._auto_daily_log("自动做日常：打开任务面板，前往「%s」" % boss_name)
+                self.assist.open_daily_tasks()
+                time.sleep(1.0)
+                go = self.assist.task_go(boss_name)
+                if go.get("ok"):
+                    time.sleep(0.8)
+                    self.assist.task_teleport_track()
+                    time.sleep(3.0)
+                else:
+                    self._auto_daily_log("自动做日常：面板里没找到「%s」，直接闪现找" % boss_name)
             monsters = self.assist.list_monsters()
             cand = [m for m in monsters if boss_name in str(m.get("name") or "")]
             if cand:
@@ -1739,10 +1753,8 @@ class AppUI:
                     )
                 except Exception:  # noqa: BLE001
                     pass
-                time.sleep(12.0)
+                time.sleep(10.0)
             else:
-                self._auto_daily_log("自动做日常：地图里没看到 %s，重进地图刷" % boss_name)
-                self.assist.reload_map_now()
                 time.sleep(4.0)
 
     def _auto_daily_kill_count(self, task: Dict[str, Any]) -> None:
