@@ -1004,27 +1004,68 @@ class AppUI:
 
     ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
-    def _home_header(self, w: int, h: int):
-        """头图（和参考图一致的原画），按尺寸缓存 PhotoImage。"""
+    # 首页按参考图（1152x2048）的比例排版
+    HOME_W, HOME_H = 1152.0, 2048.0
+
+    def _home_bg(self, w: int, h: int):
+        """整页背景（原画），按尺寸缓存。"""
         key = (int(w), int(h))
-        if getattr(self, "_header_key", None) == key:
-            return getattr(self, "_header_photo", None)
+        if getattr(self, "_home_bg_key", None) == key:
+            return getattr(self, "_home_bg_photo", None)
+        photo = None
+        for name in ("home_bg.jpg", "home_bg.png"):
+            try:
+                from PIL import Image, ImageTk
+
+                path = os.path.join(self.ASSET_DIR, name)
+                if not os.path.exists(path):
+                    continue
+                im = Image.open(path).convert("RGB")
+                im = im.resize((max(1, int(w)), max(1, int(h))), Image.LANCZOS)
+                self._home_bg_pil = im
+                photo = ImageTk.PhotoImage(im)
+                break
+            except Exception:  # noqa: BLE001
+                photo = None
+        self._home_bg_key = key
+        self._home_bg_photo = photo
+        return photo
+
+    def _frosted(self, w: int, h: int, box, tint, alpha: float, radius: float, key: str):
+        """从背景裁一块做磨砂玻璃卡片（圆角），按尺寸缓存。"""
+        cache = getattr(self, "_frosted_cache", {})
+        ck = (key, int(w), int(h), tuple(int(v) for v in box))
+        if ck in cache:
+            return cache[ck]
         photo = None
         try:
-            from PIL import Image, ImageTk
+            from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
-            path = os.path.join(self.ASSET_DIR, "home_header.png")
-            im = Image.open(path).convert("RGB")
-            im = im.resize((max(1, int(w)), max(1, int(h))), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(im)
+            bg = getattr(self, "_home_bg_pil", None)
+            if bg is None:
+                return None
+            x0, y0, x1, y1 = [int(round(v)) for v in box]
+            x0, y0 = max(0, x0), max(0, y0)
+            x1, y1 = min(bg.width, x1), min(bg.height, y1)
+            if x1 - x0 < 4 or y1 - y0 < 4:
+                return None
+            card = bg.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(8))
+            veil = Image.new("RGB", card.size, tint)
+            card = Image.blend(card, veil, alpha).convert("RGBA")
+            mask = Image.new("L", card.size, 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                [0, 0, card.width - 1, card.height - 1], radius=int(radius), fill=255
+            )
+            card.putalpha(mask)
+            photo = ImageTk.PhotoImage(card)
         except Exception:  # noqa: BLE001
             photo = None
-        self._header_key = key
-        self._header_photo = photo
+        cache[ck] = photo
+        self._frosted_cache = cache
         return photo
 
     def _build_home_tab(self, parent: tk.Frame) -> None:
-        """首页：深色科幻风（原画头图 + 半透明卡片 + 发光按钮）。"""
+        """首页：原画背景 + 卡片 + 发光按钮。"""
         parent.configure(bg=self.BG_TOP)
         canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=self.BG_TOP)
         canvas.pack(fill=tk.BOTH, expand=True)
@@ -1041,12 +1082,6 @@ class AppUI:
             return
         try:
             canvas.itemconfigure(item, text=self.home_status_var.get())
-            bbox = canvas.bbox(item)
-            bottom = bbox[3] if bbox else 0
-            # 状态文字行数变了（整个卡片要跟着变高）才重排，避免每次都重画
-            if abs(bottom - getattr(self, "_home_status_bottom", 0)) > 2:
-                self._home_status_bottom = bottom
-                self._draw_home()
         except tk.TclError:
             pass
 
@@ -1063,85 +1098,70 @@ class AppUI:
             return
 
         c.delete("all")
-        self._home_status_item = None
-
         ui_font = "Microsoft YaHei UI"
-        card_bg = "#f3f5fb"
-        card_line = "#dfe6f2"
-        dark_txt = "#1f2937"
-        sub_txt = "#4b5768"
 
-        # ---------- 头图（原画，标题/关于已在图里） ----------
-        header_h = int(round(w * 515 / 1152))
-        photo = self._home_header(w, header_h)
+        def sx(v: float) -> float:
+            return v * w / self.HOME_W
+
+        def sy(v: float) -> float:
+            return v * h / self.HOME_H
+
+        # ---------- 背景原画 ----------
+        photo = self._home_bg(w, h)
         if photo is not None:
             c.create_image(0, 0, image=photo, anchor="nw")
         else:
-            # 素材缺失时的兜底：渐变 + 文字标题
-            self._vgrad(c, 0, 0, w, header_h, "#2a1f4a", "#7d3d9e")
-            c.create_text(
-                24, header_h * 0.55, anchor="w", text="百炼英雄 · 助手",
-                fill="#ffffff", font=(ui_font, 20, "bold"),
-            )
-            c.create_text(
-                24, header_h * 0.78, anchor="w", text="百炼英雄 · 电脑版",
-                fill="#d6e9ff", font=(ui_font, 10),
-            )
+            self._vgrad(c, 0, 0, w, h, "#241b47", "#182742")
 
-        # 头图下面接一段深蓝背景
-        self._vgrad(c, 0, header_h, w, h, "#1d2c4d", "#182742")
+        card_bg = "#f3f5fb"
+        card_line = "#e2e8f4"
+        dark_txt = "#1f2937"
+        sub_txt = "#4b5768"
 
-        # 关于（图上按钮的位置，放个透明热区）
-        ax0, ay0 = int(w * 959 / 1152), int(header_h * 108 / 515)
-        ax1, ay1 = int(w * 1117 / 1152), int(header_h * 195 / 515)
-        c.create_rectangle(
-            ax0, ay0, ax1, ay1, fill="", outline="", tags=("home_about",),
+        # ---------- 本机游戏卡片 ----------
+        x0, y0, x1, y1 = sx(50), sy(515), sx(1105), sy(1085)
+        card_img = self._frosted(
+            w, h, (x0, y0, x1, y1), "#ffffff", 0.88, sx(30), "card"
         )
-        c.tag_bind("home_about", "<Button-1>", lambda _e: self._show_about())
-        c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
-        c.tag_bind("home_about", "<Leave>", lambda _e: c.configure(cursor=""))
-
-        # ---------- 本机游戏卡片（浅色，高度跟着状态文字走） ----------
-        x0, x1 = 18, w - 18
-        y0 = header_h + 8
-        title_id = c.create_text(
-            x0 + 20, y0 + 20, anchor="w", text="本机游戏",
+        if card_img is not None:
+            c.create_image(x0, y0, image=card_img, anchor="nw")
+        else:
+            c.create_polygon(
+                self._round_points(x0, y0, x1, y1, sx(30)),
+                fill=card_bg, outline=card_line,
+            )
+        c.create_polygon(
+            self._round_points(x0, y0, x1, y1, sx(30)),
+            fill="", outline=card_line,
+        )
+        c.create_text(
+            sx(84), sy(558), anchor="w", text="本机游戏",
             fill=dark_txt, font=(ui_font, 12, "bold"),
         )
         self._home_status_item = c.create_text(
-            x0 + 20, y0 + 46, anchor="nw", text=self.home_status_var.get(),
-            fill=sub_txt, width=x1 - x0 - 40, font=(ui_font, 11), justify="left",
+            sx(84), sy(648), anchor="nw", text=self.home_status_var.get(),
+            fill=sub_txt, width=x1 - sx(130), font=(ui_font, 11), justify="left",
         )
-        bbox = c.bbox(self._home_status_item)
-        text_bottom = bbox[3] if bbox else y0 + 64
-        self._home_status_bottom = text_bottom
-        by0 = max(y0 + 92, text_bottom + 18)
-        by1 = by0 + 38
-        card1_bottom = by1 + 16
 
-        inner_w = (x1 - x0) - 40
-        gap = 18
-        btn_w = (inner_w - gap) // 2
-        bx0, bx1 = x0 + 20, x0 + 20 + btn_w
-        cx0, cx1 = bx1 + gap, bx1 + gap + btn_w
-
-        # 打开游戏窗口（蓝色）
+        # 两个按钮
+        by0, by1 = sy(925), sy(1000)
+        bx0, bx1 = sx(95), sx(570)
+        cx0, cx1 = sx(610), sx(1050)
         c.create_polygon(
-            self._round_points(bx0, by0, bx1, by1, 17),
+            self._round_points(bx0, by0, bx1, by1, (by1 - by0) / 2),
             fill="#2f7fe8", outline="#8fc7ff", width=1, tags=("home_open",),
         )
         c.create_text(
             (bx0 + bx1) / 2, (by0 + by1) / 2, text="打开游戏窗口", fill="#ffffff",
-            font=(ui_font, 11, "bold"), tags=("home_open",),
+            font=(ui_font, 10, "bold"), tags=("home_open",),
         )
-        # 重新连接（浅色描边）
         c.create_polygon(
-            self._round_points(cx0, by0, cx1, by1, 17),
-            fill="#e9eef8", outline="#c3cfe2", tags=("home_reconnect",),
+            self._round_points(cx0, by0, cx1, by1, (by1 - by0) / 2),
+            fill="#eef2f9", outline="#c8d3e5", tags=("home_reconnect",),
         )
         c.create_text(
             (cx0 + cx1) / 2, (by0 + by1) / 2, text="重新连接", fill="#374151",
-            font=(ui_font, 11), tags=("home_reconnect",),
+            font=(ui_font, 10), tags=("home_reconnect",),
         )
         for tag in ("home_open", "home_reconnect"):
             c.tag_bind(tag, "<Enter>", lambda _e: c.configure(cursor="hand2"))
@@ -1149,55 +1169,65 @@ class AppUI:
         c.tag_bind("home_open", "<Button-1>", lambda _e: self.ask_open_game())
         c.tag_bind("home_reconnect", "<Button-1>", lambda _e: self.reconnect_assist())
 
-        card1 = c.create_polygon(
-            self._round_points(x0, y0, x1, card1_bottom, 16),
-            fill=card_bg, outline=card_line,
+        # ---------- 关于（背景图上的按钮位置） ----------
+        c.create_rectangle(
+            sx(959), sy(108), sx(1117), sy(195),
+            fill="", outline="", tags=("home_about",),
         )
-        c.tag_lower(card1, title_id)
+        c.tag_bind("home_about", "<Button-1>", lambda _e: self._show_about())
+        c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_about", "<Leave>", lambda _e: c.configure(cursor=""))
 
         # ---------- 辅助工具（发光六边形） ----------
-        hx0, hx1 = 46, w - 46
-        hy0 = card1_bottom + 22
-        hy1 = hy0 + 68
+        hx0, hx1 = sx(150), sx(1000)
+        hy0, hy1 = sy(1150), sy(1350)
         mid = (hy0 + hy1) / 2
-        cut = 30
+        cut = sx(58)
         hexa = [
             hx0 + cut, hy0, hx1 - cut, hy0, hx1, mid,
             hx1 - cut, hy1, hx0 + cut, hy1, hx0, mid,
         ]
-        c.create_polygon(hexa, fill="", outline="#0d5f6e", width=16, tags=("home_assist",))
-        c.create_polygon(hexa, fill="", outline="#16b8cf", width=7, tags=("home_assist",))
+        c.create_polygon(hexa, fill="", outline="#0d5f6e", width=14, tags=("home_assist",))
+        c.create_polygon(hexa, fill="", outline="#16b8cf", width=6, tags=("home_assist",))
         c.create_polygon(
             hexa, fill="#0d3b46", outline="#7ff0ff", width=2, tags=("home_assist",)
         )
         c.create_text(
-            hx0 + 26, mid, text="«", fill="#f59e0b",
+            hx0 + sx(20), mid, text="«", fill="#f59e0b",
             font=(ui_font, 15, "bold"), tags=("home_assist",),
         )
         c.create_text(
-            hx1 - 26, mid, text="»", fill="#f59e0b",
+            hx1 - sx(20), mid, text="»", fill="#f59e0b",
             font=(ui_font, 15, "bold"), tags=("home_assist",),
         )
         c.create_text(
             (hx0 + hx1) / 2, mid, text="辅助工具", fill="#ffffff",
-            font=(ui_font, 18, "bold"), tags=("home_assist",),
+            font=(ui_font, 17, "bold"), tags=("home_assist",),
         )
         c.tag_bind("home_assist", "<Button-1>", lambda _e: self._switch_mode("assist"))
         c.tag_bind("home_assist", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_assist", "<Leave>", lambda _e: c.configure(cursor=""))
 
-        # ---------- 使用说明（深色卡片） ----------
-        iy0 = hy1 + 20
-        iy1 = min(h - 52, iy0 + 168)
-        info = c.create_polygon(
-            self._round_points(x0, iy0, x1, iy1, 16),
-            fill="#223154", outline="#33466c",
+        # ---------- 使用说明 ----------
+        ix0, iy0, ix1, iy1 = sx(50), sy(1420), sx(1105), sy(1790)
+        info_img = self._frosted(
+            w, h, (ix0, iy0, ix1, iy1), "#223154", 0.88, sx(30), "info"
         )
-        info_title = c.create_text(
-            x0 + 18, iy0 + 20, anchor="w", text="使用说明",
-            fill="#ffffff", font=(ui_font, 12, "bold"),
+        if info_img is not None:
+            c.create_image(ix0, iy0, image=info_img, anchor="nw")
+        else:
+            c.create_polygon(
+                self._round_points(ix0, iy0, ix1, iy1, sx(30)),
+                fill="#223154", outline="#33466c",
+            )
+        c.create_polygon(
+            self._round_points(ix0, iy0, ix1, iy1, sx(30)),
+            fill="", outline="#33466c",
         )
-        c.tag_lower(info, info_title)
+        c.create_text(
+            sx(84), sy(1478), anchor="w", text="使用说明",
+            fill="#ffffff", font=(ui_font, 11, "bold"),
+        )
         lines = [
             "1. 打开游戏窗口，用验证码登录",
             "2. 进入主界面后会自动连接",
@@ -1205,15 +1235,9 @@ class AppUI:
         ]
         for i, line in enumerate(lines):
             c.create_text(
-                x0 + 20, iy0 + 56 + i * 27, anchor="w", text=line,
+                sx(84), sy(1560 + i * 78), anchor="w", text=line,
                 fill="#dbe4f5", font=(ui_font, 10),
             )
-
-        # ---------- 底部说明 ----------
-        c.create_text(
-            w / 2, h - 26, text="说明：使用脚本，封号自己负责",
-            fill="#f97316", font=(ui_font, 10),
-        )
 
     def _show_about(self) -> None:
         messagebox.showinfo(
