@@ -648,6 +648,29 @@ class GameAssist:
                 return tasks
         return tasks
 
+    def player_pos(self) -> list:
+        """读队长坐标 [x, y]。"""
+        try:
+            raw = self.bridge.eval_js(
+                "(function(){try{var c=window.VKXX.ZRRU;var ids=c.PFTN().YUWW(c.PMMA(window.VKXX.KBVD))||[];"
+                "var u=ids.length?c.YVSZ(ids[0]):null;return u?JSON.stringify([Math.round(u.ADUX),Math.round(u.WUZI)]):'null'}catch(e){return 'null'}})()"
+            )
+            data = json.loads(raw or "null")
+            return data if isinstance(data, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def teleport_to(self, x: float, y: float) -> bool:
+        """游戏原生无动画瞬移。"""
+        try:
+            raw = self.bridge.eval_js(
+                "(function(){try{window.VKXX.ZAVH(%d,%d,false,function(){});return 'ok'}"
+                "catch(e){return 'ERR '+((e&&e.message)||e)}})()" % (int(x), int(y))
+            )
+            return str(raw) == "ok"
+        except Exception:  # noqa: BLE001
+            return False
+
     def task_go(self, task_name: str) -> dict:
         """任务面板里点指定任务的「前往」（面板刚打开时行还没渲染，重试几次）。"""
         result: dict = {}

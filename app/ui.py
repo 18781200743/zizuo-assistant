@@ -1719,6 +1719,21 @@ class AppUI:
         except Exception as exc:  # noqa: BLE001
             self.append_log("采集失败：%s" % exc)
 
+    def _auto_daily_hop_to(self, x: float, y: float, tries: int = 8) -> bool:
+        """分段瞬移过去（一次瞬移太远游戏会丢掉）。"""
+        for _ in range(tries):
+            pos = self.assist.player_pos()
+            if len(pos) != 2:
+                return False
+            dx, dy = float(x) - pos[0], float(y) - pos[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < 220:
+                return True
+            step = min(dist - 100, 900)
+            self.assist.teleport_to(pos[0] + dx / dist * step, pos[1] + dy / dist * step)
+            time.sleep(0.7)
+        return False
+
     def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
         """击杀指定 BOSS：走游戏的「前往 → 传送并追踪」，过去之后再闪现贴脸打。"""
         task_id = task.get("id")
@@ -1746,14 +1761,8 @@ class AppUI:
             if cand:
                 nearest = min(cand, key=lambda m: int(m.get("d") or 0))
                 self._auto_daily_log("自动做日常：去找 %s（%s 米）" % (boss_name, nearest.get("d")))
-                try:
-                    self.assist.set_feature(
-                        "blinkTo",
-                        {"x": nearest.get("x"), "y": nearest.get("y"), "mode": "instant"},
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
-                time.sleep(10.0)
+                self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
+                time.sleep(8.0)
             else:
                 time.sleep(4.0)
 
@@ -1769,12 +1778,7 @@ class AppUI:
             monsters = self.assist.list_monsters()
             if monsters:
                 nearest = min(monsters, key=lambda m: int(m.get("d") or 0))
-                try:
-                    self.assist.set_feature(
-                        "blinkTo", {"x": nearest.get("x"), "y": nearest.get("y"), "mode": "instant"}
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+                self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
                 time.sleep(4.0)
             else:
                 self.assist.reload_map_now()
