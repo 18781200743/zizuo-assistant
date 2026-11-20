@@ -251,6 +251,12 @@
     setOn("fRevive", rv.enabled, "复活");
     setOn("fMob", mob.enabled, "小怪刷新");
     setOn("fBoss", boss.enabled, "BOSS刷新");
+    var combat = state.combat || {};
+    setOn("fDmg", (combat.damage || {}).enabled, "英雄倍伤 ×2");
+    setOn("fShield", (combat.shield || {}).enabled, "英雄免伤 100%");
+    setOn("fCd", (combat.cooldown || {}).enabled, "技能冷却 3 秒");
+    setOn("fVision", (combat.vision || {}).enabled, "视野：不让怪发现");
+
     var wish = state.wish || {};
     var wishBtn = $("fWish");
     if (wishBtn) {
@@ -294,6 +300,25 @@
     try { msg = (JSON.parse(raw) || {}).message || ""; } catch (e) { msg = ""; }
     if (msg) setInfo(msg);
     return msg;
+  }
+
+  function callRuntime(fnName) {
+    var raw = evalGame(
+      "JSON.stringify((window.__zzAssist && window.__zzAssist." + fnName + ") ? " +
+      "window.__zzAssist." + fnName + "() : {ok:false,message:'运行时未就绪'})"
+    );
+    var msg = "";
+    try { msg = (JSON.parse(raw) || {}).message || ""; } catch (e) { msg = ""; }
+    if (!msg && raw) msg = String(raw);
+    if (msg) setInfo(msg);
+    return msg;
+  }
+
+  function toggleCombat(feature, onValue, offValue) {
+    var item = (state && state.combat && state.combat[feature]) || null;
+    var on = !!(item && item.enabled);
+    send(feature, on ? offValue : onValue);
+    setTimeout(poll, 200);
   }
 
   function toggle(feature) {
@@ -426,6 +451,21 @@
       setStatus("已全部关闭");
       render();
     };
+
+    var dailyClaim = $("fDailyClaim");
+    if (dailyClaim) dailyClaim.onclick = function () { callRuntime("claimDailyViaService"); };
+
+    var dailyCards = $("fDailyCards");
+    if (dailyCards) dailyCards.onclick = function () { callRuntime("completeDailyWithCards"); };
+
+    var dmgBtn = $("fDmg");
+    if (dmgBtn) dmgBtn.onclick = function () { toggleCombat("damage", 2, 0); };
+    var shieldBtn = $("fShield");
+    if (shieldBtn) shieldBtn.onclick = function () { toggleCombat("shield", 100, 0); };
+    var cdBtn = $("fCd");
+    if (cdBtn) cdBtn.onclick = function () { toggleCombat("cooldown", 3, 0); };
+    var visionBtn = $("fVision");
+    if (visionBtn) visionBtn.onclick = function () { toggleCombat("vision", 0, -1); };
 
     var cats = [
       ["catMap", "secMap"],
