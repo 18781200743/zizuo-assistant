@@ -313,17 +313,12 @@ def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
 """ % (_js_chest_service(), _js(str(cfg)), _js(str(uid)), int(mult))
 
 
-def _js_teleport_panel(chapter: int, section: int) -> str:
-    """面板点击式传送：传送面板已经打开时，点章节页签 + 地图条目。
-
-    不依赖 map_id / point_id（这两个编号每个版本都会变）。
-    返回：'ok' 已点完 / 'ERR xxx'
-    """
+def _js_teleport_panel(name_prefix: str) -> str:
+    """面板点击式传送：点左边地区页签（按名字）。"""
     return r"""
 (function () {
   try {
     var cc = window.cc;
-    if (!cc || !cc.director) return 'ERR 游戏还没就绪';
     var scene = cc.director.getScene();
     var root = null;
     (function walk(n, d) {
@@ -332,45 +327,44 @@ def _js_teleport_panel(chapter: int, section: int) -> str:
       (n.children || []).forEach(function (k) { walk(k, d + 1); });
     })(scene, 0);
     if (!root) return 'ERR 请先打开游戏里的传送面板';
-    var chapter = %d, section = %d;
-    function clickNode(n) {
-      var done = false;
-      (n._components || []).forEach(function (c) {
-        var cls = '';
-        try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
-        if (cls === 'BPNN') {
-          try { c._onTouchBegan({}); c._onTouchEnded({}); } catch (e) { /* ignore */ }
-          try { n.emit('click'); } catch (e) { /* ignore */ }
-          done = true;
-        }
-      });
-      return done;
-    }
-    // 章节页签：TeleportTypePageItemView-00X（从 1 开始）
-    var tabs = [];
+    var want = %s;
+    var labels = function (node) {
+      var out = [];
+      (function l(x) {
+        (x._components || []).forEach(function (c) {
+          var cls = ''; try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
+          if (cls === 'cc.Label' && x.activeInHierarchy) out.push(String(c.string || ''));
+        });
+        (x.children || []).forEach(l);
+      })(node);
+      return out.join('|');
+    };
+    var hit = null;
     (function walk2(n) {
+      if (hit) return;
       var nm = String(n.name || '');
-      if (nm.indexOf('TeleportTypePageItemView') === 0) tabs.push(n);
+      if (nm.indexOf('TeleportTypePageItemView') === 0 && labels(n).indexOf(want) >= 0) hit = n;
       (n.children || []).forEach(walk2);
     })(root);
-    var numOf = function (n) {
-      var m = /-(\d+)$/.exec(String(n.name || ''));
-      return m ? parseInt(m[1], 10) : 0;
-    };
-    tabs = tabs.filter(function (n) { return numOf(n) > 0; });
-    tabs.sort(function (a, b) { return numOf(a) - numOf(b); });
-    if (!tabs.length) return 'ERR 面板里没有章节页签';
-    var tab = tabs[Math.max(0, Math.min(tabs.length - 1, chapter - 1))];
-    clickNode(tab);
-    // 等一帧再点地图条目（列表要重建）
-    return 'WAIT:' + chapter + ':' + section;
+    if (!hit) return 'ERR 面板里没找到「' + want + '」';
+    var btn = null; try { btn = hit.getComponent(cc.Button); } catch (e) { btn = null; }
+    if (btn && btn.clickEvents && btn.clickEvents.length) {
+      var ev = btn.clickEvents[0];
+      var target = ev.target || hit;
+      var comp = null;
+      try { comp = ev.component ? target.getComponent(ev.component) : null; } catch (e) { comp = null; }
+      if (!comp) comp = target;
+      var fn = comp && ev.handler ? comp[ev.handler] : null;
+      if (typeof fn === 'function') { fn.call(comp, ev.customEventData || null); return 'ok'; }
+    }
+    return 'ERR 地区页签点不动';
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % (chapter, section)
+""" % _js(name_prefix)
 
 
-def _js_teleport_panel_item(chapter: int, section: int) -> str:
-    """点章节之后，点第 section 个地图条目。"""
+def _js_teleport_panel_item(name_part: str) -> str:
+    """点右边地图条目（按名字）。"""
     return r"""
 (function () {
   try {
@@ -383,42 +377,39 @@ def _js_teleport_panel_item(chapter: int, section: int) -> str:
       (n.children || []).forEach(function (k) { walk(k, d + 1); });
     })(scene, 0);
     if (!root) return 'ERR 传送面板不见了';
-    var section = %d;
-    var items = [];
+    var want = %s;
+    var labels = function (node) {
+      var out = [];
+      (function l(x) {
+        (x._components || []).forEach(function (c) {
+          var cls = ''; try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
+          if (cls === 'cc.Label' && x.activeInHierarchy) out.push(String(c.string || ''));
+        });
+        (x.children || []).forEach(l);
+      })(node);
+      return out.join('|');
+    };
+    var hit = null;
     (function walk2(n) {
-      if (String(n.name || '') === 'TeleportSelectItemView') items.push(n);
+      if (hit) return;
+      if (String(n.name || '') === 'TeleportSelectItemView' && labels(n).indexOf(want) >= 0) hit = n;
       (n.children || []).forEach(walk2);
     })(root);
-    if (!items.length) return 'ERR 这个章节还没有可点的地图';
-    var node = items[Math.max(0, Math.min(items.length - 1, section - 1))];
-    // 优先走 cc.Button 的 clickEvents（真正处理「花金币传送」的是它）
-    var btn = null;
-    try { btn = node.getComponent(cc.Button); } catch (e) { btn = null; }
+    if (!hit) return 'ERR 没找到地图「' + want + '」';
+    var btn = null; try { btn = hit.getComponent(cc.Button); } catch (e) { btn = null; }
     if (btn && btn.clickEvents && btn.clickEvents.length) {
       var ev = btn.clickEvents[0];
-      var target = ev.target || node;
+      var target = ev.target || hit;
       var comp = null;
       try { comp = ev.component ? target.getComponent(ev.component) : null; } catch (e) { comp = null; }
-      if (!comp) { comp = target; }
+      if (!comp) comp = target;
       var fn = comp && ev.handler ? comp[ev.handler] : null;
-      if (typeof fn === 'function') {
-        try { fn.call(comp, ev.customEventData || null); return 'ok'; } catch (e) { return 'ERR 触发失败：' + ((e && e.message) || e); }
-      }
+      if (typeof fn === 'function') { fn.call(comp, ev.customEventData || null); return 'ok'; }
     }
-    var done = false;
-    (node._components || []).forEach(function (c) {
-      var cls = '';
-      try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
-      if (cls === 'BPNN') {
-        try { c._onTouchBegan({}); c._onTouchEnded({}); } catch (e) { /* ignore */ }
-        try { node.emit('click'); } catch (e) { /* ignore */ }
-        done = true;
-      }
-    });
-    return done ? 'ok' : 'ERR 条目点不动';
+    return 'ERR 条目点不动';
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % (section,)
+""" % _js(name_part)
 
 
 def _js_teleport_unlocked(pairs: List[List[int]]) -> str:
@@ -931,12 +922,14 @@ class InstructionRunner:
             section_no = int(float(str(args[1]).strip()))
         except (TypeError, ValueError):
             chapter_no, section_no = 0, 0
-        if chapter_no and section_no:
-            ret = str(self._eval(_js_teleport_panel(chapter_no, section_no)) or "")
+        spot_name = str(candidates[0][1].get("name") or "")
+        area_name, _, map_name = spot_name.partition("-")
+        if area_name and map_name:
+            ret = str(self._eval(_js_teleport_panel(area_name)) or "")
             if ret == "ok" or ret.startswith("ok"):
-                self._log_line("    已点章节，等地图列表…")
-                self._sleep(0.6)
-                ret2 = str(self._eval(_js_teleport_panel_item(chapter_no, section_no)) or "")
+                self._log_line("    已点地区「%s」，等地图列表…" % area_name)
+                self._sleep(0.8)
+                ret2 = str(self._eval(_js_teleport_panel_item(map_name)) or "")
                 if ret2.startswith("ok"):
                     self._log_line("    已点地图，等加载…")
                     deadline = time.monotonic() + 25.0
