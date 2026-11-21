@@ -806,6 +806,11 @@ class InstructionRunner:
             (int(v.get("map_id")), int(v.get("teleport_id") or 0), str(v.get("name") or ""))
             for _k, v in candidates
         ]
+        # 已经在这张地图里就不用传送（有些地图的传送点没解锁，但人已经在图上）
+        if before_map and any(str(mid) == before_map for mid, _tid, _n in spots):
+            self._log_line("    已经在目标地图 %s，跳过传送" % before_map)
+            return
+
         started = False
         for spot_i, (mid, tid, spot_name) in enumerate(spots):
             if self._stop.is_set():
