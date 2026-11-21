@@ -79,13 +79,20 @@
     setStatus("正在连接游戏…");
   }
 
+  function floatStyle() {
+    var sw = window.innerWidth || screen.width || 360;
+    return {
+      top: "96px", left: String(Math.max(0, sw - 58)) + "px",
+      width: "50px", height: "50px",
+      background: "transparent", zindex: 999, bounce: "none", scalable: false
+    };
+  }
+
   function ensureFloat() {
     if (floatView) return floatView;
     try {
-      floatView = plus.webview.create("float.html", "zz_float", {
-        top: "96px", right: "8px", width: "50px", height: "50px",
-        background: "transparent", zindex: 999, bounce: "none", scalable: false
-      });
+      floatView = plus.webview.create("float.html", "zz_float", floatStyle());
+      try { floatView.setStyle(floatStyle()); } catch (e) { /* ignore */ }
     } catch (e) {
       floatView = null;
     }
@@ -95,6 +102,7 @@
   function showFloat() {
     var f = ensureFloat();
     if (f) {
+      try { f.setStyle(floatStyle()); } catch (e) { /* ignore */ }
       try { f.show(); } catch (e) { /* ignore */ }
     }
   }
@@ -103,13 +111,20 @@
     if (floatView) {
       try { floatView.hide(); } catch (e) { /* ignore */ }
     }
+    try {
+      var f2 = plus.webview.getWebviewById("zz_float");
+      if (f2) f2.hide();
+    } catch (e) { /* ignore */ }
   }
 
   // 游戏里点悬浮球 → 弹出辅助面板
   window.zzOpenAssist = function () {
+    // 先收掉悬浮球，否则它会盖在面板上吃掉点击
+    hideFloat();
     try {
       // 先把游戏 webview 藏起来，保证点击落在面板上（不藏会点不动）
       if (game) game.hide();
+      hideFloat();
       var launch = plus.webview.getLaunchWebview();
       if (launch) {
         try { launch.setStyle({ zindex: 20 }); } catch (e) { /* ignore */ }
