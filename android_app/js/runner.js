@@ -184,12 +184,26 @@
     if (args.length < 2) throw new Error("传送 需要「章节,地图」两个参数");
     var chapter = Math.round(num(args, 0, "章节"));
     var section = Math.round(num(args, 1, "地图"));
+    var continent = args.length > 2 && String(args[2]).trim() !== "" ? Math.round(num(args, 2, "大陆")) : null;
+    var table = window.ZZ_TELEPORT || {};
+    var prefix = chapter + "." + section + ".";
+    var keys = Object.keys(table).filter(function (k) { return k.indexOf(prefix) === 0; }).sort();
+    if (!keys.length) throw new Error("地图 " + chapter + "-" + section + " 还没收录传送点");
+    var pick = null;
+    if (continent !== null) {
+      var exact = prefix + continent;
+      pick = table[exact] || table[keys[0]];
+    } else {
+      pick = table[keys[0]];
+    }
+    if (!pick) throw new Error("地图 " + chapter + "-" + section + " 传送点数据缺失");
     var cfg = mapCfg();
     var world = (cfg.mc.holder || "VKXX");
     var api = (cfg.mc.teleport || "LUSS");
     var code = "(function(){try{var w=window['" + world + "'];if(!w)return 'ERR 游戏还没进地图';" +
       "var f=w['" + api + "'];if(typeof f!=='function')return 'ERR 游戏没有传送入口';" +
-      "f.call(w," + chapter + "," + section + ",function(){});return 'ok'}catch(e){return 'ERR '+e.message}})()";
+      "f.call(w," + Number(pick.map_id) + "," + Number(pick.teleport_id || 0) +
+      ",function(){});return 'ok'}catch(e){return 'ERR '+e.message}})()";
     var res = evalJs(code);
     if (String(res).indexOf("ERR") === 0) throw new Error(String(res));
     return sleep(900);
