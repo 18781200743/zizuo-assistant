@@ -795,31 +795,45 @@ class InstructionRunner:
         before = _state()
         before_map = str(before.get("map") or "")
 
-        def _send() -> None:
-            result = self._eval(_js_enter_map(mapping, map_id, teleport_id))
+        def _send(mid: int, tid: int) -> None:
+            result = self._eval(_js_enter_map(mapping, mid, tid))
             if str(result).startswith("ERR"):
                 raise RuntimeError("传送失败：%s" % str(result)[4:])
 
+        # 表里同一章/地图可能有多个大陆的传送点；未解锁的点游戏会静默拒绝，
+        # 所以按顺序一个个试，哪个能切图就用哪个（不再依赖解锁字段，字段会随版本变）。
+        spots = [
+            (int(v.get("map_id")), int(v.get("teleport_id") or 0), str(v.get("name") or ""))
+            for _k, v in candidates
+        ]
         started = False
-        for attempt in range(4):
-            _send()
-            start_deadline = time.monotonic() + 5.0
-            while time.monotonic() < start_deadline:
-                if self._stop.is_set():
-                    raise _Stopped()
-                time.sleep(0.3)
-                state = _state()
-                if state.get("loading") or state.get("done") or str(state.get("map")) != before_map:
-                    started = True
+        for spot_i, (mid, tid, spot_name) in enumerate(spots):
+            if self._stop.is_set():
+                raise _Stopped()
+            self._log_line("    传送 → %s（地图 %d，传送点 %d）" % (spot_name, mid, tid))
+            for attempt in range(2):
+                _send(mid, tid)
+                start_deadline = time.monotonic() + 4.0
+                while time.monotonic() < start_deadline:
+                    if self._stop.is_set():
+                        raise _Stopped()
+                    time.sleep(0.3)
+                    state = _state()
+                    if state.get("loading") or state.get("done") or str(state.get("map")) != before_map:
+                        started = True
+                        break
+                if started:
+                    map_id, teleport_id = mid, tid
                     break
+                if attempt == 0:
+                    self._log_line("    这个点没反应，再发一次")
+                    time.sleep(1.5)
             if started:
                 break
-            # 游戏传送有冷却：连续切图会被静默拒绝，隔几秒再发
-            if attempt < 3:
-                self._log_line("    传送还没响应，等 3 秒重试（%d/4）" % (attempt + 1))
-                time.sleep(3.0)
+            self._log_line("    这个传送点不可用（可能未解锁），换下一个")
+            time.sleep(1.0)
         if not started:
-            raise RuntimeError("传送失败：游戏没开始传送（可能正在战斗或过场）")
+            raise RuntimeError("传送失败：这一章所有传送点都没反应（可能都没解锁）")
 
         deadline = time.monotonic() + 35.0
         landed = False
