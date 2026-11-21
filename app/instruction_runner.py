@@ -404,21 +404,32 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius:
       ids = mgr[mc.members || 'YUWW'](team) || [];
     } catch (e) { /* ignore */ }
     var leader = ids.length ? core[mc.read || 'YVSZ'](ids[0]) : null;
-    var lx = leader ? leader.ADUX : 0;
-    var ly = leader ? leader.WUZI : 0;
+    var lpt = leader ? (leader[u.point || 'GUJG'] || {}) : {};
+    var lx = lpt.x !== undefined ? lpt.x : (leader ? (leader.ADUX || 0) : 0);
+    var ly = lpt.y !== undefined ? lpt.y : (leader ? (leader.WUZI || 0) : 0);
     var best = null;
     var visit = function (index, unit) {
       if (!unit) return false;
       var point = unit[u.point || 'YLYI'] || {};
+      var ux = point.x !== undefined ? point.x : unit.ADUX;
+      var uy = point.y !== undefined ? point.y : unit.WUZI;
+      if (!isFinite(ux) || !isFinite(uy)) return false;
       var name = String(point.name || '');
       var tag = String(unit[u.tag || 'CLRB'] || '');
       var text = (name + ' ' + tag).toLowerCase();
       var anyKind = words.indexOf('*') >= 0;
       var collectible = false;
-      try { collectible = typeof unit.QATG === 'function' && !!unit.QATG(); } catch (e) {}
+      try {
+        if (typeof unit.QATG === 'function') collectible = !!unit.QATG();
+        else collectible = !!(point.id || point.pointID || point.name);
+      } catch (e) {}
       if (!collectible) return false;
-      // 已经采完/被采掉的不要
-      try { if (typeof unit.AINJ === 'function' && unit.AINJ()) return false; } catch (e) {}
+      // 已经采完/被采掉的不要（旧名 AINJ，新名 KHGB / HCQJ / UMMW）
+      try {
+        if (typeof unit.AINJ === 'function') { if (unit.AINJ()) return false; }
+        else if (typeof unit.KHGB === 'function') { if (unit.KHGB()) return false; }
+        else if (unit.HCQJ === true || unit.UMMW === true) return false;
+      } catch (e) {}
       if (anyKind) {
         // 活动：无名字的可采实体就是活动采集物（实测 efdx=5115601~5115603，采到会进背包）；
         // 有名字的只排除日常资源（树/木/矿/灌木/草/肉/藤）。
@@ -432,13 +443,13 @@ def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius:
         var hit = words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
         if (!hit) return false;
       }
-      var d = Math.hypot(unit.ADUX - lx, unit.WUZI - ly);
+      var d = Math.hypot(ux - lx, uy - ly);
       // 超出角色附近范围的不采
       if (d > radius) return false;
       for (var i = 0; i < skip.length; i += 1) {
-        if (Math.hypot(unit.ADUX - skip[i][0], unit.WUZI - skip[i][1]) < 80) return false;
+        if (Math.hypot(ux - skip[i][0], uy - skip[i][1]) < 80) return false;
       }
-      if (!best || d < best.d) best = { x: unit.ADUX, y: unit.WUZI, d: d, nb: unit.NBDV, name: name || '活动采集物' };
+      if (!best || d < best.d) best = { x: ux, y: uy, d: d, nb: unit.NBDV, name: name || '活动采集物' };
       return false;
     };
     if (units && typeof units[mc.each || 'OOIV'] === 'function') units[mc.each || 'OOIV'](visit);
