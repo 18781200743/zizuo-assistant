@@ -384,6 +384,23 @@
     if (snap.action) setStatus(snap.action, "");
   }
 
+  var cmdTimer = null;
+  function cmdPoll() {
+    if (cmdTimer) clearTimeout(cmdTimer);
+    cmdTimer = setTimeout(function () {
+      var raw = evalGame("JSON.stringify(window.__zzRun?window.__zzRun.snapshot():null)");
+      var snap = null;
+      try { snap = JSON.parse(raw); } catch (e) { snap = null; }
+      var info = $("cmdInfo");
+      if (snap && info) {
+        info.textContent = snap.running
+          ? "运行中 " + snap.step + "/" + snap.total + "：" + (snap.text || "")
+          : (snap.error ? "出错：" + snap.error : (snap.total ? "已结束" : "选一条指令，点「运行」"));
+      }
+      if (snap && snap.running) cmdPoll();
+    }, 400);
+  }
+
   function numVal(id, fallback) {
     var el = $(id);
     var v = el ? Number(el.value) : NaN;
@@ -588,6 +605,56 @@
     if (gStop) gStop.onclick = function () {
       evalGame("(window.__zzGacha&&window.__zzGacha.stop)?window.__zzGacha.stop():'ok'");
       gachaStats();
+    };
+
+    // ---------- 运行指令 ----------
+    var cmdSel = $("cmdSel");
+    if (cmdSel && window.ZZ_INSTRUCTIONS) {
+      window.ZZ_INSTRUCTIONS.forEach(function (it, idx) {
+        var op = document.createElement("option");
+        op.value = String(idx);
+        op.textContent = it.title || ("指令 " + (idx + 1));
+        cmdSel.appendChild(op);
+      });
+      cmdSel.onchange = function () {
+        var it = window.ZZ_INSTRUCTIONS[Number(cmdSel.value)] || null;
+        var box = $("cmdText");
+        if (box) box.textContent = it ? it.content : "";
+      };
+      if (window.ZZ_INSTRUCTIONS.length) {
+        cmdSel.value = "0";
+        var box0 = $("cmdText");
+        if (box0) box0.textContent = window.ZZ_INSTRUCTIONS[0].content;
+      }
+    }
+
+    function cmdCall(code) {
+      var raw = evalGame(code);
+      var msg = "";
+      try { var o = JSON.parse(unquote(raw)); msg = (o && (o.message || o.error)) || ""; } catch (e) { msg = ""; }
+      return msg || String(raw || "");
+    }
+
+    var cmdRun = $("cmdRun");
+    if (cmdRun) cmdRun.onclick = function () {
+      var it = window.ZZ_INSTRUCTIONS && window.ZZ_INSTRUCTIONS[Number(cmdSel.value)];
+      if (!it) { setInfo("先选一条指令"); return; }
+      evalGame("window.__zzRunMapping=" + JSON.stringify(window.ZZ_MAPPING || { builds: {} }) +
+        ";window.__zzRunMove=" + JSON.stringify(window.ZZ_RUN_MOVE || {}) + ";");
+      var msg = cmdCall("JSON.stringify((function(){try{window.__zzRun.run(" +
+        JSON.stringify(it.content) + ");return {ok:true,message:'已开始：' + " + JSON.stringify(it.title) + "};}" +
+        "catch(e){return {ok:false,message:(e&&e.message)||String(e)}}})())");
+      setInfo(msg);
+      var info = $("cmdInfo");
+      if (info) info.textContent = msg;
+      cmdPoll();
+    };
+
+    var cmdStop = $("cmdStop");
+    if (cmdStop) cmdStop.onclick = function () {
+      evalGame("(window.__zzRun&&window.__zzRun.stop)?(window.__zzRun.stop(),'ok'):'ok'");
+      var info = $("cmdInfo");
+      if (info) info.textContent = "已停止";
     };
 
     var cats = [

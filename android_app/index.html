@@ -168,6 +168,12 @@
     body.day .hero { background: #f7f9fc; border-color: #d6deea; color: #1f2937; }
     body.day .hero.red { background: #fdecea; border-color: #e7b6b0; color: #b3261e; }
 
+    .cmdtext {
+      margin: 8px 0 0; padding: 10px; border-radius: 10px; max-height: 180px; overflow: auto;
+      background: rgba(6,14,26,.75); border: 1px solid rgba(90,120,180,.35);
+      color: #cfe3ff; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+    }
+    body.day .cmdtext { background: #f7f9fc; border-color: #dfe6f2; color: #374151; }
     .row { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
     .row span { font-size: 14px; color: #e9e5ff; flex: 0 0 auto; }
     .row .muted { color: #b9b3d6; font-size: 13px; }
@@ -372,7 +378,16 @@
       </div>
       <div class="info" id="gStats">总次数 0 · 红出现 0 · 消耗 0</div>
     </div>
-    <div class="sec not-yet" id="secCmd">安卓版暂不支持「运行指令」，请用电脑版</div>
+    <div class="sec" id="secCmd">
+      <div class="sec-title">运行指令</div>
+      <select class="num sel" id="cmdSel" style="width:100%;margin-bottom:8px"></select>
+      <div class="row">
+        <button class="btn" id="cmdRun">运行</button>
+        <button class="btn danger" id="cmdStop">停止</button>
+      </div>
+      <div class="info" id="cmdInfo">选一条指令，点「运行」</div>
+      <pre class="cmdtext" id="cmdText"></pre>
+    </div>
 
     <div class="info" id="info">—</div>
   </div>
@@ -390,6 +405,9 @@
   <script src="js/mapping.js"></script>
   <script src="js/renames.js"></script>
   <script src="js/runtime.js"></script>
+  <script src="js/instructions.js"></script>
+  <script src="js/runner.js"></script>
+  <script>window.ZZ_RUN_MOVE = { cx: 50, cy: 78, r: 8 };</script>
   <script src="js/gacha.js"></script>
   <script src="js/app.js"></script>
   <script>
