@@ -313,6 +313,100 @@ def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
 """ % (_js_chest_service(), _js(str(cfg)), _js(str(uid)), int(mult))
 
 
+def _js_teleport_panel(chapter: int, section: int) -> str:
+    """面板点击式传送：传送面板已经打开时，点章节页签 + 地图条目。
+
+    不依赖 map_id / point_id（这两个编号每个版本都会变）。
+    返回：'ok' 已点完 / 'ERR xxx'
+    """
+    return r"""
+(function () {
+  try {
+    var cc = window.cc;
+    if (!cc || !cc.director) return 'ERR 游戏还没就绪';
+    var scene = cc.director.getScene();
+    var root = null;
+    (function walk(n, d) {
+      if (!n || root || d > 30) return;
+      if (String(n.name || '') === 'TeleportSelectView') { root = n; return; }
+      (n.children || []).forEach(function (k) { walk(k, d + 1); });
+    })(scene, 0);
+    if (!root) return 'ERR 请先打开游戏里的传送面板';
+    var chapter = %d, section = %d;
+    function clickNode(n) {
+      var done = false;
+      (n._components || []).forEach(function (c) {
+        var cls = '';
+        try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
+        if (cls === 'BPNN') {
+          try { c._onTouchBegan({}); c._onTouchEnded({}); } catch (e) { /* ignore */ }
+          try { n.emit('click'); } catch (e) { /* ignore */ }
+          done = true;
+        }
+      });
+      return done;
+    }
+    // 章节页签：TeleportTypePageItemView-00X（从 1 开始）
+    var tabs = [];
+    (function walk2(n) {
+      var nm = String(n.name || '');
+      if (nm.indexOf('TeleportTypePageItemView') === 0) tabs.push(n);
+      (n.children || []).forEach(walk2);
+    })(root);
+    var numOf = function (n) {
+      var m = /-(\d+)$/.exec(String(n.name || ''));
+      return m ? parseInt(m[1], 10) : 0;
+    };
+    tabs = tabs.filter(function (n) { return numOf(n) > 0; });
+    tabs.sort(function (a, b) { return numOf(a) - numOf(b); });
+    if (!tabs.length) return 'ERR 面板里没有章节页签';
+    var tab = tabs[Math.max(0, Math.min(tabs.length - 1, chapter - 1))];
+    clickNode(tab);
+    // 等一帧再点地图条目（列表要重建）
+    return 'WAIT:' + chapter + ':' + section;
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % (chapter, section)
+
+
+def _js_teleport_panel_item(chapter: int, section: int) -> str:
+    """点章节之后，点第 section 个地图条目。"""
+    return r"""
+(function () {
+  try {
+    var cc = window.cc;
+    var scene = cc.director.getScene();
+    var root = null;
+    (function walk(n, d) {
+      if (!n || root || d > 30) return;
+      if (String(n.name || '') === 'TeleportSelectView') { root = n; return; }
+      (n.children || []).forEach(function (k) { walk(k, d + 1); });
+    })(scene, 0);
+    if (!root) return 'ERR 传送面板不见了';
+    var section = %d;
+    var items = [];
+    (function walk2(n) {
+      if (String(n.name || '') === 'TeleportSelectItemView') items.push(n);
+      (n.children || []).forEach(walk2);
+    })(root);
+    if (!items.length) return 'ERR 这个章节还没有可点的地图';
+    var node = items[Math.max(0, Math.min(items.length - 1, section - 1))];
+    var done = false;
+    (node._components || []).forEach(function (c) {
+      var cls = '';
+      try { cls = cc.js.getClassName(c) || ''; } catch (e) { cls = ''; }
+      if (cls === 'BPNN') {
+        try { c._onTouchBegan({}); c._onTouchEnded({}); } catch (e) { /* ignore */ }
+        try { node.emit('click'); } catch (e) { /* ignore */ }
+        done = true;
+      }
+    });
+    return done ? 'ok' : 'ERR 条目点不动';
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % (section,)
+
+
 def _js_teleport_unlocked(pairs: List[List[int]]) -> str:
     """查每个传送点是否已解锁（csd_fuwu.csd_moxingBiao 里的 csd_yijiesuo）。"""
     return r"""
@@ -817,6 +911,36 @@ class InstructionRunner:
             (int(v.get("map_id")), int(v.get("teleport_id") or 0), str(v.get("name") or ""))
             for _k, v in candidates
         ]
+        # 面板点击式传送（传送面板开着时优先用这个，不依赖会变的 map_id/point_id）
+        try:
+            chapter_no = int(float(str(args[0]).strip()))
+            section_no = int(float(str(args[1]).strip()))
+        except (TypeError, ValueError):
+            chapter_no, section_no = 0, 0
+        if chapter_no and section_no:
+            ret = str(self._eval(_js_teleport_panel(chapter_no, section_no)) or "")
+            if ret == "ok" or ret.startswith("ok"):
+                self._log_line("    已点章节，等地图列表…")
+                self._sleep(0.6)
+                ret2 = str(self._eval(_js_teleport_panel_item(chapter_no, section_no)) or "")
+                if ret2.startswith("ok"):
+                    self._log_line("    已点地图，等加载…")
+                    deadline = time.monotonic() + 25.0
+                    while time.monotonic() < deadline:
+                        if self._stop.is_set():
+                            raise _Stopped()
+                        time.sleep(0.5)
+                        st = _state()
+                        if not st.get("loading") and str(st.get("map")) != before_map:
+                            self._log_line("    传送完成（地图 %s）" % st.get("map"))
+                            self._sleep(0.8)
+                            return
+                    self._log_line("    面板点了，但地图没变，改走接口传送")
+                else:
+                    self._log_line("    %s" % ret2)
+            else:
+                self._log_line("    %s，改走接口传送" % ret)
+
         # 已经在这张地图里就不用传送（有些地图的传送点没解锁，但人已经在图上）
         if before_map and any(str(mid) == before_map for mid, _tid, _n in spots):
             self._log_line("    已经在目标地图 %s，跳过传送" % before_map)
