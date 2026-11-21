@@ -391,6 +391,20 @@ def _js_teleport_panel_item(chapter: int, section: int) -> str:
     })(root);
     if (!items.length) return 'ERR 这个章节还没有可点的地图';
     var node = items[Math.max(0, Math.min(items.length - 1, section - 1))];
+    // 优先走 cc.Button 的 clickEvents（真正处理「花金币传送」的是它）
+    var btn = null;
+    try { btn = node.getComponent(cc.Button); } catch (e) { btn = null; }
+    if (btn && btn.clickEvents && btn.clickEvents.length) {
+      var ev = btn.clickEvents[0];
+      var target = ev.target || node;
+      var comp = null;
+      try { comp = ev.component ? target.getComponent(ev.component) : null; } catch (e) { comp = null; }
+      if (!comp) { comp = target; }
+      var fn = comp && ev.handler ? comp[ev.handler] : null;
+      if (typeof fn === 'function') {
+        try { fn.call(comp, ev.customEventData || null); return 'ok'; } catch (e) { return 'ERR 触发失败：' + ((e && e.message) || e); }
+      }
+    }
     var done = false;
     (node._components || []).forEach(function (c) {
       var cls = '';
