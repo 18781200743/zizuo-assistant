@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 13
+GACHA_VERSION = 14
 
 GACHA_JS = r"""
 (() => {
@@ -452,7 +452,8 @@ GACHA_JS = r"""
       .then(step)
       .catch(cause => {
         state.error = msgOf(cause);
-        state.action = '抽卡异常：' + state.error;
+        // 金币不足、接口失败等异常：直接停掉，避免继续空转/刷请求
+        stop('抽卡异常：' + state.error);
       })
       .then(() => {
         state.refreshing = false;

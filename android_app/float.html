@@ -20,15 +20,36 @@
 <body>
   <div class="wrap"><button class="fab" id="fab">助手</button></div>
   <script>
-    document.getElementById("fab").addEventListener("click", function () {
-      try {
-        var main = plus.webview.getLaunchWebview();
-        if (main) {
-          main.evalJS("window.zzOpenAssist && window.zzOpenAssist()");
+    (function () {
+      function openAssist() {
+        try {
+          var main = plus.webview.getLaunchWebview();
+          if (main) main.evalJS("window.zzOpenAssist && window.zzOpenAssist()");
+        } catch (e) { /* ignore */ }
+        try { plus.webview.currentWebview().hide(); } catch (e) { /* ignore */ }
+      }
+
+      function bind() {
+        var fab = document.getElementById("fab");
+        if (!fab) return;
+        var last = 0;
+        function tap(event) {
+          var now = Date.now();
+          if (now - last < 500) return;
+          last = now;
+          if (event) {
+            try { event.preventDefault(); } catch (e) { /* ignore */ }
+          }
+          openAssist();
         }
-      } catch (e) { /* ignore */ }
-      try { plus.webview.currentWebview().hide(); } catch (e) { /* ignore */ }
-    }, false);
+        fab.addEventListener("click", tap, false);
+        fab.addEventListener("touchend", tap, { passive: false });
+      }
+
+      if (window.plus && window.plus.webview) bind();
+      else document.addEventListener("plusready", bind, false);
+    })();
   </script>
+
 </body>
 </html>

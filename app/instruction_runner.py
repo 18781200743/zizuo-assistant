@@ -1,56 +1,62 @@
-"""运行指令：把「指令脚本」逐行发给游戏页执行。
+"""运行命令：把「指令脚本」逐行发给游戏页执行。
 
-指令语言来自参考工具（一行一条，例如 传送(3,2) / 移动(上,3) / 采集(活动) / 回城()）。
+指令语言和 game_storage_sync 的「自定义指令」一致，一行一条，例如：
+    传送(3,2) / 移动(上,3) / 移动(15.0,1.5) / 采集(活动) / 回城()
 
-已支持：
-    等待(秒) / 停止() / 点击(X,Y) / 滚轮(方向,量,X,Y) / 移动(方向,秒) / 回城() / 传送(章节,地图[,大陆])
-实验性：
-    采集(物品)  —— 找到最近的资源点，瞬移过去等游戏自己采集
-暂未支持：
-    开宝箱(...) / 跳转(槽位)
+支持：
+    移动(方向或角度,秒) / 等待(秒) / 点击(X%,Y%) / 滚轮(方向,量[,X%,Y%])
+    传送(章节,地图[,大陆]) / 回城() / 采集(物品) / 开宝箱([个数][,普通|双倍]) / 停止()
+只做执行核心（单脚本）：跳转(槽位) 需要多槽位，暂不支持。
 """
 
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from .instruction_library import ScriptError, library_instructions, load_library, parse_script
+from .instruction_library import ScriptError, parse_script
+from .commands_store import SLOT_COUNT
+from .chest_4758a import run_chest_4758a
 
-DIRECTIONS: Dict[str, tuple] = {
-    "上": (0.0, -1.0),
-    "下": (0.0, 1.0),
-    "左": (-1.0, 0.0),
-    "右": (1.0, 0.0),
-    "左上": (-0.7071, -0.7071),
-    "右上": (0.7071, -0.7071),
-    "左下": (-0.7071, 0.7071),
-    "右下": (0.7071, 0.7071),
+# 和 game_storage_sync 一致：方向名对应的角度（0=上，顺时针）
+DIRECTION_ANGLES: Dict[str, float] = {
+    "上": 0.0,
+    "右上": 45.0,
+    "右": 90.0,
+    "右下": 135.0,
+    "下": 180.0,
+    "左下": 225.0,
+    "左": 270.0,
+    "左上": 315.0,
 }
 
-# 采集关键字（和参考工具的说明一致；游戏里的资源点名是「火龙岛红树」「蓝矿」这种）
+# 采集按“掉落物品名”匹配（和参考工具一致）。
+# 注意：这里写的是背包物品名，不是地图上的资源点名。
 COLLECT_KEYWORDS = {
-    "木材": ("红树", "树", "木头", "木材", "木"),
-    "矿石": ("矿",),
-    "蓝矿石": ("蓝矿",),
-    "红矿石": ("红矿",),
+    "木材": ("木材", "木头", "木"),
+    "矿石": ("蓝矿石", "红矿石", "矿石", "矿"),
+    "蓝矿石": ("蓝矿石", "蓝矿"),
+    "红矿石": ("红矿石", "红矿"),
     "彩矿": ("彩矿", "矿石"),
     "宝石": ("宝石",),
     "幸运草": ("幸运草",),
     "训练石": ("训练石",),
-    "肉块": ("肉",),
+    "肉块": ("肉块", "肉"),
     "活动": ("*",),
 }
 
-# 「日常那种」资源：树、木头、矿、灌木、草、肉、藤。
-# 采集(活动) 会把它们排除掉，只采活动专属的采集物（宝箱、光球、活动道具等）。
-DAILY_RESOURCE_WORDS = ("树", "木", "矿", "灌木", "草", "肉", "藤", "仙人掌")
+# 采集(活动) 只看“不是日常资源”的掉落，和参考工具的判断一致。
+DAILY_DROP_WORDS = ("宝石", "训练石", "幸运草", "彩矿", "矿石", "木材", "肉块", "金币", "钻石")
 
-# 采集(活动) 只在角色周围这个半径内找（游戏坐标）；找不到就原地不动，不为了采一棵树飞很远。
-DEFAULT_COLLECT_RADIUS = 900
+# 参考工具：英雄停止采集/打怪 5 秒后收口；这里最多等 15 秒，避免脚本卡住。
+COLLECT_IDLE_MS = 5000
+COLLECT_MAX_WAIT = 15.0
+# 允许把“上一条移动步骤里已经开始、刚结算完”的采集算进来。
+COLLECT_LOOKBACK_MS = 15000
 
 
 def _config_path() -> Path:
@@ -68,11 +74,19 @@ def _js(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def with_current_build(mapping: Dict[str, Any]) -> Dict[str, Any]:
-    """映射表里没写 current 时，默认用第一个 build（目前只有 f61cf）。"""
+def with_current_build(mapping: Dict[str, Any], build: Optional[str] = None) -> Dict[str, Any]:
+    """确定当前使用哪个 build 的映射；没有对应 build 就明确报“未适配”。"""
     data = dict(mapping or {})
     builds = data.get("builds") or {}
-    if "current" not in data and builds:
+    if build:
+        if build not in builds:
+            raise ScriptError(
+                "游戏版本 %s 未适配运行命令（映射里没有这个 build），请先更新字段映射" % build
+            )
+        data["current"] = build
+    elif "current" not in data:
+        if not builds:
+            raise ScriptError("没有可用的游戏版本映射")
         data["current"] = sorted(builds.keys())[0]
     return data
 
@@ -156,7 +170,30 @@ JS_INSTALL = r"""
 
 
 def _js_home(mapping: Dict[str, Any]) -> str:
-    """回城：走游戏自己的返回点（营地坐标 TCLA/CLAT）。"""
+    """回城：和 exe 一样调用游戏原生地图传送回主城（默认 1,1）。"""
+    return r"""
+(function () {
+  try {
+    var m = %s;
+    var b = (m.builds || {})[m.current] || {};
+    var mc = b.map || {};
+    var world = window[mc.holder || 'VKXX'];
+    if (!world) return 'ERR 游戏还没进地图';
+    var api = mc.teleport || 'LUSS';
+    if (typeof world[api] !== 'function') return 'ERR 游戏没有传送入口（' + api + '）';
+    var rn = b.runtimeNames || {};
+    var leave = rn.MEMK || 'MEMK';
+    try { if (typeof world[leave] === 'function') world[leave](); } catch (e) { /* 没有就算了 */ }
+    window.__zzHome = { done: false, at: Date.now(), map: 1 };
+    world[api](1, 1, function () { window.__zzHome.done = true; });
+    return 'ok 1,1';
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % _js(mapping)
+
+
+def _js_home_camp(mapping: Dict[str, Any]) -> str:
+    """旧版回城：传送到本图营地坐标（读取 TCLA/CLAT 或新版本名）。"""
     return r"""
 (function () {
   try {
@@ -166,7 +203,7 @@ def _js_home(mapping: Dict[str, Any]) -> str:
     var ct = rev.campTeleport || {};
     var names = ct.campCoords || ['TCLA', 'CLAT'];
     var world = window[(b.map || {}).holder || 'VKXX'];
-    var core = world[(b.map || {}).core || 'ZRRU'];
+    var core = world && world[(b.map || {}).core || 'ZRRU'];
     if (!world || !core) return 'ERR 游戏还没进地图';
     var spot = null;
     for (var i = 0; i < names.length; i += 1) {
@@ -179,10 +216,34 @@ def _js_home(mapping: Dict[str, Any]) -> str:
       } catch (e) { /* 换下一个 */ }
     }
     if (!spot) return 'ERR 读不到营地坐标';
-    if (typeof world.ZAVH !== 'function') return 'ERR 游戏没有传送入口';
-    world.ZAVH(spot.x, spot.y, true, function () {});
+    var rn = b.runtimeNames || {};
+    var leave = rn.MEMK || 'MEMK';
+    try { if (typeof world[leave] === 'function') world[leave](); } catch (e) { /* 没有就算了 */ }
+    var api = ct.api || rn.ZAVH || 'ZAVH';
+    if (typeof world[api] !== 'function') return 'ERR 游戏没有传送入口（' + api + '）';
+    window.__zzHome = { done: false, at: Date.now() };
+    world[api](spot.x, spot.y, true, function () { window.__zzHome.done = true; });
     return 'ok ' + Math.round(spot.x) + ',' + Math.round(spot.y);
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
+})()
+""" % _js(mapping)
+
+
+def _js_home_state(mapping: Dict[str, Any]) -> str:
+    return r"""
+(function () {
+  try {
+    var m = %s;
+    var b = (m.builds || {})[m.current] || {};
+    var mc = b.map || {};
+    var world = window[mc.holder || 'VKXX'];
+    var st = world && world[mc.state || 'AGDA'];
+    return JSON.stringify({
+      done: !!(window.__zzHome && window.__zzHome.done),
+      loading: !!(st && st[mc.loading || 'MAOP']),
+      map: String(st ? st[mc.mapId || 'POMD'] : '')
+    });
+  } catch (e) { return '{}'; }
 })()
 """ % _js(mapping)
 
@@ -207,54 +268,24 @@ def _js_enter_map(mapping: Dict[str, Any], map_id: int, teleport_id: int) -> str
 """ % (_js(mapping), int(map_id), int(teleport_id), int(map_id), int(teleport_id))
 
 
-def _js_teleport_point(mapping: Dict[str, Any], teleport_id: int) -> str:
-    """在当前地图里找 pointID == teleport_id 的传送点，瞬移过去。"""
-    return r"""
-(function () {
-  try {
-    var m = %s;
-    var b = (m.builds || {})[m.current] || {};
-    var mc = b.map || {};
-    var u = mc.unit || {};
-    var world = window[mc.holder || 'VKXX'];
-    var core = world[mc.core || 'ZRRU'];
-    var mgr = core[mc.manager || 'PFTN']();
-    var best = null;
-    var collect = function (index, unit) {
-      if (!unit) return false;
-      var point = unit[u.point || 'YLYI'] || {};
-      if (String(point.pointID) === %s) {
-        best = { x: unit.ADUX, y: unit.WUZI, name: String(point.name || '') };
-        return true;
-      }
-      return false;
-    };
-    var mgr = core[mc.manager || 'PFTN']();
-    var units = mgr[mc.container || 'UFYI']();
-    if (units && typeof units[mc.each || 'OOIV'] === 'function') {
-      units[mc.each || 'OOIV'](collect);
-    }    if (!best) return 'none';
-    if (typeof world.ZAVH !== 'function') return 'ERR 游戏没有传送入口';
-    world.ZAVH(best.x, best.y, false, function () {});
-    return 'ok ' + best.name;
-  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
-})()
-""" % (_js(mapping), _js(str(teleport_id)))
-
-
-def _js_chest_service() -> str:
-    """宝箱服务 = 模块服务容器 HQQD 里的 HDPD（实测）。"""
+def _js_chest_service(mapping: Dict[str, Any]) -> str:
+    """宝箱服务：从映射里取服务容器/世界/服务名，不再写死。"""
+    b = (((mapping or {}).get("builds") or {}).get((mapping or {}).get("current") or "") or {})
+    chest = b.get("chest") or {}
+    holder = str(chest.get("holder") or "HQQD")
+    world_name = str(chest.get("world") or (b.get("map") or {}).get("holder") or "VKXX")
+    service = str(chest.get("service") or "HDPD")
     return r"""
 (function () {
   for (var pair of window.System.entries()) {
     var ex = pair[1];
     if (!ex || typeof ex !== 'object') continue;
-    var gen = ex.HQQD;
-    if (gen && gen.VKXX && gen.HDPD) return gen.HDPD;
+    var gen = ex[%s];
+    if (gen && gen[%s] && gen[%s]) return gen[%s];
   }
   return null;
 })()
-"""
+""" % (_js(holder), _js(world_name), _js(service), _js(service))
 
 
 def _js_chest_targets(mapping: Dict[str, Any]) -> str:
@@ -279,7 +310,7 @@ def _js_chest_targets(mapping: Dict[str, Any]) -> str:
       var text = name.toLowerCase();
       var hit = words.some(function (w) { return text.indexOf(w) >= 0; });
       if (!hit) return false;
-      rows.push({cfg: String(unit[u.configId || 'EFDX']), uid: String(unit.PLVT), name: name});
+      rows.push({cfg: String(unit[u.configId || 'EFDX']), uid: String(unit[u.entity || 'PLVT']), name: name});
       return false;
     });
     return JSON.stringify(rows);
@@ -288,7 +319,12 @@ def _js_chest_targets(mapping: Dict[str, Any]) -> str:
 """ % _js(mapping)
 
 
-def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
+def _js_chest_claim(mapping: Dict[str, Any], cfg: str, uid: str, mult: int) -> str:
+    b = (((mapping or {}).get("builds") or {}).get((mapping or {}).get("current") or "") or {})
+    chest = b.get("chest") or {}
+    pre = str(chest.get("preCall") or "DELV")
+    claim = str(chest.get("claim") or "KMYW")
+    finish = str(chest.get("finish") or "IVTK")
     return r"""
 (function () {
   try {
@@ -297,9 +333,9 @@ def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
     window.__zzClaim = {s: 'pending'};
     var cfg = %s, uid = %s, mult = %d;
     Promise.resolve()
-      .then(function () { return chest.DELV(cfg); })
-      .then(function () { return chest.KMYW(cfg, mult, true, uid, 0); })
-      .then(function () { return chest.IVTK(cfg, mult, true); })
+      .then(function () { return chest[%s](cfg); })
+      .then(function () { return chest[%s](cfg, mult, true, uid, 0); })
+      .then(function () { return chest[%s](cfg, mult, true); })
       .then(function (r) {
         var text = JSON.stringify(r) || '';
         var bad = text.indexOf('Err') >= 0 || text.indexOf('claimed') >= 0;
@@ -310,7 +346,11 @@ def _js_chest_claim(cfg: str, uid: str, mult: int) -> str:
     return 'called';
   } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
-""" % (_js_chest_service(), _js(str(cfg)), _js(str(uid)), int(mult))
+""" % (
+        _js_chest_service(mapping), _js(str(cfg)), _js(str(uid)), int(mult),
+        _js(pre), _js(claim), _js(finish),
+    )
+
 
 
 def _js_teleport_panel(name_prefix: str) -> str:
@@ -412,166 +452,252 @@ def _js_teleport_panel_item(name_part: str) -> str:
 """ % _js(name_part)
 
 
-def _js_teleport_unlocked(pairs: List[List[int]]) -> str:
-    """查每个传送点是否已解锁（csd_fuwu.csd_moxingBiao 里的 csd_yijiesuo）。"""
-    return r"""
-(function () {
-  try {
-    var gen = null;
-    for (var pair of window.System.entries()) {
-      var ex = pair[1];
-      if (ex && typeof ex === 'object' && ex.HQQD && ex.HQQD.VKXX) { gen = ex.HQQD; break; }
-    }
-    if (!gen || !gen.OXIA) return '{}';
-    var table = gen.OXIA.OTWF;
-    if (!table || typeof table.get !== 'function') return '{}';
-    var out = {};
-    var list = %s;
-    for (var i = 0; i < list.length; i += 1) {
-      var mapId = list[i][0], pointId = list[i][1];
-      var key = mapId + '.' + pointId;
-      try {
-        var points = table.get(mapId);
-        var point = points && points.get ? points.get(pointId) : null;
-        out[key] = point ? !!point.KFUG : null;
-      } catch (e) { out[key] = null; }
-    }
-    return JSON.stringify(out);
-  } catch (e) { return '{}'; }
-})()
-""" % _js(pairs)
+def _js_collect_watch(mapping: Dict[str, Any]) -> str:
+    """在采集事件分发器上挂一个只读监听，记录游戏自己采到的掉落。
 
-
-def _js_collect_state(entity: Any) -> str:
-    """采到没有：按目标实体自己的状态判断（采掉后 AINJ 变真，或者实体直接消失）。
-
-    不要用「事件计数」判断：映射里的 OHLC 是世界同步回调，每秒会触发好几次，
-    之前日志里的「采到 24 次」其实是同步次数，跟采集无关（实测踩坑）。
+    和 game_storage_sync 一样：采集指令不寻路、不瞬移，只等游戏自己采集；
+    这里额外把事件缓存下来，方便“移动 → 采集”这种脚本把移动途中采到的算进来。
     """
-    return r"""
-(function () {
-  try {
-    var NB = %s;
-    var c = window.VKXX.ZRRU;
-    var mgr = c.PFTN();
-    var units = mgr.UFYI();
-    var hit = null;
-    units.OOIV(function (i, u) {
-      if (!u) return false;
-      if (u.NBDV === NB) { hit = u; return true; }
-      return false;
-    });
-    if (!hit) return 'gone';
-    var dead = false, collectible = true;
-    try { dead = !!hit.AINJ(); } catch (e) {}
-    try { collectible = typeof hit.QATG === 'function' ? !!hit.QATG() : true; } catch (e) {}
-    if (!collectible) return 'gone';
-    return dead ? 'dead' : 'alive';
-  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
-})()
-""" % _js(entity)
-
-
-def _js_collect_target(keyword: str, skip: Optional[List[tuple]] = None, radius: float = DEFAULT_COLLECT_RADIUS) -> str:
-    """在角色附近找资源点（按名字关键字），返回坐标（不瞬移）。
-
-    - 只找半径 radius 以内的，远的不去（避免为了采一棵树满地图飞）。
-    - 关键字是「活动」时排除日常资源（树/木/矿/灌木/草/肉/藤），只认活动专属采集物。
-    - 已经采过的（AINJ 为真）直接跳过。
-    """
-    words = list(COLLECT_KEYWORDS.get(keyword, (keyword,)))
-    is_activity = "*" in words
-    return r"""
-(function () {
-  try {
-    var words = %s;
-    var skip = %s;
-    var radius = %s;
-    var daily = %s;
-    var m = window.__zzAssistMapping || { builds: {} };
-    var b = (m.builds || {})[m.current] || {};
-    var mc = b.map || {};
-    var u = mc.unit || {};
-    var world = window[mc.holder || 'VKXX'];
-    var core = world[mc.core || 'ZRRU'];
-    var units = null;
-    var ids = [];
-    try {
-      var mgr = core[mc.manager || 'PFTN']();
-      units = mgr[mc.container || 'UFYI']();
-      var team = core[mc.team || 'PMMA'](world[mc.player || 'KBVD']);
-      ids = mgr[mc.members || 'YUWW'](team) || [];
-    } catch (e) { /* ignore */ }
-    var leader = ids.length ? core[mc.read || 'YVSZ'](ids[0]) : null;
-    var lpt = leader ? (leader[u.point || 'GUJG'] || {}) : {};
-    var lx = lpt.x !== undefined ? lpt.x : (leader ? (leader.ADUX || 0) : 0);
-    var ly = lpt.y !== undefined ? lpt.y : (leader ? (leader.WUZI || 0) : 0);
-    var best = null;
-    var visit = function (index, unit) {
-      if (!unit) return false;
-      var point = unit[u.point || 'YLYI'] || {};
-      var ux = point.x !== undefined ? point.x : unit.ADUX;
-      var uy = point.y !== undefined ? point.y : unit.WUZI;
-      if (!isFinite(ux) || !isFinite(uy)) return false;
-      var name = String(point.name || '');
-      var tag = String(unit[u.tag || 'CLRB'] || '');
-      var text = (name + ' ' + tag).toLowerCase();
-      var anyKind = words.indexOf('*') >= 0;
-      var collectible = false;
-      try {
-        if (typeof unit.QATG === 'function') collectible = !!unit.QATG();
-        else collectible = !!(point.id || point.pointID || point.name);
-      } catch (e) {}
-      if (!collectible) return false;
-      // 已经采完/被采掉的不要（旧名 AINJ，新名 KHGB / HCQJ / UMMW）
-      try {
-        if (typeof unit.AINJ === 'function') { if (unit.AINJ()) return false; }
-        else if (typeof unit.KHGB === 'function') { if (unit.KHGB()) return false; }
-        else if (unit.HCQJ === true || unit.UMMW === true) return false;
-      } catch (e) {}
-      if (anyKind) {
-        // 活动：无名字的可采实体就是活动采集物（实测 efdx=5115601~5115603，采到会进背包）；
-        // 有名字的只排除日常资源（树/木/矿/灌木/草/肉/藤）。
-        if (name) {
-          for (var j = 0; j < daily.length; j += 1) {
-            if (text.indexOf(String(daily[j])) >= 0) return false;
-          }
-        }
-      } else {
-        if (!name) return false;
-        var hit = words.some(function (w) { return text.indexOf(String(w).toLowerCase()) >= 0; });
-        if (!hit) return false;
-      }
-      var d = Math.hypot(ux - lx, uy - ly);
-      // 超出角色附近范围的不采
-      if (d > radius) return false;
-      for (var i = 0; i < skip.length; i += 1) {
-        if (Math.hypot(ux - skip[i][0], uy - skip[i][1]) < 80) return false;
-      }
-      if (!best || d < best.d) best = { x: ux, y: uy, d: d, nb: unit.NBDV, name: name || '活动采集物' };
-      return false;
-    };
-    if (units && typeof units[mc.each || 'OOIV'] === 'function') units[mc.each || 'OOIV'](visit);
-    if (!best) return 'none';
-    return JSON.stringify({name: best.name, x: Math.round(best.x), y: Math.round(best.y), nb: best.nb});
-  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
-})()
-""" % (_js(words), _js(skip or []), _js(float(radius)), _js(list(DAILY_RESOURCE_WORDS)))
-
-
-def _js_map_state(mapping: Dict[str, Any]) -> str:
     return r"""
 (function () {
   try {
     var m = %s;
     var b = (m.builds || {})[m.current] || {};
     var mc = b.map || {};
+    var ct = b.collect || {};
     var world = window[mc.holder || 'VKXX'];
-    var st = world[mc.state || 'AGDA'];
-    return String(st ? st[mc.mapId || 'POMD'] : '');
-  } catch (e) { return ''; }
+    var core = world && world[mc.core || 'ZRRU'];
+    if (!core) return 'ERR 游戏还没进地图';
+    var q = core[ct.queue || 'YHST'];
+    var holder = q && typeof q === 'function' ? q.call(core) : null;
+    var bus = holder && holder[ct.dispatch || 'KCQB'];
+    var entry = ct.entry || 'PZQH';
+    if (!bus || typeof bus[entry] !== 'function') return 'ERR 采集事件还没就绪';
+    var WATCH_VERSION = 3;
+    if (bus.__zzCollectHooked === true && bus.__zzCollectWatchVersion === WATCH_VERSION) return 'ok';
+
+    var gen = ct.serviceGen || 'DYCU';
+    var services = null;
+    try {
+      var pairs = [...System.entries()];
+      for (var i = 0; i < pairs.length; i += 1) {
+        var ex = pairs[i][1];
+        var bag = ex && ex[gen];
+        if (bag && bag[mc.holder || 'GCOA'] === world) { services = bag; break; }
+      }
+    } catch (e) { services = null; }
+    var itemModule = services && services[ct.itemModule || 'AHWN'];
+    var parse = itemModule && itemModule[ct.dropParse || 'TEHJ'];
+    var attrKey = ct.attribute || 'TKWM';
+    var dropKey = ct.drops || 'SZSN';
+    var nameKey = ct.itemName || 'FKAZ';
+    var countKey = ct.itemCount || 'SSYS';
+
+    var log = window.__zzCollectLog = window.__zzCollectLog || [];
+    if (typeof window.__zzCollectConsumed !== 'number') window.__zzCollectConsumed = 0;
+    function text(v) { return v == null ? '' : String(v); }
+    function readDrops(unit) {
+      var out = [];
+      try {
+        var attr = unit && unit[attrKey];
+        var base = attr && attr[dropKey];
+        if (!base || typeof base.length !== 'number') return out;
+        for (var i = 0; i < base.length; i += 1) {
+          var raw = base[i], item = raw;
+          try { if (parse) item = parse(raw); } catch (e) { item = raw; }
+          var name = '';
+          try { if (item && typeof item[nameKey] === 'function') name = text(item[nameKey]()); } catch (e) {}
+          if (!name) continue;
+          var count = 0;
+          try { if (item && typeof item[countKey] === 'function') count = Number(item[countKey]()) || 0; } catch (e) {}
+          out.push({ name: name, count: count });
+        }
+      } catch (e) {}
+      return out;
+    }
+    function mergeDrops(oldDrops, newDrops) {
+      var out = [], seen = {};
+      (oldDrops || []).concat(newDrops || []).forEach(function (drop) {
+        if (!drop || !drop.name) return;
+        var key = drop.name;
+        if (seen[key] !== undefined) {
+          if ((Number(drop.count) || 0) > 0) out[seen[key]].count = Number(drop.count) || 0;
+          return;
+        }
+        seen[key] = out.length;
+        out.push({ name: String(drop.name), count: Number(drop.count) || 0 });
+      });
+      return out;
+    }
+    function record(kind, unit, hero, extraDrops) {
+      if (!unit) return;
+      var id = 0, type = 0, x = 0, y = 0;
+      try { id = Number(unit[ct.entityId || 'CXKW']) || 0; } catch (e) {}
+      try { var attr = unit[attrKey]; type = Number(attr && attr[ct.collectType || 'GKIJ']) || 0; } catch (e) {}
+      try { x = Math.round(Number(unit[mc.unit && mc.unit.x ? mc.unit.x : 'MKCS']) || 0); } catch (e) {}
+      try { y = Math.round(Number(unit[mc.unit && mc.unit.y ? mc.unit.y : 'FYYQ']) || 0); } catch (e) {}
+      var drops = mergeDrops(readDrops(unit), extraDrops || []);
+      var now = Date.now();
+      for (var i = log.length - 1; i >= 0 && i >= log.length - 8; i -= 1) {
+        var old = log[i];
+        if (old && old.id === id && old.x === x && old.y === y && now - old.t < 8000) {
+          old.t = now;
+          old.kind = kind;
+          old.type = type || old.type;
+          old.hero = old.hero || !!hero;
+          old.drops = mergeDrops(old.drops, drops);
+          return;
+        }
+      }
+      log.push({ t: now, kind: kind, id: id, type: type, x: x, y: y, hero: !!hero, drops: drops });
+      if (log.length > 80) log.shift();
+    }
+    function readExtraDrops(unit, count) {
+      var out = [];
+      try {
+        if (count == null || !isFinite(Number(count))) return out;
+        var map = world[mc.scene || 'STDU'];
+        var cache = map && map[ct.rewardCache || 'ICXC'];
+        var fn = cache && cache[ct.extraDrops || 'GUNK'];
+        if (typeof fn !== 'function') return out;
+        var type = 0;
+        try { type = unit[ct.unitType || 'QNMZ']; } catch (e) {}
+        var extra = fn.call(cache, unit, type, Number(count));
+        if (!extra || typeof extra.length !== 'number') return out;
+        for (var i = 0; i < extra.length; i += 1) {
+          var raw = extra[i];
+          try { if (raw && raw[ct.extraItem || 'GMMR'] != null) raw = raw[ct.extraItem || 'GMMR']; } catch (e) {}
+          var item = raw;
+          try { if (parse) item = parse(raw); } catch (e) { item = raw; }
+          var name = '';
+          try { if (item && typeof item[nameKey] === 'function') name = text(item[nameKey]()); } catch (e) {}
+          if (!name) continue;
+          var n = 0;
+          try { if (item && typeof item[countKey] === 'function') n = Number(item[countKey]()) || 0; } catch (e) {}
+          out.push({ name: name, count: n });
+        }
+      } catch (e) {}
+      return out;
+    }
+    function recordAction() {
+      var now = Date.now();
+      var last = log.length ? log[log.length - 1] : null;
+      if (last && last.kind === 'battle' && now - last.t < 1000) {
+        last.t = now;
+        return;
+      }
+      log.push({ t: now, kind: 'battle', id: 0, type: 0, x: 0, y: 0, hero: true, drops: [] });
+      if (log.length > 80) log.shift();
+    }
+    function wrapBus(name, handler) {
+      var current = bus[name];
+      var original = current && current.__zzCollectOriginal ? current.__zzCollectOriginal : current;
+      if (typeof original !== 'function') return;
+      var wrapper = function () {
+        try { handler(arguments); } catch (e) {}
+        return original.apply(this, arguments);
+      };
+      wrapper.__zzCollectOriginal = original;
+      try {
+        Object.defineProperty(bus, name, {
+          configurable: true, writable: true, value: wrapper, enumerable: false
+        });
+      } catch (e) {
+        try { bus[name] = wrapper; } catch (e2) {}
+      }
+    }
+
+    var actors = window.__zzCollectActors = window.__zzCollectActors || {};
+    wrapBus(entry, function (args) {
+      var event = args[0] || {};
+      var payload = event[ct.eventContent || 'AWDY'] || {};
+      var unit = payload[ct.eventTarget || 'YALQ'];
+      var collector = payload[ct.eventCollector || 'WTEB'];
+      var isCollect = false;
+      try {
+        isCollect = unit && typeof unit[ct.isCollect || 'FFCO'] === 'function'
+          ? !!unit[ct.isCollect || 'FFCO']() : false;
+      } catch (e) {}
+      if (!isCollect) return;
+      var hero = false;
+      try {
+        hero = collector && typeof collector[ct.isHero || 'GYQR'] === 'function'
+          ? !!collector[ct.isHero || 'GYQR']() : false;
+      } catch (e) {}
+      var id = '';
+      try { id = String(unit[ct.entityId || 'CXKW'] || ''); } catch (e) {}
+      if (hero && id) actors[id] = Date.now();
+      record('start', unit, hero);
+    });
+
+    wrapBus(ct.done || 'IPDY', function (args) {
+      var event = args[0] || {};
+      var unit = null;
+      try {
+        var map = world[mc.scene || 'STDU'];
+        var table = map && map[ct.unitTable || 'LTDS'];
+        var row = table && table.call(map, event[ct.eventUnitId || 'MCTA']);
+        unit = row && row[ct.unitEntity || 'BSSG'];
+      } catch (e) {}
+      if (!unit) return;
+      var isCollect = false;
+      try {
+        isCollect = typeof unit[ct.isCollect || 'FFCO'] === 'function'
+          ? !!unit[ct.isCollect || 'FFCO']() : false;
+      } catch (e) {}
+      if (!isCollect) return;
+      var id = '';
+      try { id = String(unit[ct.entityId || 'CXKW'] || ''); } catch (e) {}
+      var hero = !!(id && actors[id] && Date.now() - actors[id] < 30000);
+      if (id) delete actors[id];
+      record('done', unit, hero, readExtraDrops(unit, event[ct.completionCount || 'OXCG']));
+    });
+    wrapBus(ct.battle || 'PYRD', function (args) {
+      var event = args[0] || {};
+      var payload = event[ct.eventContent || 'AWDY'] || {};
+      var actor = payload[ct.battleActor || 'BSSG'];
+      var owner = payload[ct.battleOwner || 'YPTT'];
+      var target = payload[ct.battleTarget || 'EPUO'];
+      function hero(unit) {
+        try {
+          return unit && typeof unit[ct.isHero || 'GYQR'] === 'function' && !!unit[ct.isHero || 'GYQR']();
+        } catch (e) { return false; }
+      }
+      var monster = false;
+      try {
+        monster = target && typeof target[ct.isMonster || 'FYSR'] === 'function'
+          ? !!target[ct.isMonster || 'FYSR']() : false;
+      } catch (e) {}
+      if (monster && (hero(actor) || hero(owner))) recordAction();
+    });
+
+    bus.__zzCollectHooked = true;
+    bus.__zzCollectWatchVersion = WATCH_VERSION;
+    return 'ok';
+  } catch (e) { return 'ERR ' + ((e && e.message) || e); }
 })()
 """ % _js(mapping)
+
+
+def _collect_matches(keyword: str, drops: Any) -> bool:
+    """按背包掉落名判断是否采到目标。"""
+    names = []
+    if isinstance(drops, list):
+        for drop in drops:
+            if not isinstance(drop, dict):
+                continue
+            name = str(drop.get("name") or "").strip()
+            if name:
+                names.append(name)
+    if not names:
+        return False
+    if keyword == "活动":
+        return any(
+            not any(word in name for word in DAILY_DROP_WORDS)
+            for name in names
+        )
+    words = [str(word).lower() for word in COLLECT_KEYWORDS.get(keyword, (keyword,))]
+    return any(any(word in name.lower() for word in words) for name in names)
 
 
 class InstructionRunner:
@@ -583,11 +709,13 @@ class InstructionRunner:
         log: Optional[Callable[[str], None]] = None,
         on_step: Optional[Callable[[int, int, str], None]] = None,
         on_finished: Optional[Callable[[bool, str], None]] = None,
+        on_slot: Optional[Callable[[int], None]] = None,
     ) -> None:
         self._bridge_provider = bridge_provider
         self._log = log or (lambda _msg: None)
         self._on_step = on_step or (lambda _i, _n, _text: None)
         self._on_finished = on_finished or (lambda _ok, _msg: None)
+        self._on_slot = on_slot or (lambda _no: None)
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -601,17 +729,49 @@ class InstructionRunner:
     def stopped(self) -> bool:
         return self._stop.is_set()
 
-    def start(self, title: str, content: str, mapping: Optional[Dict[str, Any]] = None) -> None:
+    def start(
+        self,
+        title: str,
+        content: str,
+        mapping: Optional[Dict[str, Any]] = None,
+        build: Optional[str] = None,
+        slots: Optional[Dict[int, str]] = None,
+        start_slot: int = 1,
+    ) -> None:
         if self.running:
             raise RuntimeError("上一条指令还在跑，先点「停止」")
-        steps = parse_script(content)
-        if not steps:
-            raise ScriptError("这条指令是空的")
+
+        raw_slots: Dict[int, str] = {}
+        if slots:
+            for key, value in slots.items():
+                try:
+                    no = int(key)
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= no <= SLOT_COUNT:
+                    raw_slots[no] = str(value or "")
+        if not raw_slots:
+            raw_slots = {1: content}
+
+        parsed: Dict[int, List[Dict[str, Any]]] = {}
+        for no, text in raw_slots.items():
+            try:
+                steps = parse_script(text)
+            except ScriptError as exc:
+                raise ScriptError("槽位 %d：%s" % (no, exc)) from exc
+            if steps:
+                parsed[no] = steps
+        if not parsed:
+            raise ScriptError("所有槽位都是空的")
+        if start_slot not in parsed:
+            raise ScriptError("槽位 %d 是空的" % start_slot)
+
+        resolved = with_current_build(mapping or {}, build)
         self._stop.clear()
         self.title = title
         self.running = True
         self._thread = threading.Thread(
-            target=self._run, args=(title, steps, with_current_build(mapping or {})), daemon=True
+            target=self._run, args=(title, parsed, resolved, int(start_slot)), daemon=True
         )
         self._thread.start()
 
@@ -643,22 +803,63 @@ class InstructionRunner:
             time.sleep(min(0.1, left))
         raise _Stopped()
 
-    def _run(self, title: str, steps: List[Dict[str, Any]], mapping: Dict[str, Any]) -> None:
+    def _run(
+        self,
+        title: str,
+        slots_steps: Dict[int, List[Dict[str, Any]]],
+        mapping: Dict[str, Any],
+        start_slot: int,
+    ) -> None:
         ok = False
         message = "已完成"
-        total = len(steps)
         self._mapping = mapping
+        slot = int(start_slot)
+        steps = slots_steps.get(slot) or []
+        jumps = 0
         try:
-            self._log_line("▶ 运行指令：%s（%d 步）" % (title, total))
+            self._log_line(
+                "▶ 运行指令：%s（槽位 %d，%d 步）" % (title, slot, len(steps))
+            )
+            self._collect_watch_error = ""
             self._eval(JS_INSTALL)
-            for index, step in enumerate(steps, 1):
+            try:
+                self._eval(_js_collect_watch(mapping))
+                # 本次脚本开始前的采集事件不算，移动途中新采的才算。
+                self._eval("window.__zzCollectConsumed=Date.now();'ok'")
+            except Exception:  # noqa: BLE001
+                pass
+
+            self._on_slot(slot)
+            index = 0
+            while True:
                 if self._stop.is_set():
                     raise _Stopped()
+                if index >= len(steps):
+                    break
+                step = steps[index]
+                index += 1
                 name = step["name"]
                 args = step["args"]
-                self._on_step(index, total, step["raw"])
-                self._log_line("  [%d/%d] %s" % (index, total, step["raw"]))
-                self._exec(name, args, mapping)
+                self._on_step(index, len(steps), step["raw"])
+                self._log_line(
+                    "  [槽位%d %d/%d] %s" % (slot, index, len(steps), step["raw"])
+                )
+                self._ensure_collect_watch()
+                try:
+                    self._exec(name, args, mapping)
+                except _JumpTo as jump:
+                    jumps += 1
+                    if jumps > 1000:
+                        raise RuntimeError("跳转次数超过 1000 次，可能有死循环")
+                    target = int(jump.slot)
+                    target_steps = slots_steps.get(target) or []
+                    if not target_steps:
+                        raise RuntimeError("槽位 %d 是空的" % target)
+                    slot = target
+                    steps = target_steps
+                    index = 0
+                    self._on_slot(slot)
+                    self._log_line("    ↪ 跳转 → 槽位 %d（%d 步）" % (slot, len(steps)))
             ok = True
             message = "指令已跑完"
         except _Stopped:
@@ -680,11 +881,20 @@ class InstructionRunner:
 
     def _exec(self, name: str, args: List[str], mapping: Dict[str, Any]) -> None:
         if name in ("等待", "延时", "wait"):
-            self._sleep(self._number(args, 0, "等待秒数"))
+            if len(args) != 1:
+                raise RuntimeError("等待指令需要一个秒数，例如「等待(2)」")
+            seconds = self._number(args, 0, "等待秒数")
+            if seconds < 0:
+                raise RuntimeError("等待秒数必须是大于或等于 0 的数字")
+            self._sleep(seconds)
             return
         if name in ("停止", "结束", "stop"):
+            if args:
+                raise RuntimeError("停止指令不接收参数，请使用「停止()」")
             raise _Stopped()
         if name in ("点击", "单击", "click"):
+            if len(args) != 2:
+                raise RuntimeError("点击指令需要 X、Y 百分比，例如「点击(39.00,16.00)」")
             self._click(self._number(args, 0, "X"), self._number(args, 1, "Y"))
             return
         if name in ("滚轮", "wheel"):
@@ -694,15 +904,33 @@ class InstructionRunner:
             self._move(args)
             return
         if name in ("回城", "home"):
+            if args:
+                raise RuntimeError("回城指令不接收参数，请使用「回城()」")
             self._home(mapping)
             return
         if name in ("传送", "teleport"):
+            if len(args) not in (2, 3):
+                raise RuntimeError("传送指令需要章节和地图，可选大陆，例如「传送(1,2)」或「传送(1,2,0)」")
             self._teleport(args, mapping)
             return
+        if name in ("跳转", "jump"):
+            if len(args) != 1:
+                raise RuntimeError("跳转指令需要一个槽位编号，例如「跳转(2)」")
+            try:
+                slot_no = int(round(float(str(args[0]).strip())))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("跳转的槽位编号必须是数字") from exc
+            if slot_no < 1 or slot_no > SLOT_COUNT:
+                raise RuntimeError("跳转的槽位编号必须是 1-%d" % SLOT_COUNT)
+            raise _JumpTo(slot_no)
         if name in ("采集", "collect"):
+            if len(args) != 1 or not str(args[0]).strip() or len(str(args[0])) > 40:
+                raise RuntimeError("采集指令需要一个物品名称或「活动」，例如「采集(红矿石)」或「采集(活动)」")
             self._collect(args)
             return
         if name in ("开宝箱", "chest"):
+            if len(args) > 2:
+                raise RuntimeError("开宝箱指令格式为「开宝箱(个数)」或「开宝箱(个数,普通/双倍)」")
             self._chest(args)
             return
         if name in ("跳转", "jump"):
@@ -717,9 +945,35 @@ class InstructionRunner:
         if index >= len(args) or str(args[index]).strip() == "":
             raise RuntimeError("%s 缺少参数" % label)
         try:
-            return float(str(args[index]).strip())
+            value = float(str(args[index]).strip())
         except ValueError as exc:
             raise RuntimeError("%s 不是数字：%s" % (label, args[index])) from exc
+        if not math.isfinite(value):
+            raise RuntimeError("%s 不是有效数字：%s" % (label, args[index]))
+        return value
+
+    @staticmethod
+    def _angle(value: Any) -> float:
+        text = str(value).strip()
+        if text in DIRECTION_ANGLES:
+            return DIRECTION_ANGLES[text]
+        if text.endswith("度"):
+            text = text[:-1].strip()
+        try:
+            angle = float(text)
+        except ValueError as exc:
+            raise RuntimeError(
+                "移动方向必须是八方向名称或角度数值，例如「右上」或「15.0」"
+            ) from exc
+        if not math.isfinite(angle):
+            raise RuntimeError("移动方向的角度不是有效数字：%s" % value)
+        return angle % 360.0
+
+    @staticmethod
+    def _percent(value: float, label: str) -> float:
+        if not math.isfinite(value) or value < 0 or value > 100:
+            raise RuntimeError("%s 必须是 0 到 100 之间的视口百分比" % label)
+        return value
 
     def _viewport(self) -> Dict[str, float]:
         try:
@@ -734,11 +988,11 @@ class InstructionRunner:
         return {"w": 372.0, "h": 798.0}
 
     def _point(self, x: float, y: float, view: Optional[Dict[str, float]] = None) -> tuple:
-        """指令里的坐标是「百分比」（参考工具显示坐标也是百分比），超过 100 当像素。"""
+        """指令里的坐标是视口百分比（0~100），和 game_storage_sync 一致。"""
         view = view or self._viewport()
-        if -1.0 <= x <= 100.0 and -1.0 <= y <= 100.0:
-            return x / 100.0 * view["w"], y / 100.0 * view["h"]
-        return x, y
+        px = self._percent(float(x), "X") / 100.0 * view["w"]
+        py = self._percent(float(y), "Y") / 100.0 * view["h"]
+        return px, py
 
     def _click(self, x: float, y: float) -> None:
         """真鼠标点击：走 CDP Input（游戏只认可信事件，DOM 派发点不动按钮）。"""
@@ -767,68 +1021,86 @@ class InstructionRunner:
             {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
         )
 
-    def _cdp_wheel(self, amount: float, x: float, y: float) -> None:
+    def _cdp_wheel(self, dx: float, dy: float, x: float, y: float) -> None:
         self._cdp(
             "Input.dispatchMouseEvent",
-            {"type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": amount, "button": "none", "buttons": 0},
+            {
+                "type": "mouseWheel", "x": x, "y": y,
+                "deltaX": dx, "deltaY": dy, "button": "none", "buttons": 0,
+            },
         )
 
     def _wheel(self, args: List[str]) -> None:
-        if not args:
-            raise RuntimeError("滚轮 缺少参数")
+        """滚轮(上|下|左|右, 视口百分比[, X%, Y%])，和 game_storage_sync 一致。"""
+        if len(args) not in (2, 4):
+            raise RuntimeError("滚轮指令格式为「滚轮(下,25.00)」或「滚轮(下,25.00,27.00,28.00)」")
         direction = str(args[0]).strip()
-        amount = self._number(args, 1, "滚动量") if len(args) > 1 else 3
-        x = self._number(args, 2, "X") if len(args) > 2 else None
-        y = self._number(args, 3, "Y") if len(args) > 3 else None
-        sign = -1 if direction in ("上", "up") else 1
+        if direction not in ("上", "下", "左", "右"):
+            raise RuntimeError("滚轮方向必须是「上」、「下」、「左」或「右」")
+        amount = self._number(args, 1, "滚轮总滚动量")
+        if amount <= 0:
+            raise RuntimeError("滚轮总滚动量必须是大于 0 的数字")
         view = self._viewport()
-        if x is None or y is None:
-            x = view["w"] / 2.0
-            y = view["h"] / 2.0
+        if len(args) == 4:
+            x, y = self._point(
+                self._number(args, 2, "滚轮 X"), self._number(args, 3, "滚轮 Y"), view
+            )
         else:
-            x, y = self._point(float(x), float(y), view)
-        self._cdp_wheel(sign * amount * 120, float(x), float(y))
+            x, y = view["w"] / 2.0, view["h"] / 2.0
+        if direction in ("上", "下"):
+            dx = 0.0
+            dy = (-1.0 if direction == "上" else 1.0) * amount / 100.0 * view["h"]
+        else:
+            dx = (-1.0 if direction == "左" else 1.0) * amount / 100.0 * view["w"]
+            dy = 0.0
+        self._cdp_wheel(dx, dy, float(x), float(y))
         self._sleep(0.2)
 
     def _move(self, args: List[str]) -> None:
-        if not args:
-            raise RuntimeError("移动 缺少方向")
-        direction = str(args[0]).strip()
-        if direction not in DIRECTIONS:
-            raise RuntimeError("方向要写：上/下/左/右/左上/右上/左下/右下")
-        seconds = self._number(args, 1, "移动秒数") if len(args) > 1 else 1.0
-        dx, dy = DIRECTIONS[direction]
+        """移动(方向或角度, 秒)：按住虚拟摇杆走指定方向，和 exe 一样走 CDP 原生输入。"""
+        if len(args) != 2:
+            raise RuntimeError("移动指令需要方向和持续秒数，例如「移动(右上,6.5)」")
+        angle = self._angle(args[0])
+        seconds = self._number(args, 1, "移动秒数")
+        if seconds < 0.1:
+            raise RuntimeError("移动拖动时间必须是大于或等于 0.1 秒的数字")
+        rad = math.radians(angle)
+        dx = math.sin(rad)
+        dy = -math.cos(rad)
         cfg = load_automation_config()
         center = cfg.get("movement_center") or {"x": 50.0, "y": 78.0}
-        radius = float(cfg.get("movement_radius") or 8.0)
-        js = (
-            "(function(){var s=window.__zzCmd.size();"
-            "var cx=s.w*%s/100, cy=s.h*%s/100;"
-            "var r=Math.min(s.w,s.h)*%s/100;"
-            "window.__zzCmd.down(cx,cy);"
-            "window.__zzCmd.move(cx+%s*r, cy+%s*r);"
-            "return 'ok'})()"
-            % (_js(float(center.get("x") or 50.0)), _js(float(center.get("y") or 78.0)),
-               _js(radius), _js(dx), _js(dy))
+        radius_pct = float(cfg.get("movement_radius") or 8.0)
+        view = self._viewport()
+        cx = view["w"] * float(center.get("x") or 50.0) / 100.0
+        cy = view["h"] * float(center.get("y") or 78.0) / 100.0
+        radius = min(view["w"], view["h"]) * radius_pct / 100.0
+        tx = cx + radius * dx
+        ty = cy + radius * dy
+        self._cdp(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseMoved", "x": cx, "y": cy, "button": "none", "buttons": 0},
         )
-        self._eval(js)
+        self._cdp(
+            "Input.dispatchMouseEvent",
+            {"type": "mousePressed", "x": cx, "y": cy, "button": "left", "buttons": 1, "clickCount": 1},
+        )
+        self._sleep(0.05)
         try:
-            end = time.monotonic() + max(0.05, seconds)
+            end = time.monotonic() + max(0.1, seconds)
             while time.monotonic() < end:
                 if self._stop.is_set():
                     raise _Stopped()
-                time.sleep(0.08)
-                self._eval(
-                    "(function(){var s=window.__zzCmd.size();"
-                    "var cx=s.w*%s/100, cy=s.h*%s/100;"
-                    "var r=Math.min(s.w,s.h)*%s/100;"
-                    "window.__zzCmd.move(cx+%s*r, cy+%s*r);return 'ok'})()"
-                    % (_js(float(center.get("x") or 50.0)), _js(float(center.get("y") or 78.0)),
-                       _js(radius), _js(dx), _js(dy))
+                self._cdp(
+                    "Input.dispatchMouseEvent",
+                    {"type": "mouseMoved", "x": tx, "y": ty, "button": "left", "buttons": 1},
                 )
+                time.sleep(0.08)
         finally:
             try:
-                self._eval("window.__zzCmd.up(0,0)")
+                self._cdp(
+                    "Input.dispatchMouseEvent",
+                    {"type": "mouseReleased", "x": tx, "y": ty, "button": "left", "buttons": 0, "clickCount": 1},
+                )
             except Exception:  # noqa: BLE001
                 pass
         self._sleep(0.2)
@@ -836,55 +1108,74 @@ class InstructionRunner:
     # ---- 地图指令
 
     def _home(self, mapping: Dict[str, Any]) -> None:
+        before = self._home_state(mapping).get("map")
         result = self._eval(_js_home(mapping))
         if str(result).startswith("ERR"):
+            self._log_line("    %s，改走营地传送" % str(result)[4:])
+            result = self._eval(_js_home_camp(mapping))
+            if str(result).startswith("ERR"):
+                raise RuntimeError("回城失败：%s" % str(result)[4:])
+        else:
+            self._log_line("    回城 → 主城（%s）" % str(result)[3:])
+        if self._wait_home(mapping, before, 8.0):
+            return
+        self._log_line("    主城传送没反应，改走营地传送")
+        result = self._eval(_js_home_camp(mapping))
+        if str(result).startswith("ERR"):
             raise RuntimeError("回城失败：%s" % str(result)[4:])
-        self._sleep(1.6)
+        self._wait_home(mapping, before, 4.0)
+
+    def _home_state(self, mapping: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return json.loads(str(self._eval(_js_home_state(mapping)) or "{}"))
+        except ValueError:
+            return {}
+
+    def _wait_home(self, mapping: Dict[str, Any], before: Any, timeout: float) -> bool:
+        deadline = time.monotonic() + max(0.5, timeout)
+        while time.monotonic() < deadline:
+            if self._stop.is_set():
+                raise _Stopped()
+            state = self._home_state(mapping)
+            if state.get("done") and not state.get("loading"):
+                return True
+            after = str(state.get("map") or "")
+            if before and after and after != str(before) and not state.get("loading"):
+                return True
+            time.sleep(0.3)
+        return False
 
     def _teleport(self, args: List[str], mapping: Dict[str, Any]) -> None:
         if len(args) < 2:
-            raise RuntimeError("传送 需要「章节,地图」两个参数")
+            raise RuntimeError("传送指令需要章节和地图，可选大陆，例如「传送(1,2)」或「传送(1,2,0)」")
         try:
-            chapter = int(float(str(args[0]).strip()))
-            section = int(float(str(args[1]).strip()))
+            chapter = int(round(float(str(args[0]).strip())))
+            section = int(round(float(str(args[1]).strip())))
         except ValueError as exc:
             raise RuntimeError("传送 的章节/地图必须是数字") from exc
-        continent = 0
+        if chapter < 1 or section < 1:
+            raise RuntimeError("传送的章节和地图必须是大于或等于 1 的整数")
+        continent = 1
         if len(args) > 2 and str(args[2]).strip() != "":
             try:
-                continent = int(float(str(args[2]).strip()))
+                continent = int(round(float(str(args[2]).strip())))
             except ValueError as exc:
                 raise RuntimeError("传送 的大陆必须是数字") from exc
+            if continent < 0:
+                raise RuntimeError("传送的大陆必须是大于或等于 0 的整数")
         cfg = load_automation_config()
         table = cfg.get("teleport_mappings") or {}
-        candidates = [
-            (k, v) for k, v in table.items()
-            if k.startswith("%d.%d." % (chapter, section))
-        ]
-        candidates.sort(key=lambda kv: kv[0])
+        exact = "%d.%d.%d" % (chapter, section, continent)
+        candidates = [(exact, table[exact])] if exact in table else []
+        if not candidates:
+            # 省略/未收录的大陆：退回同一章/地图的传送点，按编号顺序试。
+            candidates = [
+                (k, v) for k, v in table.items()
+                if k.startswith("%d.%d." % (chapter, section))
+            ]
+            candidates.sort(key=lambda kv: kv[0])
         if not candidates:
             raise RuntimeError("地图 %d-%d 还没收录传送点" % (chapter, section))
-        if len(args) > 2 and str(args[2]).strip() != "":
-            key = "%d.%d.%d" % (chapter, section, continent)
-            candidates = [kv for kv in candidates if kv[0] == key] or candidates
-            candidates = candidates[:1]
-        else:
-            # 没写大陆：优先挑「已解锁」的那个（和参考工具一致，锁住的点不能传）
-            try:
-                pairs = [
-                    [int(v.get("map_id")), int(v.get("teleport_id") or 0)]
-                    for _k, v in candidates
-                ]
-                unlocked = json.loads(str(self._eval(_js_teleport_unlocked(pairs)) or "{}"))
-            except Exception:  # noqa: BLE001
-                unlocked = {}
-            if isinstance(unlocked, dict) and unlocked:
-                usable = [
-                    kv for kv in candidates
-                    if unlocked.get("%s.%s" % (int(kv[1].get("map_id")), int(kv[1].get("teleport_id") or 0))) is True
-                ]
-                if usable:
-                    candidates = usable
         key, spot = candidates[0]
         map_id = int(spot.get("map_id"))
         teleport_id = int(spot.get("teleport_id") or 0)
@@ -916,6 +1207,7 @@ class InstructionRunner:
             (int(v.get("map_id")), int(v.get("teleport_id") or 0), str(v.get("name") or ""))
             for _k, v in candidates
         ]
+        same_map = bool(before_map) and any(str(mid) == before_map for mid, _tid, _n in spots)
         # 面板点击式传送（传送面板开着时优先用这个，不依赖会变的 map_id/point_id）
         try:
             chapter_no = int(float(str(args[0]).strip()))
@@ -932,7 +1224,8 @@ class InstructionRunner:
                 ret2 = str(self._eval(_js_teleport_panel_item(map_name)) or "")
                 if ret2.startswith("ok"):
                     self._log_line("    已点地图，等加载…")
-                    deadline = time.monotonic() + 25.0
+                    deadline = time.monotonic() + (6.0 if same_map else 25.0)
+                    since_click = time.monotonic()
                     while time.monotonic() < deadline:
                         if self._stop.is_set():
                             raise _Stopped()
@@ -942,16 +1235,16 @@ class InstructionRunner:
                             self._log_line("    传送完成（地图 %s）" % st.get("map"))
                             self._sleep(0.8)
                             return
+                        # 同图传送：地图 id 不会变，点完条目后等一会儿就按已重定位处理
+                        if same_map and time.monotonic() - since_click >= 2.5:
+                            self._log_line("    已点目标地图（同图重定位），继续")
+                            self._sleep(0.8)
+                            return
                     self._log_line("    面板点了，但地图没变，改走接口传送")
                 else:
                     self._log_line("    %s" % ret2)
             else:
                 self._log_line("    %s，改走接口传送" % ret)
-
-        # 已经在这张地图里就不用传送（有些地图的传送点没解锁，但人已经在图上）
-        if before_map and any(str(mid) == before_map for mid, _tid, _n in spots):
-            self._log_line("    已经在目标地图 %s，跳过传送" % before_map)
-            return
 
         started = False
         for spot_i, (mid, tid, spot_name) in enumerate(spots):
@@ -997,43 +1290,15 @@ class InstructionRunner:
         time.sleep(0.8)
 
     def _jump(self, args: List[str]) -> None:
-        """跳转(指令名或编号)：接着跑另一条指令（我的优先，最多套 5 层）。"""
-        if not args:
-            raise RuntimeError("跳转 需要写目标指令名或编号")
-        key = str(args[0]).strip()
-        library = load_library()
-        mine = library_instructions(library, -1)
-        pool = mine or library_instructions(library, 0)
-        target: Optional[Dict[str, Any]] = None
-        if key.isdigit():
-            index = int(key) - 1
-            if 0 <= index < len(pool):
-                target = pool[index]
-        if target is None:
-            for item in library_instructions(library, 0):
-                if str(item.get("title") or "").strip() == key:
-                    target = item
-                    break
-        if target is None:
-            raise RuntimeError("跳转目标不存在：%s" % key)
-        depth = getattr(self, "_jump_depth", 0)
-        if depth >= 5:
-            raise RuntimeError("跳转层数太深（可能有死循环）")
-        steps = parse_script(str(target.get("content") or ""))
-        title = str(target.get("title") or key)
-        self._log_line("    ↳ 跳转到「%s」（%d 步）" % (title, len(steps)))
-        self._jump_depth = depth + 1
-        try:
-            for step in steps:
-                if self._stop.is_set():
-                    raise _Stopped()
-                self._exec(str(step["name"]), step["args"], self._mapping)
-        finally:
-            self._jump_depth = depth
-        self._log_line("    ↳ 「%s」跑完，继续后面的步骤" % title)
+        """跳转需要多脚本槽位；当前只做执行核心（单脚本），直接给出明确提示。"""
+        raise RuntimeError("单脚本模式不支持「跳转」（需要多脚本槽位）")
 
     def _chest(self, args: List[str]) -> None:
         """开宝箱(个数,奖励模式)：个数不填=尽量全开；奖励模式=普通/双倍。"""
+        mapping = getattr(self, "_mapping", {}) or {}
+        cb = ((mapping.get("builds") or {}).get(mapping.get("current") or "") or {}).get("chest") or {}
+        if cb.get("supported") is False:
+            raise RuntimeError("开宝箱 暂未适配当前游戏版本（%s）" % (mapping.get("current") or "未知"))
         limit = 0
         if args and str(args[0]).strip() != "":
             try:
@@ -1045,6 +1310,11 @@ class InstructionRunner:
             mode = str(args[1]).strip()
         mult = 2 if ("双倍" in mode or mode.lower() in ("double", "2")) else 1
         mapping = getattr(self, "_mapping", None) or {}
+        build = str(mapping.get("current") or "")
+        if build == "4758a" and cb.get("supported"):
+            reward_mode = "double" if mult == 2 else ("auto" if not mode else "normal")
+            run_chest_4758a(self, limit, reward_mode)
+            return
         raw = self._eval(_js_chest_targets(mapping))
         text = str(raw)
         if text.startswith("ERR"):
@@ -1067,7 +1337,7 @@ class InstructionRunner:
             uid = str(target.get("uid") or "")
             if not cfg:
                 continue
-            self._eval(_js_chest_claim(cfg, uid, mult))
+            self._eval(_js_chest_claim(mapping, cfg, uid, mult))
             state = {}
             for _ in range(12):
                 if self._stop.is_set():
@@ -1094,117 +1364,106 @@ class InstructionRunner:
                 self._log_line("    跳过 %s（%s）" % (target.get("name") or cfg, reason))
         self._log_line("    共开箱 %d 个" % done)
 
+    def _ensure_collect_watch(self) -> None:
+        """确保当前地图的采集事件监听已挂上（切图后自动重挂）。"""
+        try:
+            result = str(self._eval(_js_collect_watch(self._mapping)) or "")
+            if result.startswith("ERR") and result != getattr(self, "_collect_watch_error", ""):
+                self._collect_watch_error = result
+                self._log_line("    采集监听未就绪：%s" % result[4:])
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if msg != getattr(self, "_collect_watch_error", ""):
+                self._collect_watch_error = msg
+                self._log_line("    采集监听未就绪：%s" % msg)
+
     def _collect(self, args: List[str]) -> None:
+        """采集：和参考工具一样，只等游戏自己采，不寻路、不瞬移。"""
         keyword = str(args[0]).strip() if args else "活动"
+        self._ensure_collect_watch()
+        self._log_line("    等游戏自己采集「%s」…" % keyword)
+
+        now_ms = int(time.time() * 1000)
         try:
-            cfg = load_automation_config()
-            radius = float(cfg.get("collect_radius") or DEFAULT_COLLECT_RADIUS)
-        except (TypeError, ValueError):
-            radius = DEFAULT_COLLECT_RADIUS
-        tried: List[tuple] = []
-        got = 0
-        for _ in range(10):
-            if self._stop.is_set():
-                raise _Stopped()
-            result = self._eval(_js_collect_target(keyword, tried, radius))
-            text = str(result)
-            if text.startswith("ERR"):
-                raise RuntimeError("采集失败：%s" % text[4:])
-            if text == "none" or not text.startswith("{"):
-                break
+            consumed = int(self._eval("Number(window.__zzCollectConsumed)||0") or 0)
+        except Exception:  # noqa: BLE001
+            consumed = 0
+        since = max(consumed, now_ms - COLLECT_LOOKBACK_MS)
+        deadline = time.monotonic() + COLLECT_MAX_WAIT
+        last_action = now_ms
+        seen = set()
+        matched = None
+        observed = []
+
+        while not self._stop.is_set() and time.monotonic() < deadline:
             try:
-                target = json.loads(text)
-            except ValueError:
+                raw = str(self._eval("JSON.stringify((window.__zzCollectLog||[]).slice(-80))") or "[]")
+                events = json.loads(raw) if raw.startswith("[") else []
+            except (TypeError, ValueError):
+                events = []
+            done_matched = False
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                stamp = int(event.get("t") or 0)
+                if stamp < since:
+                    continue
+                key = (stamp, event.get("kind"), event.get("id"), event.get("x"), event.get("y"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                if event.get("hero"):
+                    last_action = max(last_action, stamp)
+                drops = event.get("drops") or []
+                for drop in drops:
+                    if not isinstance(drop, dict):
+                        continue
+                    name = str(drop.get("name") or "").strip()
+                    if not name:
+                        continue
+                    label = "%s×%d" % (name, int(drop.get("count") or 0))
+                    if label not in observed:
+                        observed.append(label)
+                if _collect_matches(keyword, drops):
+                    matched = (event, drops)
+                    if event.get("kind") == "done":
+                        done_matched = True
+                        break
+            if done_matched:
                 break
-            tx = float(target.get("x") or 0)
-            ty = float(target.get("y") or 0)
-            nb = target.get("nb")
-            tried.append((tx, ty))
-            self._log_line("    去采 %s（%d,%d）" % (target.get("name"), int(tx), int(ty)))
-            # 站到资源旁边（不踩正中间，游戏是靠近就开始采）
-            if not self._teleport_to(tx + 28, ty):
-                self._log_line("    瞬移没过去，换下一个")
-                continue
-            self._sleep(3.2)
-            state = str(self._eval(_js_collect_state(nb)) or "")
-            if state == "alive":
-                self._nudge_towards(target)
-                self._sleep(2.2)
-                state = str(self._eval(_js_collect_state(nb)) or "")
-            if state == "alive" and self._teleport_to(tx, ty):
-                # 还是没采到：干脆站到资源点上再等
-                self._sleep(2.6)
-                state = str(self._eval(_js_collect_state(nb)) or "")
-            if state in ("dead", "gone"):
-                got += 1
-                self._log_line("    采到了")
-            else:
-                self._log_line("    这个点没采到，换下一个")
-        if got:
-            self._log_line("    共采到 %d 个点" % got)
+            # 参考工具：英雄动作停止 5 秒后继续下一步，确保采集/结算完成。
+            if int(time.time() * 1000) - last_action >= COLLECT_IDLE_MS:
+                break
+            self._sleep(0.3)
+
+        try:
+            self._eval("window.__zzCollectConsumed=Date.now();'ok'")
+        except Exception:  # noqa: BLE001
+            pass
+
+        if matched:
+            _event, drops = matched
+            names = []
+            for drop in drops[:4]:
+                if not isinstance(drop, dict):
+                    continue
+                name = str(drop.get("name") or "").strip()
+                count = int(drop.get("count") or 0)
+                if name:
+                    names.append("%s×%d" % (name, count) if count > 0 else name)
+            self._log_line("    采到了：%s" % ("、".join(names) or keyword))
         else:
-            self._log_line("    角色附近 %d 米内没有可采的「%s」，原地不动" % (int(radius), keyword))
-
-    def _pos(self) -> Optional[tuple]:
-        try:
-            raw = self._eval(
-                "(function(){try{var c=window.VKXX.ZRRU;var ids=c.PFTN().YUWW(c.PMMA(window.VKXX.KBVD))||[];"
-                "var u=ids.length?c.YVSZ(ids[0]):null;return u?JSON.stringify([u.ADUX,u.WUZI]):'null'}"
-                "catch(e){return 'null'}})()"
-            )
-            data = json.loads(raw) if isinstance(raw, str) else raw
-            if isinstance(data, list) and len(data) == 2:
-                return float(data[0]), float(data[1])
-        except Exception:  # noqa: BLE001
-            pass
-        return None
-
-    def _teleport_to(self, x: float, y: float, retries: int = 3) -> bool:
-        """游戏原生瞬移（无动画）。刚进图/过场时会被丢，所以带校验重试。"""
-        for _ in range(max(1, retries)):
-            if self._stop.is_set():
-                raise _Stopped()
-            try:
-                self._eval(
-                    "(function(){try{window.VKXX.ZAVH(%s,%s,false,function(){});return 'ok'}"
-                    "catch(e){return 'ERR '+(e&&e.message||e)}})()" % (_js(float(x)), _js(float(y)))
-                )
-            except Exception:  # noqa: BLE001
-                pass
-            time.sleep(1.0)
-            pos = self._pos()
-            if pos and abs(pos[0] - x) < 260 and abs(pos[1] - y) < 260:
-                return True
-        return False
-
-    def _nudge_towards(self, target: Dict[str, Any]) -> None:
-        """朝资源方向轻推一下摇杆（方向取最近的 45°）。"""
-        try:
-            tx = float(target.get("x") or 0)
-            ty = float(target.get("y") or 0)
-        except (TypeError, ValueError):
-            return
-        pos = self._pos()
-        if not pos:
-            return
-        mx, my = pos
-        dx, dy = tx - mx, ty - my
-        if abs(dx) < 1 and abs(dy) < 1:
-            return
-        # 屏幕方向 = (dx, -dy)，摇杆 dy 是屏幕向下
-        import math
-
-        angle = math.degrees(math.atan2(-dy, dx))
-        buckets = [
-            ("右", 0), ("右上", 45), ("上", 90), ("左上", 135),
-            ("左", 180), ("左下", -135), ("下", -90), ("右下", -45),
-        ]
-        name = min(buckets, key=lambda b: abs(((angle - b[1] + 180) % 360) - 180))[0]
-        try:
-            self._move([name, "0.6"])
-        except Exception:  # noqa: BLE001
-            pass
-
+            self._log_line("    没有等到「%s」采集（附近没有就继续）" % keyword)
+            if observed:
+                self._log_line("    最近看到掉落：%s" % "、".join(observed[:8]))
 
 class _Stopped(Exception):
     """内部用：用户点了停止。"""
+
+
+class _JumpTo(Exception):
+    """内部用：跳转到另一个槽位。"""
+
+    def __init__(self, slot: int) -> None:
+        super().__init__()
+        self.slot = int(slot)

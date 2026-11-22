@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT))
 
 from app.assist_script import RUNTIME_JS  # noqa: E402
 from app.game_assist import load_mapping  # noqa: E402
+from app.build_info import APP_VERSION  # noqa: E402
+from app.gacha_script import build_runtime as build_gacha_runtime  # noqa: E402
 
 OUT = ROOT / "android_app" / "js"
 
@@ -38,8 +40,16 @@ def main() -> None:
         "window.ZZ_RENAMES = " + json.dumps(renames, ensure_ascii=False) + ";\n",
         encoding="utf-8",
     )
+    (OUT / "version.js").write_text(
+        "window.ZZ_APP_VERSION = " + json.dumps(APP_VERSION, ensure_ascii=False) + ";\n",
+        encoding="utf-8",
+    )
+    (OUT / "gacha.js").write_text(
+        "window.ZZ_GACHA_RUNTIME = " + json.dumps(build_gacha_runtime(), ensure_ascii=False) + ";\n",
+        encoding="utf-8",
+    )
 
-    for name in ("runtime.js", "mapping.js", "renames.js"):
+    for name in ("runtime.js", "mapping.js", "renames.js", "version.js", "gacha.js"):
         size = (OUT / name).stat().st_size / 1024
         print(f"{name}: {size:.1f} KB")
 

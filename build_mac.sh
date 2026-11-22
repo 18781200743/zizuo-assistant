@@ -23,7 +23,10 @@ pyinstaller --noconfirm --clean --windowed \
   --target-arch x86_64 \
   --add-data "app/assist_mapping.json:app" \
   --add-data "app/instructions.json:app" \
+  --add-data "app/commands_presets.json:app" \
+  --add-data "app/chest_aliases_4758a.json:app" \
   --add-data "app/automation_config.json:app" \
+  --add-data "app/assets:app/assets" \
   main.py
 
 # 把 Chrome for Testing 打进 .app（用户不用自己装浏览器，装完就能开）

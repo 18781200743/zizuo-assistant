@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .config_store import project_root
 
@@ -26,6 +26,32 @@ CATEGORY_ALL = 0
 
 def library_path() -> Path:
     return Path(__file__).resolve().parent / "instructions.json"
+
+
+def presets_path() -> Path:
+    """game_storage_sync 导出的自定义指令列表。"""
+    return Path(__file__).resolve().parent / "commands_presets.json"
+
+
+def load_sync_presets() -> List[Dict[str, Any]]:
+    """读取从同步助手导出的指令列表（只读）。"""
+    data = _read_json(presets_path(), {})
+    rows: List[Dict[str, Any]] = []
+    for item in (data.get("instructions") if isinstance(data, dict) else None) or []:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        rows.append(
+            {
+                "title": str(item.get("title") or script_title(content) or "未命名指令"),
+                "content": content,
+                "source": "同步助手",
+                "category_id": int(item.get("category_id") or 3),
+            }
+        )
+    return rows
 
 
 def _user_library_path() -> Path:
@@ -245,11 +271,22 @@ class ScriptError(ValueError):
     pass
 
 
+def _normalize_line(line: str) -> str:
+    """和游戏同步助手一致：全角括号/逗号转半角，去掉行首 BOM。"""
+    return (
+        line.lstrip("\ufeff")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("，", ",")
+        .strip()
+    )
+
+
 def parse_script(content: str) -> List[Dict[str, Any]]:
     """把脚本拆成一行一步；# 开头是注释，空行忽略。"""
     steps: List[Dict[str, Any]] = []
     for no, raw in enumerate((content or "").splitlines(), 1):
-        line = raw.strip().lstrip("\ufeff")
+        line = _normalize_line(raw)
         if not line or line.startswith("#") or line.startswith("//"):
             continue
         match = _CMD_RE.match(line)
@@ -284,36 +321,3 @@ def format_content(content: str) -> str:
     while lines and not lines[-1].strip():
         lines.pop()
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------- 指令码（分享文本）
-
-_SHARE_PREFIX = "ZZCMD1:"
-
-
-def export_code(title: str, content: str) -> str:
-    """导出一条指令的可复制文本（我们自己定义的格式）。"""
-    import base64
-
-    payload = json.dumps({"title": title, "content": content}, ensure_ascii=False)
-    return _SHARE_PREFIX + base64.b64encode(payload.encode("utf-8")).decode("ascii")
-
-
-def import_code(text: str) -> Tuple[str, str]:
-    """导入指令码；也接受直接粘贴的脚本正文。"""
-    import base64
-
-    raw = (text or "").strip()
-    if not raw:
-        raise ValueError("没有内容")
-    if raw.startswith(_SHARE_PREFIX):
-        try:
-            data = json.loads(base64.b64decode(raw[len(_SHARE_PREFIX):]).decode("utf-8"))
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise ValueError("指令码格式不对：%s" % exc) from exc
-        return str(data.get("title") or "导入的指令"), format_content(str(data.get("content") or ""))
-    # 直接粘贴脚本：标题取第一行 #xxx，没有就用「导入的指令」
-    content = format_content(raw)
-    if not content:
-        raise ValueError("没有可用的指令内容")
-    return script_title(content) or "导入的指令", content

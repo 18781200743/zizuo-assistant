@@ -8,11 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.gacha_script import GACHA_JS  # noqa: E402
+from app.gacha_script import build_runtime  # noqa: E402
 
 OUT = ROOT / "android_app" / "js" / "gacha.js"
 OUT.write_text(
-    "window.ZZ_GACHA_RUNTIME = " + json.dumps(GACHA_JS, ensure_ascii=False) + ";\n",
+    "window.ZZ_GACHA_RUNTIME = " + json.dumps(build_runtime(), ensure_ascii=False) + ";\n",
     encoding="utf-8",
     newline="\n",
 )

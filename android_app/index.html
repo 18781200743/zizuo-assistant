@@ -168,10 +168,58 @@
     body.day .hero { background: #f7f9fc; border-color: #d6deea; color: #1f2937; }
     body.day .hero.red { background: #fdecea; border-color: #e7b6b0; color: #b3261e; }
 
+    /* 抽卡面板（和电脑版保持一致） */
+    .gacha-sub { font-size: 12px; color: #b9b3d6; margin: -4px 2px 8px; }
+    body.day .gacha-sub { color: #6b7280; }
+    .gcard { background: rgba(10, 30, 45, .55); border: 1px solid rgba(90, 120, 180, .35);
+      border-radius: 12px; padding: 9px 10px; margin-bottom: 8px; }
+    body.day .gcard { background: #f6f8fa; border-color: #dde3ea; }
+    .grow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+    .grow span { font-size: 13px; color: #e9e5ff; }
+    body.day .grow span { color: #374151; }
+    .gsettings { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .gset { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .gset span { font-size: 13px; color: #e9e5ff; flex: 0 0 auto; }
+    body.day .gset span { color: #374151; }
+    .grow .gmuted, .gmuted { color: #b9b3d6; font-size: 12px; }
+    body.day .grow .gmuted, body.day .gmuted { color: #6b7280; }
+    .gnum { width: 58px !important; padding: 7px 4px !important; }
+    .gstat-card { display: flex; align-items: stretch; gap: 10px; }
+    .gstat-grid { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+    .gstat { display: flex; align-items: baseline; gap: 5px; font-size: 13px; color: #b9b3d6; }
+    .gstat b { font-size: 16px; color: #e9e5ff; font-variant-numeric: tabular-nums; }
+    body.day .gstat { color: #6b7280; }
+    body.day .gstat b { color: #111827; }
+    .gstat.gtime { grid-column: 1 / 3; }
+    .gstat-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .gstat-actions .btn { flex: 0 0 auto; padding: 10px 12px; font-size: 14px; border-radius: 10px; }
+    .btn.green { background: linear-gradient(180deg, #3fbf74, #2f9e5f); color: #fff;
+      border: 1px solid rgba(120, 255, 180, .6); }
+    .btn.green.stop { background: linear-gradient(180deg, #d24141, #b03030);
+      border-color: rgba(255, 150, 170, .7); }
+    .gtoolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 6px; }
+    .gstatus { flex: 1 1 auto; min-width: 150px; font-size: 12px; color: #b9b3d6; }
+    body.day .gstatus { color: #6b7280; }
+    .gmini { display: flex; gap: 6px; }
+    .gmini .btn { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+    .ghead { display: flex; align-items: baseline; justify-content: space-between;
+      gap: 6px; flex-wrap: wrap; margin: 6px 2px 0; }
+    .ghead b { font-size: 14px; color: #e9e5ff; }
+    body.day .ghead b { color: #111827; }
+    #secGacha .hero { padding: 6px 8px; font-size: 13px; gap: 4px; }
+    #secGacha .hero .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #secGacha .hero .cnt { flex: 0 0 auto; font-size: 12px; font-variant-numeric: tabular-nums; opacity: .92; }
+    #secGacha .hero.gold { background: rgba(90, 70, 10, .55); border-color: rgba(230, 190, 90, .5); color: #ffe9b0; }
+    body.day #secGacha .hero.gold { background: #fff8e1; border-color: #efe0b4; color: #8a6100; }
+
     .cmdtext {
       margin: 8px 0 0; padding: 10px; border-radius: 10px; max-height: 180px; overflow: auto;
       background: rgba(6,14,26,.75); border: 1px solid rgba(90,120,180,.35);
       color: #cfe3ff; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+    }
+    textarea.cmdtext {
+      width: 100%; box-sizing: border-box; min-height: 180px; resize: vertical;
+      font-family: Consolas, ui-monospace, monospace;
     }
     body.day .cmdtext { background: #f7f9fc; border-color: #dfe6f2; color: #374151; }
     .row { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
@@ -220,6 +268,7 @@
     .grid .btn.on { box-shadow: 0 0 20px rgba(90,240,255,.85); border-color: #b6f7ff; }
     .grid .btn.full { grid-column: span 2; }
 
+    #reviveInfo:empty, #info:empty { display: none; }
     .info {
       margin-top: 14px; padding: 14px; border-radius: 14px; font-size: 13px; line-height: 1.7;
       background: rgba(12,20,36,.78); border: 1px solid rgba(90,120,180,.35); color: #dbe4f5;
@@ -255,6 +304,83 @@
       .hero-btn { height: 58px; }
       .hint-card { margin-top: 14px; }
     }
+    /* 功能玩法：选中后才显示 */
+    .feature-panel { display: none; margin-top: 10px; }
+    .feature-panel.open { display: block; }
+    .grid .btn.feature-btn.sel {
+      background: linear-gradient(180deg, #4a9df0, #2563eb);
+      color: #fff; border-color: #8fc7ff;
+      box-shadow: 0 0 18px rgba(90, 160, 255, .75);
+    }
+    .note {
+      background: rgba(255, 247, 230, .12); border: 1px solid rgba(240, 217, 168, .55);
+      color: #ffe2a8; border-radius: 10px; padding: 8px 10px;
+      font-size: 12px; line-height: 1.7; margin-bottom: 8px;
+    }
+    body.day .note { background: #fff7e6; border-color: #f0d9a8; color: #8a5a00; }
+    .list-row {
+      background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 10px; padding: 8px 10px; margin: 6px 0;
+      font-size: 13px; line-height: 1.6; color: #e9e5ff;
+    }
+    body.day .list-row { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
+    .list-row b { color: #8ecbff; }
+    body.day .list-row b { color: #1c4f9c; }
+    .list-row .muted { color: #b9b3d6; }
+    body.day .list-row .muted { color: #64748b; }
+
+    /* 复活 / 闪现：和 PC 一样一行排开 */
+    .revive-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .revive-row .btn { padding: 12px 4px; font-size: 13px; }
+    .blink-bar {
+      display: flex; align-items: center; gap: 4px;
+      flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+    }
+    .blink-bar .lab { font-size: 12px; white-space: nowrap; }
+    .blink-bar .num.sel {
+      width: 58px; min-width: 0; padding: 6px 2px; font-size: 12px;
+    }
+    .blink-bar .btn.sm {
+      flex: 0 0 auto; padding: 6px 8px; font-size: 12px; border-radius: 8px;
+    }
+    .mini-check {
+      display: flex; align-items: center; gap: 3px;
+      font-size: 12px; white-space: nowrap; flex: 0 0 auto;
+    }
+    .mini-check input { width: 15px; height: 15px; accent-color: #4a9df0; }
+    .monster-list {
+      min-height: 190px; padding: 8px; border-radius: 12px;
+      border: 1px solid rgba(90, 230, 255, .45);
+      background: rgba(6, 20, 30, .35);
+    }
+    body.day .monster-list { background: #f8fafc; border-color: #cbd5e1; }
+    .monster-list:empty::before {
+      content: "点「刷新怪物」读取附近怪物";
+      display: block; padding: 12px 4px; font-size: 12px; color: #94a3b8;
+    }
+
+    /* 功能玩法：2 列，最后一个占满一行 */
+    .feature-grid .btn { padding: 14px 6px; font-size: 14px; }
+    .feature-grid .btn.feature-btn:last-child { grid-column: 1 / -1; }
+
+    /* 运行命令和功能玩法固定同一排 */
+    .cat-pair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* 闪现寻怪内嵌列表 */
+    .monster-list { max-height: 280px; overflow-y: auto; margin-top: 8px; }
+    .monster-list .item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border-radius: 10px; margin-bottom: 8px;
+      background: rgba(255, 255, 255, .08);
+      border: 1px solid rgba(255, 255, 255, .14);
+      color: #e9e5ff;
+    }
+    body.day .monster-list .item { background: #fff; border-color: #e3e9f3; color: #1f2937; }
+    .monster-list .item.boss { border-left: 4px solid #f59e0b; }
+    .monster-list .item.sel { outline: 2px solid #4a9df0; }
+    .monster-list .name { font-size: 14px; font-weight: 700; }
+    .monster-list .meta { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
     /* 内容太长时正常纵向滚动 */
     body { overflow-y: auto; }
   </style>
@@ -295,6 +421,7 @@
     </div>
 
     <div class="tip">说明：使用脚本，封号自己负责</div>
+    <div class="tip" id="homeVer">脚本版本 —</div>
   </div>
 
   <!-- 功能页 -->
@@ -320,36 +447,53 @@
     <div class="grid cats">
       <button class="btn cat" id="catMap">地图 / 红包</button>
       <button class="btn cat warn" id="catRevive">复活 / 闪现</button>
-      <button class="btn cat" id="catDaily">日常任务</button>
       <button class="btn cat danger" id="catCombat">战斗参数</button>
       <button class="btn cat" id="catGacha">抽卡</button>
-      <button class="btn cat" id="catCmd">运行指令</button>
+      <div class="cat-pair">
+        <button class="btn cat" id="catCmd">运行命令</button>
+        <button class="btn cat" id="catPlay">功能玩法</button>
+      </div>
     </div>
 
     <div class="sec" id="secMap">
       <div class="sec-title">地图刷新</div>
       <div class="row"><span>小怪死亡后等待</span><input class="num" id="mobSec" type="number" value="1" min="0" step="0.5"><span>秒</span><button class="btn sm" id="fMob">开启</button></div>
       <div class="row"><span>BOSS 死亡后等待</span><input class="num" id="bossSec" type="number" value="3" min="0" step="0.5"><span>秒</span><button class="btn sm" id="fBoss">开启</button></div>
+      <div class="sec-title" style="margin-top:14px">自动宝箱</div>
+      <div class="row"><span>定时开 BOSS 掉落宝箱</span><button class="btn sm" id="fAutoChest">开启</button></div>
       <div class="sec-title" style="margin-top:14px">红包 / 祈愿</div>
       <div class="row"><span>快速抢红包</span><button class="btn sm" id="fRed">开启</button></div>
       <div class="row"><span>祈愿领取</span><button class="btn sm" id="fWish">开启</button></div>
-      <div class="row"><button class="btn danger sm" id="fClear">清除卡图</button><span class="muted">传送/回城没反应时点一下</span></div>
     </div>
 
     <div class="sec" id="secRevive">
-      <div class="sec-title">快速复活 / 闪现寻怪</div>
-      <div class="grid">
+      <div class="sec-title">快速复活</div>
+      <div class="revive-row">
         <button class="btn warn" id="fRevive">快速复活</button>
-        <button class="btn warn" id="fMonsters">怪物 / 闪现</button>
+        <button class="btn warn" id="fReviveNow">手动复活</button>
+        <button class="btn danger" id="fClear">清除卡图</button>
       </div>
-    </div>
+      <div class="info" id="reviveInfo"></div>
 
-    <div class="sec" id="secDaily">
-      <div class="sec-title">日常任务</div>
-      <div class="grid">
-        <button class="btn full" id="fDailyClaim">一键领日常</button>
-        <button class="btn full" id="fDailyCards">用任务卡完成</button>
+      <div class="sec-title" style="margin-top:14px">闪现寻怪</div>
+      <div class="blink-bar">
+        <span class="lab">方式</span>
+        <select class="num sel" id="blinkMode">
+          <option value="instant">瞬移</option>
+          <option value="fly">飞过去</option>
+        </select>
+        <span class="lab">筛选</span>
+        <select class="num sel" id="blinkFilter">
+          <option value="all">全部</option>
+          <option value="boss">BOSS</option>
+          <option value="small">小怪</option>
+        </select>
+        <button class="btn sm" id="fRefreshMonsters">刷新怪物</button>
+        <button class="btn sm" id="fBlinkGo">闪现</button>
+        <label class="mini-check"><input type="checkbox" id="blinkClickTp"><span>鼠标瞬移</span></label>
       </div>
+      <div class="info" id="blinkInfo">点「刷新怪物」，选中一只再点「闪现」</div>
+      <div class="monster-list" id="monsterList"></div>
     </div>
 
     <div class="sec" id="secCombat">
@@ -368,28 +512,132 @@
 
     <div class="sec" id="secGacha">
       <div class="sec-title">英雄招募</div>
-      <div class="row"><span>抽奖次数</span><input class="num" id="gMax" type="number" value="0" min="0"><span>0 为无限</span></div>
-      <div class="row"><span>绿钻消耗</span><input class="num" id="gGreen" type="number" value="0" min="0"><span>0 为不花</span></div>
-      <div class="row"><span style="color:#8ecbff">最大倍数招募（勾选保留）</span></div>
-      <div class="heroes" id="gHeroes"></div>
-      <div class="row">
-        <button class="btn" id="gStart">开始招募</button>
-        <button class="btn danger" id="gStop">停止</button>
+      <div class="gacha-sub">开始招募时自动打开招募界面</div>
+
+      <div class="gcard">
+        <div class="gsettings">
+          <div class="gset">
+            <span>抽奖次数</span>
+            <input class="num gnum" id="gMax" type="number" value="0" min="0">
+            <span class="gmuted">0 为无限</span>
+          </div>
+          <div class="gset">
+            <span>绿钻消耗</span>
+            <input class="num gnum" id="gGreen" type="number" value="0" min="0">
+            <span class="gmuted">0 为不花</span>
+          </div>
+        </div>
       </div>
-      <div class="info" id="gStats">总次数 0 · 红出现 0 · 消耗 0</div>
+
+      <div class="gcard gstat-card">
+        <div class="gstat-grid">
+          <div class="gstat"><span>总次数</span><b id="gDraws">0</b></div>
+          <div class="gstat"><span>红出现</span><b id="gRed">0</b></div>
+          <div class="gstat"><span>总消耗</span><b id="gCost">0</b></div>
+          <div class="gstat"><span>绿钻消耗</span><b id="gGreenStat">0</b></div>
+          <div class="gstat gtime"><span>总时间</span><b id="gTime">0:00</b></div>
+        </div>
+        <div class="gstat-actions">
+          <button class="btn sm" id="gClear">清空</button>
+          <button class="btn green" id="gStart">开始招募</button>
+        </div>
+      </div>
+
+      <div class="gtoolbar">
+        <div class="gstatus" id="gHint">打开酒馆/招募界面，再点「开始招募」</div>
+        <div class="gmini">
+          <button class="btn sm" id="gAll">全选</button>
+          <button class="btn sm" id="gNone">全不选</button>
+          <button class="btn sm" id="gReload">重载</button>
+        </div>
+      </div>
+
+      <div class="ghead">
+        <b id="gCount">最大倍数招募（已选 0）</b>
+        <span class="gmuted">出现 / 中 / 碎片（红=品级6+）</span>
+      </div>
+      <div class="heroes" id="gHeroes"></div>
     </div>
+
     <div class="sec" id="secCmd">
-      <div class="sec-title">运行指令</div>
-      <select class="num sel" id="cmdSel" style="width:100%;margin-bottom:8px"></select>
+      <div class="sec-title">运行命令</div>
+      <div class="row" style="margin-top:0"><span class="muted">一行一条，# 开头是注释</span></div>
+      <select class="num sel" id="cmdCategory" style="width:100%;margin-bottom:8px"></select>
+      <select class="num sel" id="cmdPreset" style="width:100%;margin-bottom:8px">
+        <option value="">选择指令…</option>
+      </select>
+      <div class="row">
+        <button class="btn sm" id="cmdSave">保存</button>
+        <button class="btn sm" id="cmdNew">新建</button>
+        <button class="btn sm" id="cmdRename">重命名</button>
+        <button class="btn sm" id="cmdClear">清空</button>
+        <button class="btn sm" id="cmdRecord">录制</button>
+      </div>
+      <textarea class="cmdtext" id="cmdText" spellcheck="false" placeholder="点击(50.00,50.00)&#10;等待(1)&#10;移动(上,2)"></textarea>
       <div class="row">
         <button class="btn" id="cmdRun">运行</button>
         <button class="btn danger" id="cmdStop">停止</button>
       </div>
-      <div class="info" id="cmdInfo">选一条指令，点「运行」</div>
-      <pre class="cmdtext" id="cmdText"></pre>
+      <div class="info" id="cmdInfo">编辑脚本，点「运行」</div>
     </div>
 
-    <div class="info" id="info">—</div>
+    <div class="sec" id="secPlay">
+      <div class="sec-title">功能玩法</div>
+      <div class="grid feature-grid">
+        <button class="btn feature-btn" id="playDaily">日常任务</button>
+        <button class="btn feature-btn" id="playArena">竞技场</button>
+        <button class="btn feature-btn" id="playTalisman">护符升级</button>
+        <button class="btn feature-btn" id="playGuild">公会情报</button>
+        <button class="btn feature-btn" id="playMaze">公会迷宫</button>
+      </div>
+
+      <div class="feature-panel" id="dailyPanel">
+        <div class="info">日常任务：下一步实现。</div>
+      </div>
+
+      <div class="feature-panel" id="arenaPanel">
+        <div class="info">竞技场：安卓版下一步接入，先在电脑版使用。</div>
+      </div>
+
+      <div class="feature-panel" id="talismanPanel">
+        <div class="info">护符升级：下一步实现。</div>
+      </div>
+
+      <div class="feature-panel" id="guildPanel">
+        <div class="note">
+          说明：战力 100 / 200 / 300 是游戏给未配置队伍下发的占位值（每队默认 100），不是真实战力。
+          工具会显示为「未配置」，并且不计入总战力。
+        </div>
+        <div class="row">
+          <span>阵营</span>
+          <select class="num sel" id="gCamp">
+            <option value="0">全部</option>
+            <option value="1">我方</option>
+            <option value="2">敌方</option>
+          </select>
+          <button class="btn sm" id="gQuery">查询</button>
+          <button class="btn sm" id="gCopy">复制</button>
+        </div>
+        <div class="info" id="gStatus">点「查询」读取据点成员与战力（每方 1~13 号据点）</div>
+        <div id="gList"></div>
+      </div>
+
+      <div class="feature-panel" id="mazePanel">
+        <div class="note">
+          说明：只读取当前公会迷宫首领的血量、抗暴击、抗暴伤、命中和全部属性，不会发起挑战。
+          选中本面板后会自动等待；进入首领战斗约 2 秒内自动记录。
+        </div>
+        <div class="row">
+          <button class="btn sm" id="mQuery">查询首领</button>
+          <button class="btn sm" id="mCopy">复制</button>
+        </div>
+        <div class="info" id="mStatus">进入公会迷宫首领战斗后点「查询首领」</div>
+        <div class="info" id="mSummary">尚未查询</div>
+        <div id="mList"></div>
+      </div>
+    </div>
+
+    <div class="info" id="info"></div>
   </div>
 
   <!-- 怪物列表 -->
@@ -402,13 +650,13 @@
     <div id="listItems"></div>
   </div>
 
+  <script src="js/version.js"></script>
   <script src="js/mapping.js"></script>
   <script src="js/renames.js"></script>
   <script src="js/runtime.js"></script>
-  <script src="js/instructions.js"></script>
   <script src="js/teleport.js"></script>
-  <script src="js/runner.js"></script>
-  <script>window.ZZ_RUN_MOVE = { cx: 50, cy: 78, r: 8 };</script>
+  <script src="js/instructions.js"></script>
+  <script src="js/sync_presets.js"></script>
   <script src="js/gacha.js"></script>
   <script src="js/app.js"></script>
   <script>

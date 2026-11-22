@@ -136,7 +136,11 @@
      "template": "GTHQ",
      "entity": "PLTV",
      "config": "WTXP",
-     "point": "YLYI"
+     "point": "YLYI",
+     "x": "ADUX",
+     "y": "WUZI",
+     "attributeList": "CNIS",
+     "skillId": "ZLTC"
     },
     "camps": {
      "monster": 3
@@ -310,7 +314,9 @@
      "player": "KBVD",
      "team": "PMMA",
      "members": "YUWW",
-     "read": "YVSZ"
+     "read": "YVSZ",
+     "attributeList": "CNIS",
+     "skillId": "ZLTC"
     },
     "damage": {
      "unitModule": "JPVU",
@@ -327,7 +333,8 @@
       "PPMU",
       "MDAY"
      ],
-     "target": "KXRF"
+     "target": "KXRF",
+     "zeroField": "UEAT"
     },
     "cooldown": {
      "readModule": "NBTP",
@@ -455,7 +462,26 @@
     "doneCount": "MBPD",
     "isCollect": "QATG",
     "collectType": "KQHV",
-    "standOffset": 30
+    "standOffset": 30,
+    "entityId": "NBDV",
+    "collectible": "QATG",
+    "removedFlags": []
+   },
+   "chest": {
+    "supported": true,
+    "holder": "HQQD",
+    "world": "VKXX",
+    "service": "HDPD",
+    "preCall": "DELV",
+    "claim": "KMYW",
+    "finish": "IVTK"
+   },
+   "clearStuck": {
+    "flags": [
+     "XXNL",
+     "FZJB"
+    ],
+    "loadingHolder": "HOFK"
    }
   },
   "4758a": {
@@ -587,7 +613,11 @@
      "template": "KUVN",
      "entity": "YUTK",
      "config": "WTXP",
-     "point": "GUJG"
+     "point": "GUJG",
+     "x": "ADUX",
+     "y": "WUZI",
+     "attributeList": "CNIS",
+     "skillId": "ZLTC"
     },
     "camps": {
      "monster": 3
@@ -761,7 +791,9 @@
      "player": "IOER",
      "team": "RBKC",
      "members": "VOXK",
-     "read": "JYPS"
+     "read": "JYPS",
+     "attributeList": "CNIS",
+     "skillId": "ZLTC"
     },
     "damage": {
      "unitModule": "JPVU",
@@ -778,7 +810,8 @@
       "PPMU",
       "MDAY"
      ],
-     "target": "EPUO"
+     "target": "EPUO",
+     "zeroField": "UEAT"
     },
     "cooldown": {
      "readModule": "NBTP",
@@ -893,20 +926,110 @@
     "flyBack": false
    },
    "_collectComment": [
-    "采集事件（2026-11-19 实测）：core[cj_shitiBiaoxianDuilie]() [cj_shitiBiaoxianFenfa] 是表现事件分发器。",
-    "采集入口 OHLC 每采一次触发一次（参数里有单位 PLTV），采完 GWZL 带完成次数 MBPD。",
-    "资源单位用 QATG() 判断是否可采，属性里的 KQHV 是采集类型。"
+    "采集事件（4758a 实测）：core[cj_shitiBiaoxianDuilie]() [cj_shitiBiaoxianFenfa] 是表现事件分发器。",
+    "入口 PZQH 每次采集触发一次，参数 event[AWDY] 里 YALQ=目标单位、WTEB=采集者；单位 FFCO()=可采。",
+    "掉落读单位 TKWM.SZSN，经服务模块 AHWN.TEHJ 解析后取 FKAZ 名称 / SSYS 数量。",
+    "采集指令和参考工具一样是「等游戏自己采」，不寻路、不瞬移；5 秒没有新的英雄动作就继续下一步。"
    ],
    "collect": {
     "queue": "YHST",
-    "dispatch": "NCHO",
+    "dispatch": "KCQB",
     "entry": "PZQH",
     "done": "IPDY",
     "battle": "PYRD",
-    "doneCount": "MBPD",
+    "eventContent": "AWDY",
+    "eventTarget": "YALQ",
+    "eventCollector": "WTEB",
+    "eventUnitId": "MCTA",
+    "completionCount": "OXCG",
+    "battleActor": "BSSG",
+    "battleOwner": "YPTT",
+    "battleTarget": "EPUO",
+    "isMonster": "FYSR",
+    "unitType": "QNMZ",
+    "unitTable": "LTDS",
+    "unitEntity": "BSSG",
     "isCollect": "FFCO",
+    "isHero": "GYQR",
     "collectType": "GKIJ",
+    "attribute": "TKWM",
+    "drops": "SZSN",
+    "itemModule": "AHWN",
+    "dropParse": "TEHJ",
+    "itemId": "BWSK",
+    "itemCount": "SSYS",
+    "itemName": "FKAZ",
+    "rewardCache": "ICXC",
+    "extraDrops": "GUNK",
+    "extraItem": "GMMR",
+    "serviceGen": "DYCU",
+    "entityId": "CXKW",
+    "collectible": "FFCO",
+    "removedFlags": [
+     "HCQJ",
+     "UMMW"
+    ],
     "standOffset": 30
+   },
+   "arena": {
+    "service": "QGYH",
+    "model": "HBJS",
+    "free": "EDKF",
+    "opponents": "WNXA",
+    "points": "NZCV",
+    "power": "HDQB",
+    "player": "LMET",
+    "playerName": "WFVU",
+    "lineup": "ITLO",
+    "auto": "IFBD",
+    "closed": "HCQN",
+    "robot": "IRZA",
+    "autoOn": "CPAE",
+    "autoCount": "BTYB",
+    "autoRunning": "YHFV",
+    "autoRemaining": "LOLY",
+    "autoTotal": "COFQ",
+    "autoPrev": "MNAZ",
+    "autoRemainingField": "ENRU",
+    "autoUpdate": "DDBV",
+    "sendRequest": "EJIM",
+    "responseError": "ZMCL",
+    "responseCode": "TCFK",
+    "responseMessage": "GAFC",
+    "battleType": "SHQF",
+    "battleMode": "TWYE",
+    "battle": "HUWI",
+    "refresh": "MYJC",
+    "challenge": "MHII",
+    "settle": "AXTR",
+    "rank": "NONP",
+    "rankPlayer": "CPNB",
+    "rankName": "NCWQ",
+    "rankStars": "IENM",
+    "ticketId": "SMRK",
+    "ticketCost": "CKTU",
+    "greenCost": "UMMQ",
+    "inventoryService": "IOMT",
+    "ticketCount": "ETIY",
+    "currencyCount": "SSYS",
+    "viewManager": "BBIK",
+    "viewSingleton": "IZBA",
+    "viewConfig": "XFNM",
+    "isOpen": "ASHZ",
+    "getView": "JEEK",
+    "resultView": "ArenaBattleResultView",
+    "transitionView": "MapTransitionView",
+    "resultClose": "KNIJ",
+    "resultTip": "QTEF",
+    "battleSetup": "JJQL",
+    "battleSetupMethod": "KQSJ",
+    "enterWorld": "XCXK",
+    "resultDestination": "DAMU",
+    "worldTypeField": "JMHB",
+    "mainWorldType": 1,
+    "viewModule": "BBIK.ts",
+    "configModule": "XFNM.ts",
+    "setupModule": "JJQL.ts"
    },
    "translatedFrom": "f61cf",
    "runtimeNames": {
@@ -987,6 +1110,76 @@
     "ZAVH": "JWDT",
     "ZLTC": "XZXW",
     "ZRRU": "VZZY"
+   },
+   "maze": {
+    "holder": "GCOA",
+    "scene": "STDU",
+    "mazeService": "QYLU",
+    "challengeService": "JUHS",
+    "model": "HBJS",
+    "difficulty": "UTAT",
+    "floor": "NRSG",
+    "battleType": "HMTC",
+    "engine": "FWQV",
+    "bossData": "JSZI",
+    "bossId": "RLHX",
+    "unitManager": "LSLA",
+    "unitContainer": "ICUU",
+    "unitIterate": "VSJG",
+    "unitConfig": "CXKW",
+    "isMonster": "FYSR",
+    "unitAttrs": "TKWM",
+    "maxHp": "MEWF",
+    "antiCrit": "IUUT",
+    "antiCritDamage": "FIAT",
+    "hitRate": "XMKX",
+    "attrContainer": "ACWL",
+    "attrValue": "SJEC",
+    "attrTool": "OTII",
+    "attrDefs": "WAAH",
+    "attrName": "DAIC",
+    "attrText": "GKNU"
+   },
+   "guild": {
+    "bag": "DYCU",
+    "service": "RGZM",
+    "query": "MBKH",
+    "model": "HBJS",
+    "member": [
+     "JQCZ",
+     "KSVJ"
+    ],
+    "playerA": "FQHT",
+    "playerB": "XOIR",
+    "idA": "GZZR",
+    "idB": "ZEYQ",
+    "nameA": "BYUC",
+    "nameB": "WFVU",
+    "nameC": "IHFH",
+    "nameD": "DCQX",
+    "nameE": "HCCT",
+    "powerA": "FJRN",
+    "powerB": "HGUM",
+    "level": "LDFD",
+    "server": "NQOX",
+    "teams": "ESBX",
+    "camp": "ROWA",
+    "stronghold": "DGRE"
+   },
+   "chest": {
+    "supported": true,
+    "controller": "boss_chest"
+   },
+   "clearStuck": {
+    "flags": [
+     "XXNL",
+     "FZJB"
+    ],
+    "loadingHolder": "HOFK"
+   },
+   "confirmPopup": {
+    "className": "IHCJ",
+    "confirmMethod": "SOET"
    }
   }
  }

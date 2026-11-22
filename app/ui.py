@@ -1,4 +1,4 @@
-"""主界面：1-10 存档 + 脚本代码 + 抽卡。"""
+"""主界面：首页、抽卡、辅助工具、运行命令。"""
 
 from __future__ import annotations
 
@@ -9,25 +9,20 @@ import time
 import webbrowser
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 try:  # Windows 全局热键；macOS 上没有这个库，界面按钮照样能用
     import keyboard
 except Exception:  # noqa: BLE001
     keyboard = None
 
-from .capture import grab_cursor_patch
 from .config_store import (
     load_config,
-    new_task,
     normalize_assist,
     save_config,
-    templates_dir,
 )
-from .gacha import GachaRunner
 from .gacha_store import (
     CARD_CATALOG,
-    cards_dir,
     list_available_card_templates,
     list_ui_template_status,
     normalize_gacha,
@@ -38,18 +33,18 @@ from .game_window import GAME_WINDOW_TITLE, SIZE_PRESETS, open_game_window
 from .game_assist import GameAssist, load_mapping
 from .instruction_library import (
     CATEGORY_ALL,
-    clear_instruction_override,
-    delete_user_instruction,
     format_content,
-    library_categories,
     library_instructions,
     load_library,
-    save_instruction_override,
-    save_user_instruction,
+    load_sync_presets,
     script_title,
 )
 from .instruction_runner import InstructionRunner
-from .build_info import dev_mode
+from .arena import ArenaRunner
+from .chest_4758a import run_chest_4758a
+from .commands_store import SLOT_COUNT, load_slots, save_slots, set_slot, slot_label
+from .command_recorder import CommandRecorder
+from .build_info import APP_VERSION, dev_mode
 from .gacha_cdp import GachaCdp
 
 # 是否允许「用系统浏览器打开游戏」。
@@ -91,16 +86,6 @@ DEFAULT_FIXED_HEROES = [
     (84019, "甘道夫"),
     (83031, "吉尔"),
 ]
-from .recorder import ClickRecorder
-from .runner import TaskRunner
-from .script_codec import script_to_lines, script_to_steps, steps_to_script, slot_title
-from .slots_store import (
-    SLOT_COUNT,
-    load_slots,
-    save_slots,
-    set_slot,
-    slot_label,
-)
 from .window_lock import lock_game_window, unlock_game_window
 
 DEFAULT_GAME_URL = (
@@ -122,28 +107,6 @@ VISION_OFF = "关闭"
 VISION_ZERO = "0 · 不让怪发现"
 VISION_WIDE = "1 · 扩大索敌"
 VISION_CHOICES = [VISION_OFF, VISION_ZERO, VISION_WIDE]
-
-
-# 日常任务编号 -> 名字（游戏里的任务表编号，用于显示和判断能不能自动做）
-DAILY_TASK_NAMES = {
-    1043: "合成一次宝石",
-    1007: "击杀BOSS熔岩领主",
-    1015: "开启5个地图宝箱",
-    1017: "分享游戏1次",
-    1032: "击杀BOSS黑石矮人王",
-    1033: "击杀BOSS炎魔大帝",
-    1034: "挑战云顶试炼塔1次",
-    1009: "招募英雄3次",
-    1010: "升级英雄1次",
-    1012: "挑战荣耀竞技场",
-    1014: "采集资源50次",
-    1018: "观看视频广告",
-    1035: "击杀1000只怪物",
-    1047: "登录游戏",
-}
-
-# 这些任务不做（要花钱/要 SDK/用户不要）
-DAILY_TASK_SKIP = ("宝箱", "广告", "招募", "合成", "竞技", "试炼")
 
 
 def _fmt_hp(value: Any) -> str:
@@ -247,6 +210,27 @@ def _hero_revive_mode(text: Any) -> str:
     return "item"
 
 
+class _AutoChestAdapter:
+    """给 run_chest_4758a 用的最小 runner 适配器。"""
+
+    def __init__(self, bridge_provider, log, stop):
+        self._bridge_provider = bridge_provider
+        self._log = log
+        self._stop = stop
+
+    def _eval(self, js: str) -> Any:
+        bridge = self._bridge_provider()
+        if bridge is None:
+            raise RuntimeError("还没连上游戏窗口")
+        return bridge.eval_js(js)
+
+    def _log_line(self, text: str) -> None:
+        self._log(str(text))
+
+    def _sleep(self, seconds: float) -> None:
+        time.sleep(float(seconds))
+
+
 class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
@@ -264,21 +248,17 @@ class AppUI:
         self.root.resizable(False, False)
 
         self.config: Dict[str, Any] = load_config()
-        self.slots: List[List[str]] = load_slots()
         # 后台线程只往队列里丢日志，由 UI 线程统一写进日志框（跨线程操作 Tk 会卡死/丢日志）
         self._log_queue: "queue.Queue[str]" = queue.Queue()
-        self.runner = TaskRunner(self.append_log, on_finished=self._on_run_finished)
-        self.gacha_runner = GachaRunner(
-            self.append_log,
-            on_progress=self._on_gacha_progress,
-            on_finished=self._on_run_finished,
-        )
-        self.recorder = ClickRecorder(self.append_log)
         assist_cfg = normalize_assist(self.config.get("assist"))
         self.assist = GameAssist(
             self.append_log,
             port=int(assist_cfg.get("cdp_port") or 9229),
         )
+        self._auto_chest_stop = threading.Event()
+        self._auto_chest_stop.set()
+        self._auto_chest_thread = None
+        self._auto_chest_q: "queue.Queue[str]" = queue.Queue()
         self.assist.names = {
             "bossKeywords": assist_cfg.get("boss_keywords") or [],
             "bossIds": assist_cfg.get("boss_ids") or [],
@@ -287,23 +267,25 @@ class AppUI:
             self.assist.names[key] = value
         self._hotkeys_bound = False
         self._game_proc = None
-        self._loading_slot = False
         self._assist_auto_started = False
         self.instruction_runner = InstructionRunner(
             lambda: getattr(self.assist, "bridge", None),
-            log=self.append_log,
+            log=self._instruction_log,
             on_step=self._on_instruction_step,
             on_finished=self._on_instruction_finished,
+            on_slot=self._on_instruction_slot,
         )
         self._cmd_events: "queue.Queue[tuple]" = queue.Queue()
-        self.cmd_library: Dict[str, Any] = load_library()
-        self.cmd_category: int = CATEGORY_ALL
-        self.cmd_rows: List[Dict[str, Any]] = []
+        self.arena_runner = ArenaRunner(
+            lambda: getattr(self.assist, "bridge", None),
+            log=self._arena_log,
+            on_finished=self._on_arena_finished,
+            on_state=self._on_arena_state,
+        )
+        self._arena_events: "queue.Queue[tuple]" = queue.Queue()
+        self._arena_last_action = ""
         # 开发模式：源码运行显示开发功能；打包成 exe 默认隐藏（--dev / ZIZUO_DEV=1 可强制打开）
         self.dev_mode = dev_mode()
-        self.record_status = tk.StringVar(value="录制: 未开始（游戏窗口内相对坐标）")
-        self.slot_hint = tk.StringVar(value="")
-        self.gacha_status = tk.StringVar(value="抽卡: 未开始")
         self.card_vars: Dict[str, tk.BooleanVar] = {}
         self._frag_base: Dict[str, int] = {}
         self._gold_base = None
@@ -312,9 +294,10 @@ class AppUI:
         self._build()
         try:
             self.root.after(150, self._pump_cmd_events)
+            self.root.after(200, self._pump_arena_events)
+            self.root.after(300, self._pump_auto_chest_log)
         except tk.TclError:
             pass
-        self.refresh_slot_list(select=int(self.config.get("selected_slot", 1)) - 1)
         self.refresh_gacha_templates()
         self.bind_hotkeys()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -625,7 +608,7 @@ class AppUI:
         self._mode_btn_assist.pack(side=tk.LEFT, padx=(6, 0))
         self._mode_btn_commands = tk.Button(
             mode_bar,
-            text="运行指令",
+            text="运行命令",
             relief=tk.FLAT,
             bd=0,
             padx=9,
@@ -653,14 +636,13 @@ class AppUI:
         self._content = ttk.Frame(self.root)
         self._content.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        self._page_slots = ttk.Frame(self._content, padding=4)
         self._page_gacha = ttk.Frame(self._content, padding=4)
         self._page_assist = ttk.Frame(self._content, padding=4)
         self._page_commands = ttk.Frame(self._content, padding=4)
+        self._page_play = ttk.Frame(self._content, padding=4)
         self._page_home = tk.Frame(self._content, bg="#f3f5f9")
         self._scroll_canvases: Dict[str, tk.Canvas] = {}
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
-        self._build_slots_tab(self._page_slots)
         self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
         self._page_assist.configure(style="Dark.TFrame")
         self._build_assist_tab(
@@ -669,6 +651,7 @@ class AppUI:
         # 构建完后按当前主题（默认白天）套用配色
         self.root.after(60, self._apply_assist_theme)
         self._build_commands_tab(self._page_commands)
+        self._build_play_tab(self._page_play)
         self._build_home_tab(self._page_home)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self._switch_mode("home")
@@ -685,6 +668,7 @@ class AppUI:
             "gacha": self._page_gacha,
             "assist": self._page_assist,
             "commands": self._page_commands,
+            "play": self._page_play,
         }
         buttons = {
             "home": self._mode_btn_home,
@@ -710,88 +694,6 @@ class AppUI:
             pass
         elif mode == "assist":
             self._update_assist_labels()
-
-    def _build_slots_tab(self, parent: ttk.Frame) -> None:
-        mid = ttk.Panedwindow(parent, orient=tk.HORIZONTAL)
-        mid.pack(fill=tk.BOTH, expand=True)
-
-        left = ttk.Frame(mid, padding=4)
-        center = ttk.Frame(mid, padding=4)
-        right = ttk.Frame(mid, padding=4)
-        mid.add(left, weight=2)
-        mid.add(center, weight=4)
-        mid.add(right, weight=3)
-
-        ttk.Label(left, text="存档 1-10（选中后运行）").pack(anchor=tk.W)
-        self.slot_list = tk.Listbox(left, height=16, exportselection=False)
-        self.slot_list.pack(fill=tk.BOTH, expand=True, pady=4)
-        self.slot_list.bind("<<ListboxSelect>>", self._on_slot_select)
-
-        slot_btns = ttk.Frame(left)
-        slot_btns.pack(fill=tk.X)
-        ttk.Button(slot_btns, text="保存到选中存档", command=self.save_editor_to_slot).pack(
-            fill=tk.X, pady=2
-        )
-        ttk.Button(slot_btns, text="清空选中存档", command=self.clear_selected_slot).pack(
-            fill=tk.X, pady=2
-        )
-        ttk.Label(left, textvariable=self.slot_hint, wraplength=220).pack(
-            anchor=tk.W, pady=6
-        )
-
-        ttk.Label(center, text="脚本代码（录制后复制到任意存档）").pack(anchor=tk.W)
-        editor_wrap = ttk.Frame(center)
-        editor_wrap.pack(fill=tk.BOTH, expand=True, pady=4)
-        self.script_text = tk.Text(editor_wrap, wrap=tk.NONE, undo=True)
-        yscroll = ttk.Scrollbar(editor_wrap, orient=tk.VERTICAL, command=self.script_text.yview)
-        self.script_text.configure(yscrollcommand=yscroll.set)
-        self.script_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        code_btns = ttk.Frame(center)
-        code_btns.pack(fill=tk.X)
-        ttk.Button(code_btns, text="复制脚本", command=self.copy_script).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(code_btns, text="粘贴到编辑器", command=self.paste_script).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(code_btns, text="写入存档…", command=self.write_to_slot_dialog).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(code_btns, text="插入找图(传送)", command=self.insert_find_teleport).pack(
-            side=tk.LEFT, padx=2
-        )
-
-        form = ttk.LabelFrame(right, text="操作", padding=8)
-        form.pack(fill=tk.X)
-        self.pos_var = tk.StringVar(value="鼠标: -")
-        ttk.Label(form, textvariable=self.pos_var).pack(anchor=tk.W)
-        ttk.Label(form, textvariable=self.record_status).pack(anchor=tk.W, pady=2)
-        ttk.Label(form, text="1. 打开游戏窗口").pack(anchor=tk.W, pady=1)
-        ttk.Label(form, text="2. 鼠标移到「传送」上 → 截取模板").pack(anchor=tk.W, pady=1)
-        ttk.Label(form, text="3. F6 录制点击；可用 找图点击(传送)").pack(anchor=tk.W, pady=1)
-        ttk.Label(form, text="4. 写入存档 → F8 单次运行（默认不循环）").pack(
-            anchor=tk.W, pady=1
-        )
-
-        self.loop_var = tk.BooleanVar(value=bool(self.config.get("loop_playback", False)))
-        ttk.Checkbutton(form, text="循环运行（会持续占鼠标，慎用）", variable=self.loop_var).pack(
-            anchor=tk.W, pady=4
-        )
-
-        run_box = ttk.Frame(right)
-        run_box.pack(fill=tk.X, pady=4)
-        ttk.Button(run_box, text="录制(F6)", command=self.toggle_record).pack(side=tk.LEFT, padx=2)
-        ttk.Button(run_box, text="运行选中(F8)", command=self.start_run).pack(side=tk.LEFT, padx=2)
-        ttk.Button(run_box, text="停止(F9)", command=self.stop_run).pack(side=tk.LEFT, padx=2)
-
-        run_box2 = ttk.Frame(right)
-        run_box2.pack(fill=tk.X, pady=4)
-        ttk.Button(run_box2, text="截取模板", command=self.capture_template).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(run_box2, text="保存配置", command=self.save_all).pack(side=tk.LEFT, padx=2)
 
     def _make_scroll(
         self, parent: ttk.Frame, key: str, bg: str = "#ffffff", frame_style: str = ""
@@ -1485,14 +1387,19 @@ class AppUI:
             w / 2, sy(1912), text="说明：使用脚本，封号自己负责",
             fill="#f97316", font=(ui_font, 10),
         )
+        c.create_text(
+            w / 2, sy(1984), text="脚本版本 %s" % APP_VERSION,
+            fill="#a9b8d4", font=(ui_font, 9),
+        )
 
     def _show_about(self) -> None:
         messagebox.showinfo(
             "关于",
             "百炼助手\n\n"
+            "脚本版本：%s\n"
             "游戏辅助工具（安卓 / 电脑同一套运行时）\n"
-            "功能：红包、复活、地图刷新、闪现、取坐标、日常任务\n\n"
-            "说明：使用脚本，封号自己负责。",
+            "功能：红包、复活、地图刷新、闪现、取坐标、运行命令\n\n"
+            "说明：使用脚本，封号自己负责。" % APP_VERSION,
         )
 
     ASSIST_TOP_H = 352
@@ -1513,6 +1420,9 @@ class AppUI:
             pass
 
     def _click_tool(self, key: str) -> None:
+        if key in ("commands", "play"):
+            self._switch_mode(key)
+            return
         self._show_tool(key)
         self._draw_assist_top()
 
@@ -1672,10 +1582,10 @@ class AppUI:
         items = [
             ("地图 / 红包", "map", "teal"),
             ("复活 / 闪现", "revive", "orange"),
-            ("日常任务", "daily", "teal"),
             ("战斗参数", "combat", "red"),
             ("抽卡", "gacha", "teal"),
-            ("运行指令", "commands", "teal"),
+            ("运行命令", "commands", "teal"),
+            ("功能玩法", "play", "red"),
         ]
         gap = 8
         bw = (w - 24 - gap) // 2
@@ -1853,6 +1763,18 @@ class AppUI:
             wraplength=200,
         ).grid(row=4, column=1, columnspan=4, sticky=tk.W, padx=(8, 0), pady=(8, 0))
 
+        self.assist_auto_chest_var = tk.BooleanVar(value=False)
+        self.assist_auto_chest_btn = ttk.Checkbutton(
+            refresh, text="自动宝箱", variable=self.assist_auto_chest_var,
+            style="Toolbutton", command=self.toggle_auto_chest,
+        )
+        self.assist_auto_chest_btn.grid(row=6, column=0, sticky=tk.W, pady=(8, 0))
+        self.assist_auto_status = tk.StringVar(value="自动宝箱：定时开 BOSS 掉落宝箱")
+        ttk.Label(
+            refresh, textvariable=self.assist_auto_status, foreground="#9fb0c9",
+            wraplength=420, justify=tk.LEFT,
+        ).grid(row=7, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
+
         # ---------- 红包 / 祈愿 ----------
         free = ttk.LabelFrame(parent, text="红包 / 祈愿", padding=6)
         free.columnconfigure(4, weight=1)
@@ -1873,26 +1795,26 @@ class AppUI:
 
         # ---------- 快速复活 ----------
         revive = ttk.LabelFrame(parent, text="快速复活", padding=6)
-        revive.columnconfigure(4, weight=1)
-        ttk.Label(revive, text="快速复活").grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(revive, text="免费·原地", foreground="#4ade80").grid(
-            row=0, column=1, columnspan=2, sticky=tk.W, padx=8
-        )
-        self._revive_click_job = None
+        revive.columnconfigure(3, weight=1)
+        self._revive_flash_job = None
+        self._revive_btn_pending = 0.0
         self.assist_revive_btn = ttk.Button(
-            revive, text="快速复活", width=14, command=self.revive_click, style="Accent.TButton"
+            revive, text="快速复活", width=11, command=self.toggle_revive_auto,
+            style="Accent.TButton",
         )
-        self.assist_revive_btn.grid(row=0, column=3, padx=(6, 4))
-        self.assist_revive_status = tk.StringVar(value="尚未开启（点1次=复活1次；点2次=一直开）")
-        ttk.Label(
-            revive, textvariable=self.assist_revive_status, foreground="#9fb0c9", wraplength=330
-        ).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
-        ttk.Button(revive, text="清除卡图", width=9, command=self.clear_stuck).grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, pady=(8, 0)
+        self.assist_revive_btn.grid(row=0, column=0, sticky=tk.W)
+        self.assist_revive_now_btn = ttk.Button(
+            revive, text="手动复活", width=11, command=self.revive_now
         )
+        self.assist_revive_now_btn.grid(row=0, column=1, padx=(6, 0))
+        self.assist_clear_stuck_btn = ttk.Button(
+            revive, text="清除卡图", width=11, command=self.clear_stuck
+        )
+        self.assist_clear_stuck_btn.grid(row=0, column=2, padx=(6, 0))
+        self.assist_revive_status = tk.StringVar(value="")
         ttk.Label(
-            revive, text="复活/传送没反应时点一下", foreground="#9fb0c9"
-        ).grid(row=2, column=2, columnspan=3, sticky=tk.W, padx=(6, 0), pady=(8, 0))
+            revive, textvariable=self.assist_revive_status, foreground="#4ade80", wraplength=330
+        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
 
         # ---------- 闪现寻怪 ----------
         blink = ttk.LabelFrame(parent, text="闪现寻怪", padding=6)
@@ -1915,14 +1837,20 @@ class AppUI:
         )
         self.assist_blink_btn = ttk.Button(blink, text="过去", width=6, command=self.blink_assist)
         self.assist_blink_btn.grid(row=0, column=5, padx=(6, 4))
+        self.assist_click_tp_var = tk.BooleanVar(value=False)
+        self.assist_click_tp_check = ttk.Checkbutton(
+            blink, text="鼠标瞬移", variable=self.assist_click_tp_var,
+            style="Toolbutton", command=self.toggle_click_teleport,
+        )
+        self.assist_click_tp_check.grid(row=0, column=6, padx=(6, 0))
         self.assist_blink_status = tk.StringVar(value="点「刷新怪物」，选中一只再点「过去」")
         ttk.Label(
-            blink, textvariable=self.assist_blink_status, foreground="#9fb0c9", wraplength=330,
+            blink, textvariable=self.assist_blink_status, foreground="#9fb0c9", wraplength=380,
             justify=tk.LEFT,
-        ).grid(row=1, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+        ).grid(row=1, column=0, columnspan=7, sticky=tk.W, pady=(4, 0))
 
         list_frame = ttk.Frame(blink)
-        list_frame.grid(row=2, column=0, columnspan=6, sticky=tk.EW, pady=(4, 0))
+        list_frame.grid(row=2, column=0, columnspan=7, sticky=tk.EW, pady=(4, 0))
         self.assist_monster_list = tk.Listbox(list_frame, height=7, activestyle="none")
         list_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.assist_monster_list.yview)
         self.assist_monster_list.configure(yscrollcommand=list_sb.set)
@@ -1938,20 +1866,15 @@ class AppUI:
         ttk.Button(coord, text="取坐标", width=8, command=self.pick_coord).pack(side=tk.LEFT)
         ttk.Button(coord, text="飞过去", width=8, command=self.fly_to_picked).pack(side=tk.LEFT, padx=(6, 0))
         self.assist_coord_status = tk.StringVar(
-            value="点「取坐标」，再到游戏画面上点一下；取到后点「飞过去」"
+            value="点「取坐标」，再到游戏画面上点一下要记录的位置"
         )
         ttk.Label(
             coord, textvariable=self.assist_coord_status, foreground="#9fb0c9", wraplength=280
         ).pack(side=tk.LEFT, padx=6)
 
         # ---------- 日常任务 ----------
-        daily = ttk.LabelFrame(parent, text="日常任务", padding=6)
-        ttk.Button(daily, text="一键领日常", width=12, command=self.claim_daily).pack(side=tk.LEFT)
-        ttk.Button(daily, text="自动做日常", width=12, command=self.auto_daily).pack(side=tk.LEFT, padx=4)
-        self.assist_daily_status = tk.StringVar(value="自动领日常")
-        ttk.Label(
-            daily, textvariable=self.assist_daily_status, foreground="#9fb0c9", wraplength=200
-        ).pack(side=tk.LEFT, padx=6)
+        # 入口暂时移除（后续重写）。状态变量保留：取坐标也复用它显示进度。
+        self.assist_daily_status = tk.StringVar(value="")
 
         # ---------- 战斗参数（保留，默认关；实测会被服务端校验）----------
         combat = ttk.LabelFrame(parent, text="战斗参数（改战斗数值，会被服务端校验，默认关）", padding=6)
@@ -2013,20 +1936,19 @@ class AppUI:
 
         self.root.after(800, self._tick_assist)
 
-    # ---------------------------------------------------------------- 运行指令
+    # ---------------------------------------------------------------- 分类区块
 
         self._tool_sections = {
             "map": refresh,
             "red": free,
             "revive": revive,
             "blink": blink,
-            "daily": daily,
             "combat": combat,
         }
 
     def _show_tool(self, key: str) -> None:
         """点分类：只显示这一个功能；再点一次收起。"""
-        if key in ("gacha", "commands"):
+        if key == "gacha":
             self._switch_mode(key)
             return
         sections = getattr(self, "_tool_sections", {}) or {}
@@ -2056,6 +1978,16 @@ class AppUI:
         if shown:
             self._tool_current = key
 
+    COMMAND_TEMPLATE = (
+        "# 运行命令：一行一条，# 开头是注释；Ctrl+Enter 运行\n"
+        "# 示例：\n"
+        "# 点击(50.00,50.00)\n"
+        "# 等待(1)\n"
+        "# 移动(上,2)\n"
+        "# 传送(1,2)\n"
+        "# 回城()\n"
+    )
+
     def _build_commands_tab(self, parent: ttk.Frame) -> None:
         nav = ttk.Frame(parent)
         nav.pack(fill=tk.X, pady=(0, 6))
@@ -2064,298 +1996,861 @@ class AppUI:
 
         c = self.colors
         bar = tk.Frame(parent, bg=c["page"])
-        bar.pack(fill=tk.X, pady=(0, 6))
+        bar.pack(fill=tk.X, pady=(0, 2))
         tk.Label(
-            bar, text="运行指令", bg=c["page"], fg=c["text"], font=("Microsoft YaHei UI", 11, "bold")
+            bar, text="运行命令", bg=c["page"], fg=c["text"], font=("Microsoft YaHei UI", 11, "bold")
         ).pack(side=tk.LEFT)
-        self.cmd_status = tk.StringVar(value="选一条指令，点「运行」")
-        tk.Label(bar, textvariable=self.cmd_status, bg=c["page"], fg="#1a4d8f").pack(side=tk.LEFT, padx=12)
         self.cmd_run_btn = ttk.Button(
             bar, text="运行", width=10, style="Accent.TButton", command=self.toggle_instruction
         )
-        self.cmd_run_btn.pack(side=tk.RIGHT, padx=6)
+        self.cmd_run_btn.pack(side=tk.RIGHT)
+        self.cmd_status = tk.StringVar(value="编辑脚本，点「运行」")
+        tk.Label(
+            parent,
+            textvariable=self.cmd_status,
+            bg=c["page"],
+            fg="#1a4d8f",
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=440,
+        ).pack(fill=tk.X, pady=(0, 4))
 
-        cats = tk.Frame(parent, bg=c["page"])
-        cats.pack(fill=tk.X, pady=(0, 8))
-        self._cmd_cat_buttons: Dict[int, tk.Button] = {}
-        for cat in library_categories(self.cmd_library):
-            btn = tk.Button(
-                cats,
-                text=cat["name"],
-                relief=tk.FLAT,
-                bd=0,
-                padx=8,
-                pady=5,
-                font=("Microsoft YaHei UI", 9),
-                command=lambda cid=int(cat["id"]): self._select_cmd_category(cid),
-            )
-            btn.pack(side=tk.LEFT, padx=(0, 3))
-            self._cmd_cat_buttons[int(cat["id"])] = btn
-        search_row = tk.Frame(parent, bg=c["page"])
-        search_row.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(search_row, text="搜索", bg=c["page"], fg=c["sub"]).pack(side=tk.LEFT)
-        self.cmd_search_var = tk.StringVar()
-        search = ttk.Entry(search_row, textvariable=self.cmd_search_var)
-        search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-        search.bind("<Return>", lambda _e: self.refresh_command_list())
-        ttk.Button(search_row, text="搜索", width=6, command=self.refresh_command_list).pack(side=tk.LEFT)
+        # 槽位 + 录制
+        slot_data = load_slots(default_content=str(self.config.get("commands_text") or self.COMMAND_TEMPLATE))
+        self.cmd_slots = slot_data["slots"]
+        self._cmd_slot_index = max(0, min(SLOT_COUNT - 1, int(slot_data.get("active") or 1) - 1))
+        self._cmd_running_slot = self._cmd_slot_index + 1
+        self._cmd_syncing_slot = False
+        self._cmd_recorder = CommandRecorder(
+            lambda: getattr(self.assist, "bridge", None), log=self.append_log
+        )
+
+        self._cmd_preset_loaded = False
+        self._cmd_preset_title = ""
+        self._cmd_text_guard_until = 0.0
+
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 6))
+
+        # 指令列表（按分类）
+        presets = []
+        categories = [{"id": 0, "name": "全部"}]
+        library = {}
+        try:
+            library = load_library()
+            for cat in library.get("categories") or []:
+                cid = int(cat.get("id") or 0)
+                name = str(cat.get("name") or "").strip()
+                if cid and name and all(row["id"] != cid for row in categories):
+                    categories.append({"id": cid, "name": name})
+        except Exception:  # noqa: BLE001
+            library = {}
+        try:
+            for item in load_sync_presets():
+                content = str(item.get("content") or "").strip()
+                if not content:
+                    continue
+                presets.append(
+                    {
+                        "title": str(item.get("title") or script_title(content) or "未命名指令"),
+                        "content": content,
+                        "category_id": int(item.get("category_id") or 3),
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            for item in library_instructions(library, CATEGORY_ALL):
+                content = str(item.get("content") or "").strip()
+                if not content:
+                    continue
+                presets.append(
+                    {
+                        "title": str(item.get("title") or script_title(content) or "未命名指令"),
+                        "content": content,
+                        "category_id": int(item.get("category_id") or 3),
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        for item in presets:
+            cid = int(item.get("category_id") or 0)
+            if cid and all(row["id"] != cid for row in categories):
+                categories.append({"id": cid, "name": "分类%d" % cid})
+        categories.append({"id": -1, "name": "我的"})
+        self._cmd_presets = presets
+        self._cmd_category_ids = [row["id"] for row in categories]
+        self._cmd_category_names = [row["name"] for row in categories]
+        self._cmd_category_id = 0
+        self._cmd_visible_presets: list = []
+
+        cat_row = ttk.Frame(parent)
+        cat_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(cat_row, text="分类").pack(side=tk.LEFT)
+        self.cmd_category_var = tk.StringVar(value="全部")
+        self.cmd_category_box = ttk.Combobox(
+            cat_row,
+            textvariable=self.cmd_category_var,
+            values=self._cmd_category_names,
+            state="readonly",
+            width=12,
+        )
+        self.cmd_category_box.pack(side=tk.LEFT, padx=6)
+        self.cmd_category_box.bind("<<ComboboxSelected>>", lambda _e: self._on_category_selected())
+
+        pick = ttk.Frame(parent)
+        pick.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(pick, text="指令列表").pack(side=tk.LEFT)
+        self.cmd_preset_var = tk.StringVar()
+        self.cmd_preset_box = ttk.Combobox(
+            pick,
+            textvariable=self.cmd_preset_var,
+            values=[],
+            state="readonly",
+            height=20,
+        )
+        self.cmd_preset_box.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        self.cmd_preset_box.bind("<<ComboboxSelected>>", lambda _e: self._load_selected_preset())
+
+        action_row = ttk.Frame(parent)
+        action_row.pack(fill=tk.X, pady=(0, 6))
+        self.cmd_save_btn = ttk.Button(
+            action_row, text="保存", width=7, command=self._save_slot_clicked
+        )
+        self.cmd_save_btn.pack(side=tk.LEFT, padx=(0, 3))
+        self.cmd_new_btn = ttk.Button(
+            action_row, text="新建", width=7, command=self._new_slot_clicked
+        )
+        self.cmd_new_btn.pack(side=tk.LEFT, padx=(0, 3))
+        self.cmd_rename_btn = ttk.Button(
+            action_row, text="重命名", width=8, command=self._rename_slot_clicked
+        )
+        self.cmd_rename_btn.pack(side=tk.LEFT, padx=(0, 3))
+        self.cmd_clear_btn = ttk.Button(
+            action_row, text="清空", width=7, command=self._clear_slot_clicked
+        )
+        self.cmd_clear_btn.pack(side=tk.LEFT, padx=(0, 3))
+        self.cmd_record_btn = ttk.Button(
+            action_row, text="录制", width=7, command=self.toggle_recording
+        )
+        self.cmd_record_btn.pack(side=tk.LEFT)
+
+        self._refresh_preset_box()
 
         ttk.Label(
             parent,
-            text="支持：等待/点击/滚轮/移动/传送/回城/采集/开宝箱；内置指令可编辑、可还原。",
+            text=(
+                "一行一条指令，# 开头是注释。支持：移动(方向或角度,秒) / 等待(秒) / "
+                "点击(X%,Y%) / 滚轮(上|下|左|右,量[,X%,Y%]) / 传送(章节,地图[,大陆]) / "
+                "回城() / 采集(目标) / 开宝箱([个数][,普通|双倍]) / 跳转(槽位) / 停止()"
+            ),
             foreground="#6b7280",
-            wraplength=440,
+            wraplength=430,
             justify=tk.LEFT,
         ).pack(side=tk.BOTTOM, anchor=tk.W, pady=(6, 0))
 
-        mid = ttk.Panedwindow(parent, orient=tk.VERTICAL)
-        mid.pack(fill=tk.BOTH, expand=True)
-        left = ttk.Frame(mid, padding=4)
-        right = ttk.Frame(mid, padding=4)
-        mid.add(left, weight=1)
-        mid.add(right, weight=3)
-
-        self.cmd_list_hint = tk.StringVar(value="")
-        ttk.Label(left, textvariable=self.cmd_list_hint).pack(anchor=tk.W)
-        list_frame = ttk.Frame(left)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=4)
-        self.cmd_list = tk.Listbox(list_frame, activestyle="none", exportselection=False, height=4)
-        cmd_sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.cmd_list.yview)
-        self.cmd_list.configure(yscrollcommand=cmd_sb.set)
-        self.cmd_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cmd_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.cmd_list.bind("<<ListboxSelect>>", lambda _e: self._show_command_detail())
-        self.cmd_list.bind("<Double-Button-1>", lambda _e: self.run_instruction())
-
-        self.cmd_title_var = tk.StringVar(value="指令详情")
-        ttk.Label(
-            right, textvariable=self.cmd_title_var, font=("Microsoft YaHei UI", 10, "bold")
-        ).pack(anchor=tk.W)
-        text_frame = ttk.Frame(right)
-        text_frame.pack(fill=tk.BOTH, expand=True, pady=4)
-        self.cmd_text = tk.Text(text_frame, wrap=tk.CHAR, height=10, undo=False)
-        text_sb = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.cmd_text.yview)
-        self.cmd_text.configure(yscrollcommand=text_sb.set)
-        text_frame.rowconfigure(0, weight=1)
-        text_frame.columnconfigure(0, weight=1)
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True)
+        self.cmd_text = tk.Text(frame, wrap=tk.NONE, undo=True, height=18, font=("Consolas", 10))
+        ysb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.cmd_text.yview)
+        xsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=self.cmd_text.xview)
+        self.cmd_text.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
         self.cmd_text.grid(row=0, column=0, sticky="nsew")
-        text_sb.grid(row=0, column=1, sticky="ns")
-        self.cmd_text.tag_configure("run", background="#fff3cd")
-        self.cmd_text.configure(state=tk.DISABLED)
-
-        row = ttk.Frame(right)
-        row.pack(fill=tk.X, pady=(2, 0))
-        ttk.Button(row, text="新建", style="Accent.TButton", command=self.new_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(row, text="编辑", command=self.edit_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
-        )
-        ttk.Button(row, text="删除", command=self.delete_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
-        )
-        row2 = ttk.Frame(right)
-        row2.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(row2, text="还原", command=self.restore_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X
-        )
-        ttk.Button(row2, text="复制", command=self.copy_instruction).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
-        )
-
-
-        self.refresh_command_list()
-        self._select_cmd_category(CATEGORY_ALL)
-
-    def _select_cmd_category(self, category_id: int) -> None:
-        self.cmd_category = category_id
-        self.refresh_command_list()
-        c = self.colors
-        for cid, btn in getattr(self, "_cmd_cat_buttons", {}).items():
-            if cid == category_id:
-                btn.configure(bg=c["accent"], fg="#ffffff", activebackground=c["accent"], activeforeground="#ffffff")
-            else:
-                btn.configure(bg=c["soft"], fg=c["text"], activebackground="#e5e7eb", activeforeground=c["text"])
-
-    def refresh_command_list(self, select_title: Optional[str] = None) -> None:
-        if not hasattr(self, "cmd_list"):
-            return
-        self.cmd_library = load_library()
-        keyword = self.cmd_search_var.get().strip() if hasattr(self, "cmd_search_var") else ""
-        self.cmd_rows = library_instructions(self.cmd_library, self.cmd_category, keyword)
-        self.cmd_list.delete(0, tk.END)
-        for item in self.cmd_rows:
-            content = str(item.get("content") or "")
-            count = sum(1 for line in content.splitlines() if line.strip() and not line.strip().startswith("#"))
-            mark = " ·我的" if item.get("custom") else (" ·已改" if item.get("edited") else "")
-            self.cmd_list.insert(tk.END, "%s（%d 步%s）" % (item.get("title") or "未命名", count, mark))
-        total = len(self.cmd_library.get("instructions") or [])
-        self.cmd_list_hint.set("共 %d 条，当前显示 %d 条" % (total, len(self.cmd_rows)))
-        if self.cmd_rows:
-            index = 0
-            if select_title:
-                for i, item in enumerate(self.cmd_rows):
-                    if str(item.get("title") or "") == select_title:
-                        index = i
-                        break
-            self.cmd_list.selection_set(index)
-            self._show_command_detail()
-
-    def _selected_command(self) -> Optional[Dict[str, Any]]:
-        try:
-            index = int(self.cmd_list.curselection()[0])
-        except (IndexError, AttributeError, tk.TclError):
-            return None
-        if 0 <= index < len(self.cmd_rows):
-            return self.cmd_rows[index]
-        return None
-
-    def _show_command_detail(self) -> None:
-        item = self._selected_command()
-        if not item:
-            return
-        suffix = "（我的）" if item.get("custom") else ("（已修改）" if item.get("edited") else "")
-        self.cmd_title_var.set("%s%s" % (item.get("title") or "", suffix))
-        self.cmd_text.configure(state=tk.NORMAL)
-        self.cmd_text.delete("1.0", tk.END)
-        self.cmd_text.insert("1.0", format_content(str(item.get("content") or "")))
-        self.cmd_text.configure(state=tk.DISABLED)
-
-    def _instruction_editor(self, title: str, content: str, on_save, heading: str) -> None:
-        """通用指令编辑器：on_save(正文) 负责保存；返回 False 表示失败、别关窗。"""
-        win = tk.Toplevel(self.root)
-        win.title(heading)
-        win.transient(self.root)
-        win.geometry("640x620")
-        win.minsize(480, 420)
-
-        ttk.Label(
-            win,
-            text=(
-                "一行一条：# 开头是注释。支持 传送(章节,地图[,大陆]) / 移动(方向,秒) / "
-                "采集(活动) / 等待(秒) / 回城() / 点击(X,Y) / 滚轮(上|下,量[,X,Y]) / 停止()"
-            ),
-            foreground="#6b7280",
-            wraplength=600,
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, padx=12, pady=(10, 4))
-
-        frame = ttk.Frame(win)
-        frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
-        text = tk.Text(frame, wrap=tk.NONE, undo=True)
-        sb_y = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text.yview)
-        sb_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text.xview)
-        text.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        text.grid(row=0, column=0, sticky="nsew")
-        sb_y.grid(row=0, column=1, sticky="ns")
-        sb_x.grid(row=1, column=0, sticky="ew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        text.insert("1.0", format_content(content))
-        text.focus_set()
+        self.cmd_text.tag_configure("run", background="#fff3cd")
+        self.cmd_text.bind("<<Modified>>", self._on_cmd_text_modified)
+        self.cmd_text.bind("<Control-Return>", self._run_from_shortcut)
 
-        note = tk.StringVar(value="")
-        ttk.Label(win, textvariable=note, foreground="#c62828").pack(anchor=tk.W, padx=12)
+        self._load_slot_into_editor()
 
-        btns = ttk.Frame(win)
-        btns.pack(fill=tk.X, padx=12, pady=10)
+    # ------------------------------------------------------------ 功能玩法
 
-        def _save() -> None:
-            body = text.get("1.0", tk.END).strip()
-            if not body:
-                note.set("内容不能为空")
-                return
-            try:
-                if on_save(body) is False:
-                    return
-            except Exception as exc:  # noqa: BLE001
-                messagebox.showerror("保存指令", str(exc), parent=win)
-                return
-            win.destroy()
+    def _build_play_tab(self, parent: ttk.Frame) -> None:
+        nav = ttk.Frame(parent)
+        nav.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(nav, text="‹ 返回首页", command=lambda: self._switch_mode("home")).pack(side=tk.LEFT)
+        ttk.Button(nav, text="辅助工具", command=lambda: self._switch_mode("assist")).pack(side=tk.RIGHT)
 
-        ttk.Button(btns, text="保存", style="Accent.TButton", command=_save).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(btns, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
-        win.bind("<Escape>", lambda _e: win.destroy())
-        win.grab_set()
+        ttk.Label(
+            parent,
+            text="功能玩法",
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).pack(anchor=tk.W, pady=(0, 6))
 
-    def edit_instruction(self) -> None:
-        """编辑被选中的指令（内置的自己改过的也直接改本体，不用先另存一份）。"""
-        item = self._selected_command()
-        if not item:
-            messagebox.showinfo("编辑指令", "先从列表里选一条指令")
+        # 功能选择：默认什么都不选，点哪个才在下面显示哪个
+        self._play_buttons: Dict[str, tk.Button] = {}
+        self._play_panels: Dict[str, ttk.LabelFrame] = {}
+        self._play_current = None
+        self._guild_rows: List[Dict[str, Any]] = []
+        self._guild_polling = False
+        self._maze_auto = False
+        self._maze_last_stamp = ""
+
+        chooser = ttk.Frame(parent)
+        chooser.pack(fill=tk.X, pady=(0, 8))
+        for col in range(2):
+            chooser.columnconfigure(col, weight=1)
+        for index, (key, text) in enumerate((
+            ("daily", "日常任务"),
+            ("arena", "竞技场"),
+            ("talisman", "护符升级"),
+            ("guild", "公会情报"),
+            ("maze", "公会迷宫"),
+        )):
+            row, col = divmod(index, 2)
+            button = tk.Button(
+                chooser, text=text, command=lambda k=key: self._play_select(k),
+                relief=tk.FLAT, bd=0, padx=10, pady=8, cursor="hand2",
+                bg="#eef2ff", fg="#1e3a8a",
+                activebackground="#dbeafe", activeforeground="#1e3a8a",
+                font=("Microsoft YaHei UI", 10, "bold"),
+            )
+            button.grid(
+                row=row, column=col, sticky="ew",
+                padx=(0 if col == 0 else 6, 0), pady=(0, 6),
+            )
+            self._play_buttons[key] = button
+
+        content = ttk.Frame(parent)
+        content.pack(fill=tk.BOTH, expand=True)
+        self._play_content = content
+
+        # ---- 日常任务 ----
+        daily = ttk.LabelFrame(content, text="日常任务", padding=10)
+        ttk.Label(daily, text="日常任务：下一步实现。").pack(anchor=tk.W)
+        self._play_panels["daily"] = daily
+
+        # ---- 护符升级 ----
+        talisman = ttk.LabelFrame(content, text="护符升级", padding=10)
+        ttk.Label(talisman, text="护符升级：下一步实现。").pack(anchor=tk.W)
+        self._play_panels["talisman"] = talisman
+
+        # ---- 荣耀竞技场 ----
+        arena = ttk.LabelFrame(content, text="荣耀竞技场（免费直接结算，可花门票/绿钻继续）", padding=8)
+        self.arena_status = tk.StringVar(value="点「查询状态」查看次数/阵容/对手")
+        ttk.Label(
+            arena, textvariable=self.arena_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        count_row = ttk.Frame(arena)
+        count_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(count_row, text="挑战次数（0=免费次数全跑）").pack(side=tk.LEFT)
+        self.arena_count_var = tk.StringVar(value="0")
+        self.arena_count_box = ttk.Spinbox(
+            count_row, from_=0, to=99, width=5, textvariable=self.arena_count_var
+        )
+        self.arena_count_box.pack(side=tk.LEFT, padx=6)
+
+        self.arena_fast_var = tk.BooleanVar(value=True)
+        self.arena_fast_check = ttk.Checkbutton(
+            arena,
+            text="极速模式（免费次数直接结算，不进战斗）",
+            variable=self.arena_fast_var,
+            command=self._update_arena_button,
+        )
+        self.arena_fast_check.pack(anchor=tk.W, pady=(0, 2))
+        self.arena_paid_var = tk.BooleanVar(value=True)
+        self.arena_paid_check = ttk.Checkbutton(
+            arena,
+            text="免费次数用完允许付费（门票优先，其次绿钻，正常战斗）",
+            variable=self.arena_paid_var,
+        )
+        self.arena_paid_check.pack(anchor=tk.W, pady=(0, 2))
+        self.arena_battle_var = tk.BooleanVar(value=False)
+        self.arena_battle_check = ttk.Checkbutton(
+            arena,
+            text="免费的极速结算失败时允许打正常战斗（默认关闭）",
+            variable=self.arena_battle_var,
+        )
+        self.arena_battle_check.pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(
+            arena,
+            text="免费次数走直接结算、不进战斗；免费用完后按门票/绿钻正常战斗。",
+            foreground="#7a5b00",
+            wraplength=440,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 4))
+
+        btns = ttk.Frame(arena)
+        btns.pack(fill=tk.X, pady=(0, 6))
+        self.arena_probe_btn = ttk.Button(btns, text="查询状态", width=10, command=self.arena_probe)
+        self.arena_probe_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.arena_run_btn = ttk.Button(
+            btns, text="开始极速竞技", width=14, style="Accent.TButton", command=self.toggle_arena
+        )
+        self.arena_run_btn.pack(side=tk.LEFT)
+
+        log_frame = ttk.Frame(arena)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        self.arena_log_text = tk.Text(
+            log_frame, height=8, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Microsoft YaHei UI", 9), background="#f8fafc",
+        )
+        sb = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.arena_log_text.yview)
+        self.arena_log_text.configure(yscrollcommand=sb.set)
+        self.arena_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._append_arena_log("荣耀竞技场：免费次数直接结算不进战斗；免费用完后按门票/绿钻正常战斗。")
+        self._play_panels["arena"] = arena
+
+        # ---- 公会情报（内嵌）----
+        guild = ttk.LabelFrame(content, text="公会情报", padding=8)
+        self._build_guild_panel(guild)
+        self._play_panels["guild"] = guild
+
+        # ---- 公会迷宫 ----
+        maze = ttk.LabelFrame(content, text="公会迷宫", padding=8)
+        self._build_maze_panel(maze)
+        self._play_panels["maze"] = maze
+
+    def _play_select(self, key: str) -> None:
+        """点功能按钮：只显示选中功能的下面内容，并高亮按钮。"""
+        panel = self._play_panels.get(key)
+        if panel is None:
             return
-        title = str(item.get("title") or "未命名")
-
-        def _on_save(body: str) -> None:
-            if item.get("custom"):
-                save_user_instruction(title, body, int(item.get("category_id") or 3), old_title=title)
+        for widget in self._play_panels.values():
+            try:
+                widget.pack_forget()
+            except Exception:  # noqa: BLE001
+                pass
+        panel.pack(fill=tk.BOTH, expand=True)
+        self._play_current = key
+        for name, button in self._play_buttons.items():
+            if name == key:
+                button.configure(
+                    bg="#2563eb", fg="#ffffff",
+                    activebackground="#1d4ed8", activeforeground="#ffffff",
+                )
             else:
-                save_instruction_override(item.get("id"), body)
-            self.refresh_command_list(select_title=title)
-            self.cmd_status.set("已保存修改：%s" % title)
-
-        self._instruction_editor(
-            title, str(item.get("content") or ""), _on_save, "编辑指令 - %s" % title
-        )
-
-    NEW_INSTRUCTION_TEMPLATE = (
-        "# 我的指令（把下面几行改成你要的步骤；# 开头的行不会执行）\n"
-        "# 传送(3,2)\n"
-        "# 移动(上,3)\n"
-        "# 等待(2)\n"
-        "# 采集(活动)\n"
-        "# 回城()\n"
-    )
-
-    def new_instruction(self) -> None:
-        """新建一条空白指令（存在「我的」里）。"""
-        name = simpledialog.askstring(
-            "新建指令", "指令名称（例如：我的刷怪路线）：", parent=self.root
-        )
-        if not name or not name.strip():
-            return
-        title = name.strip()
-        existing = {
-            str(row.get("title") or "")
-            for row in (load_library().get("instructions") or [])
-        }
-        if title in existing:
-            messagebox.showinfo("新建指令", "已经有同名指令了，换个名字。")
-            return
-
-        category = 3
-        current = getattr(self, "cmd_category", CATEGORY_ALL)
-        if current not in (CATEGORY_ALL, -1, None):
+                button.configure(
+                    bg="#eef2ff", fg="#1e3a8a",
+                    activebackground="#dbeafe", activeforeground="#1e3a8a",
+                )
+        if key in ("guild", "maze") and not self.assist.running:
             try:
-                category = int(current)
-            except (TypeError, ValueError):
-                category = 3
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        if key == "maze":
+            if not getattr(self, "_maze_auto", False):
+                self._maze_auto = True
+                self.root.after(800, self._maze_auto_poll)
+        else:
+            self._maze_auto = False
 
-        def _on_save(body: str) -> None:
-            save_user_instruction(title, body, category)
-            self.refresh_command_list(select_title=title)
-            self.cmd_status.set("已新建：%s" % title)
+    def _update_arena_button(self) -> None:
+        if getattr(self, "arena_runner", None) is not None and self.arena_runner.running:
+            return
+        try:
+            self.arena_run_btn.configure(
+                text="开始极速竞技" if self.arena_fast_var.get() else "开始竞技"
+            )
+        except tk.TclError:
+            pass
 
-        self._instruction_editor(
-            title, self.NEW_INSTRUCTION_TEMPLATE, _on_save, "新建指令 - %s" % title
+    def _append_arena_log(self, text: str) -> None:
+        widget = getattr(self, "arena_log_text", None)
+        if widget is None:
+            return
+        try:
+            state = str(widget.cget("state"))
+            if state == tk.DISABLED:
+                widget.configure(state=tk.NORMAL)
+            widget.insert(tk.END, str(text) + "\n")
+            widget.see(tk.END)
+            if state == tk.DISABLED:
+                widget.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def _arena_log(self, text: str) -> None:
+        self._arena_events.put(("log", str(text)))
+
+    def _on_arena_finished(self, ok: bool, message: str) -> None:
+        self._arena_events.put(("done", ok, message))
+
+    def _on_arena_state(self, state: Dict[str, Any]) -> None:
+        self._arena_events.put(("state", dict(state or {})))
+
+    def _pump_arena_events(self) -> None:
+        while True:
+            try:
+                event = self._arena_events.get_nowait()
+            except queue.Empty:
+                break
+            if not event:
+                continue
+            kind = event[0]
+            try:
+                if kind == "log":
+                    self._append_arena_log(str(event[1]))
+                elif kind == "state":
+                    st = event[1] if isinstance(event[1], dict) else {}
+                    if st.get("running"):
+                        total = int(st.get("totalFree") or 0)
+                        done = int(st.get("challenges") or 0)
+                        free = int(st.get("free") or 0)
+                        action = str(st.get("action") or "")
+                        text = "运行中：已挑战 %d" % done
+                        if total:
+                            text += "/%d" % total
+                        text += " 次，剩余免费 %d" % free
+                        if action:
+                            text += " · " + action
+                        self.arena_status.set(text)
+                elif kind == "done":
+                    _, ok, message = event
+                    self._append_arena_log(("✔ " if ok else "■ ") + str(message or ""))
+                    self.arena_status.set(("完成：" if ok else "停止：") + str(message or ""))
+                    try:
+                        self._update_arena_button()
+                        self.arena_probe_btn.configure(state=tk.NORMAL)
+                        self.arena_count_box.configure(state=tk.NORMAL)
+                        self.arena_fast_check.configure(state=tk.NORMAL)
+                        self.arena_paid_check.configure(state=tk.NORMAL)
+                        self.arena_battle_check.configure(state=tk.NORMAL)
+                    except tk.TclError:
+                        pass
+            except tk.TclError:
+                pass
+        try:
+            self.root.after(200, self._pump_arena_events)
+        except tk.TclError:
+            pass
+
+    def arena_probe(self) -> None:
+        if self.arena_runner.running:
+            self.arena_status.set("竞技场正在运行，先停止再查询")
+            return
+        try:
+            data = self.arena_runner.probe(load_mapping())
+        except Exception as exc:  # noqa: BLE001
+            self.arena_status.set("查询失败：%s" % exc)
+            return
+        if data.get("error"):
+            self.arena_status.set("查询失败：%s" % data.get("error"))
+            return
+        state = "主城" if data.get("main") else "非主城"
+        if data.get("transitioning"):
+            state += " · 过场中"
+        if data.get("resultOpen"):
+            state += " · 结算页未关"
+        rank = data.get("rank") or ""
+        ticket_text = ""
+        if data.get("tickets") is not None:
+            ticket_text = " · 门票 %s（每次 %s）" % (
+                data.get("tickets"),
+                data.get("ticketCost") or 0,
+            )
+        auto_text = ""
+        if data.get("autoTotal") is not None:
+            auto_text = " · 自动次数 %s/%s" % (
+                data.get("autoRemaining") or 0,
+                data.get("autoTotal") or 0,
+            )
+        self.arena_status.set(
+            "免费 %s 次 · 阵容 %s 人 · 对手 %s 个（%s-%s分）%s%s%s · %s"
+            % (
+                data.get("free", 0),
+                data.get("lineup", 0),
+                data.get("opponents", 0),
+                data.get("minPoints", 0),
+                data.get("maxPoints", 0),
+                (" · " + rank) if rank else "",
+                ticket_text,
+                auto_text,
+                state,
+            )
         )
 
-    def restore_instruction(self) -> None:
-        """把改过的内置指令还原成原版。"""
-        item = self._selected_command()
-        if not item:
+    def toggle_arena(self) -> None:
+        if self.arena_runner.running:
+            self.arena_runner.stop()
+            self.arena_status.set("正在停止…（当前这场结束后停止）")
             return
-        if item.get("custom"):
-            messagebox.showinfo("还原内置指令", "「我的」指令请直接用「编辑」或「删除」")
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        mapping = load_mapping()
+        try:
+            build = self.assist.current_build()
+        except Exception:  # noqa: BLE001
+            build = ""
+        if build:
+            if build not in (mapping.get("builds") or {}):
+                messagebox.showinfo("荣耀竞技场", "游戏版本 %s 未适配竞技场" % build)
+                return
+            mapping["current"] = build
+        try:
+            count = int(float(str(self.arena_count_var.get()).strip() or "0"))
+        except (TypeError, ValueError):
+            messagebox.showerror("荣耀竞技场", "挑战次数必须是数字")
             return
-        if not item.get("edited"):
-            messagebox.showinfo("还原内置指令", "这条是内置原版，没有改过")
+        count = max(0, min(99, count))
+        fast = bool(self.arena_fast_var.get())
+        allow_paid = bool(self.arena_paid_var.get())
+        allow_battle = bool(self.arena_battle_var.get())
+        try:
+            self.arena_runner.start(
+                mapping,
+                count=count,
+                fast=fast,
+                allow_paid=allow_paid,
+                allow_battle=allow_battle,
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("荣耀竞技场", str(exc))
             return
-        if not messagebox.askyesno("还原内置指令", "把「%s」恢复成内置原版？" % (item.get("title") or "")):
+        self._append_arena_log(
+            "—— 开始荣耀竞技场（%s%s%s）——"
+            % (
+                "极速" if fast else "正常战斗",
+                "，允许付费" if allow_paid else "",
+                "，免费极速失败可进战斗" if allow_battle else "，免费极速失败即停止",
+            )
+        )
+        self.arena_status.set(
+            "运行中：免费直接结算%s"
+            % ("，免费用完继续付费战斗" if allow_paid else "")
+        )
+        try:
+            self.arena_run_btn.configure(text="停止")
+            self.arena_probe_btn.configure(state=tk.DISABLED)
+            self.arena_count_box.configure(state=tk.DISABLED)
+            self.arena_fast_check.configure(state=tk.DISABLED)
+            self.arena_paid_check.configure(state=tk.DISABLED)
+            self.arena_battle_check.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    # ------------------------------------------------------------ 槽位
+
+    def _slot_label(self, index: int) -> str:
+        if 0 <= index < len(self.cmd_slots):
+            return slot_label(self.cmd_slots[index], index)
+        return "槽位 %d · 空" % (index + 1)
+
+    def _on_cmd_text_modified(self, _event=None) -> None:
+        """用户手动改内容后，取消“从指令列表载入”的未保存状态。"""
+        try:
+            if not self.cmd_text.edit_modified():
+                return
+            if time.monotonic() < getattr(self, "_cmd_text_guard_until", 0.0):
+                self.cmd_text.edit_modified(False)
+                return
+            if not getattr(self, "_cmd_syncing_slot", False):
+                self._cmd_preset_loaded = False
+            self.cmd_text.edit_modified(False)
+        except tk.TclError:
+            pass
+
+    def _save_current_slot_into_memory(self) -> None:
+        if not hasattr(self, "cmd_text"):
             return
-        clear_instruction_override(item.get("id"))
-        self.refresh_command_list(select_title=str(item.get("title") or ""))
-        self.cmd_status.set("已还原：%s" % (item.get("title") or ""))
+        content = self.cmd_text.get("1.0", "end-1c")
+        set_slot(self.cmd_slots, self._cmd_slot_index, content)
+        self._cmd_preset_loaded = False
+        self._refresh_preset_box()
+
+    def _set_editor_content(self, content: str) -> None:
+        self._cmd_syncing_slot = True
+        old_state = str(self.cmd_text.cget("state"))
+        try:
+            if old_state == tk.DISABLED:
+                self.cmd_text.configure(state=tk.NORMAL)
+            self.cmd_text.delete("1.0", tk.END)
+            self.cmd_text.insert("1.0", content)
+            self.cmd_text.tag_remove("run", "1.0", tk.END)
+            self.cmd_text.see("1.0")
+            self.cmd_text.edit_modified(False)
+        finally:
+            if old_state == tk.DISABLED:
+                try:
+                    self.cmd_text.configure(state=tk.DISABLED)
+                except tk.TclError:
+                    pass
+            self._cmd_syncing_slot = False
+            self._cmd_text_guard_until = time.monotonic() + 0.25
+        self._cmd_step_line = 1
+
+    def _load_slot_into_editor(self) -> None:
+        content = str(self.cmd_slots[self._cmd_slot_index].get("content") or "")
+        self._set_editor_content(content)
+        self._cmd_preset_loaded = False
+        self._cmd_preset_title = ""
+        self._refresh_preset_box()
+
+    def _persist_slots(self) -> None:
+        try:
+            save_slots({"active": self._cmd_slot_index + 1, "slots": self.cmd_slots})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _save_slot_clicked(self) -> None:
+        self._save_current_slot_into_memory()
+        self._persist_slots()
+        self.cmd_status.set("已保存：%s" % self._slot_label(self._cmd_slot_index))
+
+    def _new_slot_clicked(self) -> None:
+        if self.instruction_runner.running or self._cmd_recorder.recording:
+            return
+        if not self._cmd_preset_loaded:
+            self._save_current_slot_into_memory()
+        empty = None
+        for i, slot in enumerate(self.cmd_slots):
+            if not str(slot.get("content") or "").strip():
+                empty = i
+                break
+        if empty is None:
+            messagebox.showinfo("新建脚本", "10 个槽位都满了，先清空一个再新建")
+            return
+        name = simpledialog.askstring(
+            "新建脚本", "脚本名称：", initialvalue="未命名", parent=self.root
+        )
+        if name is None:
+            return
+        name = name.strip() or "未命名"
+        self._cmd_slot_index = empty
+        set_slot(self.cmd_slots, empty, "", title=name)
+        self._load_slot_into_editor()
+        self._persist_slots()
+        self._cmd_category_id = -1
+        try:
+            index = self._cmd_category_ids.index(-1)
+            self.cmd_category_box.current(index)
+            self.cmd_category_var.set(self._cmd_category_names[index])
+            self._refresh_preset_box()
+        except (ValueError, tk.TclError):
+            pass
+        self.cmd_status.set("已新建到 %s，写完后点「保存」" % self._slot_label(empty))
+
+    def _rename_slot_clicked(self) -> None:
+        if self.instruction_runner.running or self._cmd_recorder.recording:
+            return
+        current = str(self.cmd_slots[self._cmd_slot_index].get("title") or "")
+        name = simpledialog.askstring(
+            "重命名",
+            "给 %s 起个名字：" % self._slot_label(self._cmd_slot_index),
+            initialvalue=current,
+            parent=self.root,
+        )
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            return
+        self.cmd_slots[self._cmd_slot_index]["title"] = name
+        self._persist_slots()
+        self._refresh_preset_box()
+        self.cmd_status.set("已重命名：%s" % name)
+
+    def _clear_slot_clicked(self) -> None:
+        if self.instruction_runner.running or self._cmd_recorder.recording:
+            return
+        if not messagebox.askyesno("清空槽位", "清空 %s？" % self._slot_label(self._cmd_slot_index)):
+            return
+        set_slot(self.cmd_slots, self._cmd_slot_index, "")
+        self._load_slot_into_editor()
+        self._persist_slots()
+        self.cmd_status.set("已清空：%s" % self._slot_label(self._cmd_slot_index))
+
+    def _cmd_slot_map(self) -> dict:
+        slots = {}
+        for i, slot in enumerate(self.cmd_slots):
+            content = str(slot.get("content") or "")
+            if i == self._cmd_slot_index:
+                content = self.cmd_text.get("1.0", "end-1c")
+            if content.strip():
+                slots[i + 1] = content
+        return slots
+
+    def _set_commands_editable(self, editable: bool) -> None:
+        state = tk.NORMAL if editable else tk.DISABLED
+        try:
+            self.cmd_text.configure(state=state)
+        except tk.TclError:
+            pass
+        for widget in (
+            getattr(self, "cmd_category_box", None),
+            getattr(self, "cmd_preset_box", None),
+        ):
+            if widget is None:
+                continue
+            try:
+                widget.configure(state="readonly" if editable else "disabled")
+            except tk.TclError:
+                pass
+        for widget in (
+            getattr(self, "cmd_save_btn", None),
+            getattr(self, "cmd_new_btn", None),
+            getattr(self, "cmd_rename_btn", None),
+            getattr(self, "cmd_clear_btn", None),
+            getattr(self, "cmd_record_btn", None),
+        ):
+            if widget is None:
+                continue
+            try:
+                widget.configure(state="normal" if editable else "disabled")
+            except tk.TclError:
+                pass
+
+    def _append_recorded_lines(self, lines: List[str]) -> None:
+        if not lines:
+            return
+        try:
+            state = str(self.cmd_text.cget("state"))
+            if state == tk.DISABLED:
+                self.cmd_text.configure(state=tk.NORMAL)
+            text = self.cmd_text.get("1.0", "end-1c")
+            if text and not text.endswith("\n"):
+                self.cmd_text.insert(tk.END, "\n")
+            self.cmd_text.insert(tk.END, "\n".join(lines) + "\n")
+            self.cmd_text.see(tk.END)
+            if state == tk.DISABLED:
+                self.cmd_text.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def toggle_recording(self) -> None:
+        if self._cmd_recorder.recording:
+            lines = self._cmd_recorder.stop()
+            self._append_recorded_lines(lines)
+            self._save_current_slot_into_memory()
+            self._persist_slots()
+            try:
+                self.cmd_record_btn.configure(text="录制")
+            except tk.TclError:
+                pass
+            self._set_commands_editable(True)
+            try:
+                self.cmd_run_btn.configure(state=tk.NORMAL)
+            except tk.TclError:
+                pass
+            self.cmd_status.set("录制结束，已写入 %s" % self._slot_label(self._cmd_slot_index))
+            return
+
+        if self.instruction_runner.running:
+            messagebox.showinfo("录制", "先停止当前指令再录制")
+            return
+        if getattr(self.assist, "bridge", None) is None:
+            messagebox.showinfo(
+                "录制",
+                "还没连上游戏窗口。\n\n请用首页「打开游戏窗口」打开游戏，"
+                "等顶部显示「辅助已连接（版本号）」后再录制。",
+            )
+            return
+        if not self._cmd_recorder.start():
+            messagebox.showerror("录制", "录制启动失败，先重新连接游戏窗口再试")
+            return
+
+        self._save_current_slot_into_memory()
+        stamp = time.strftime("%H:%M:%S")
+        self._append_recorded_lines(["# 录制 %s" % stamp])
+        try:
+            self.cmd_record_btn.configure(text="停止录制")
+        except tk.TclError:
+            pass
+        self._set_commands_editable(False)
+        try:
+            self.cmd_run_btn.configure(state=tk.DISABLED)
+            self.cmd_record_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            pass
+        self.cmd_status.set("录制中：在游戏窗口里点击/拖动摇杆/滚轮，回来点「停止录制」")
+        self._poll_recording()
+
+    def _poll_recording(self) -> None:
+        if not self._cmd_recorder.recording:
+            return
+        self._append_recorded_lines(self._cmd_recorder.poll())
+        try:
+            self.root.after(250, self._poll_recording)
+        except tk.TclError:
+            pass
+
+    def _on_instruction_slot(self, slot: int) -> None:
+        self._cmd_events.put(("slot", int(slot)))
+
+    def _on_category_selected(self) -> None:
+        index = self.cmd_category_box.current()
+        if 0 <= index < len(self._cmd_category_ids):
+            self._cmd_category_id = int(self._cmd_category_ids[index])
+            self._refresh_preset_box()
+
+    def _refresh_preset_box(self) -> None:
+        if self._cmd_category_id == -1:
+            rows = []
+            for i, slot in enumerate(self.cmd_slots):
+                rows.append(
+                    {
+                        "slot_index": i,
+                        "title": slot_label(slot, i),
+                        "content": str(slot.get("content") or ""),
+                        "category_id": -1,
+                    }
+                )
+            labels = [str(item.get("title") or "") for item in rows]
+        else:
+            if self._cmd_category_id == 0:
+                rows = list(self._cmd_presets)
+            else:
+                rows = [
+                    item
+                    for item in self._cmd_presets
+                    if int(item.get("category_id") or 0) == self._cmd_category_id
+                ]
+            labels = [str(item.get("title") or "") for item in rows]
+        self._cmd_visible_presets = rows
+        try:
+            self.cmd_preset_box.configure(values=labels)
+            self.cmd_preset_var.set("")
+            self.cmd_preset_box.set("")
+            if self._cmd_category_id == -1:
+                for index, item in enumerate(rows):
+                    if int(item.get("slot_index")) == self._cmd_slot_index:
+                        self.cmd_preset_box.current(index)
+                        break
+        except tk.TclError:
+            pass
+
+    def _load_selected_preset(self) -> None:
+        if self.instruction_runner.running or self._cmd_recorder.recording:
+            messagebox.showinfo("运行命令", "先停止当前指令/录制，再切换指令列表")
+            return
+        index = self.cmd_preset_box.current()
+        presets = getattr(self, "_cmd_visible_presets", [])
+        if index < 0 or index >= len(presets):
+            return
+        item = presets[index]
+        if item.get("slot_index") is not None:
+            target = int(item["slot_index"])
+            if target == self._cmd_slot_index:
+                self.cmd_status.set("当前：%s" % self._slot_label(self._cmd_slot_index))
+                return
+            if not self._cmd_preset_loaded:
+                self._save_current_slot_into_memory()
+            self._cmd_slot_index = target
+            self._load_slot_into_editor()
+            self._persist_slots()
+            self.cmd_status.set("当前：%s" % self._slot_label(self._cmd_slot_index))
+            return
+        if not self._cmd_preset_loaded:
+            self._save_current_slot_into_memory()
+        content = format_content(str(item.get("content") or ""))
+        if not content:
+            return
+        self._set_editor_content(content)
+        self._cmd_preset_loaded = True
+        self._cmd_preset_title = str(item.get("title") or "未命名指令")
+        self.cmd_status.set(
+            "已载入：%s（点「保存」写入 %s，或点「运行」直接执行）"
+            % (self._cmd_preset_title, self._slot_label(self._cmd_slot_index))
+        )
 
     def toggle_instruction(self) -> None:
         """一个按钮：没跑就运行，跑着就停止。"""
@@ -2372,18 +2867,24 @@ class AppUI:
 
     def _highlight_step(self, raw: str) -> None:
         """把当前执行的那一行标黄（重复的行接着上次往下找）。"""
+        def norm(value: str) -> str:
+            return (
+                str(value).replace("（", "(").replace("）", ")").replace("，", ",").strip()
+            )
+
         try:
             text = self.cmd_text
+            target = norm(raw)
             last = int(str(text.index("end-1c")).split(".")[0])
             start = getattr(self, "_cmd_step_line", 1)
             found = 0
             for lineno in range(start, last + 1):
-                if text.get("%d.0" % lineno, "%d.end" % lineno).strip() == raw.strip():
+                if norm(text.get("%d.0" % lineno, "%d.end" % lineno)) == target:
                     found = lineno
                     break
             if not found:
                 for lineno in range(1, start):
-                    if text.get("%d.0" % lineno, "%d.end" % lineno).strip() == raw.strip():
+                    if norm(text.get("%d.0" % lineno, "%d.end" % lineno)) == target:
                         found = lineno
                         break
             text.tag_remove("run", "1.0", tk.END)
@@ -2395,24 +2896,75 @@ class AppUI:
             pass
 
     def run_instruction(self) -> None:
-        item = self._selected_command()
-        if not item:
-            messagebox.showinfo("运行指令", "先从列表里选一条指令")
+        if self._cmd_recorder.recording:
+            messagebox.showinfo("运行命令", "先停止录制")
             return
         if self.instruction_runner.running:
             self.cmd_status.set("上一条还在跑，先点「停止」")
             return
-        content = format_content(str(item.get("content") or ""))
+        self._save_current_slot_into_memory()
+        self._persist_slots()
+        content = format_content(self.cmd_text.get("1.0", "end-1c"))
+        if not content:
+            messagebox.showinfo("运行命令", "先写点指令再运行")
+            return
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            build = self.assist.current_build()
+        except Exception:  # noqa: BLE001
+            build = ""
+        if not build:
+            try:
+                status = self.assist_message_var.get()
+            except Exception:  # noqa: BLE001
+                status = ""
+            # 状态栏里的「辅助已连接（4758a）」也来自运行时，snapshot 读不到时兜底用它。
+            if "已连接" in status and "（" in status and "）" in status:
+                candidate = status.split("（", 1)[1].split("）", 1)[0].strip()
+                if candidate and candidate != "未知版本":
+                    build = candidate
+            if not build:
+                messagebox.showinfo(
+                    "运行命令",
+                    "还没识别到游戏版本。\n\n"
+                    "当前辅助状态：%s\n\n"
+                    "请用首页的「打开游戏窗口」打开游戏（不要用普通浏览器），"
+                    "登录并进入主界面，等顶部显示「辅助已连接（版本号）」后再运行。"
+                    % (status or "辅助未连接"),
+                )
+                return
         self._cmd_step_line = 1
+        self._cmd_running_slot = self._cmd_slot_index + 1
+        slots = self._cmd_slot_map()
         try:
             self.instruction_runner.start(
-                str(item.get("title") or script_title(content) or "指令"), content, load_mapping()
+                script_title(content) or "槽位%d" % (self._cmd_slot_index + 1),
+                content,
+                load_mapping(),
+                build=build,
+                slots=slots,
+                start_slot=self._cmd_slot_index + 1,
             )
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("运行指令", str(exc))
+            messagebox.showerror("运行命令", str(exc))
             return
+        self.config["commands_text"] = content
+        try:
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        self.cmd_text.tag_remove("run", "1.0", tk.END)
         self._set_run_button(True)
-        self.cmd_status.set("运行中…")
+        self._set_commands_editable(False)
+        self.cmd_status.set("运行中：%s" % self._slot_label(self._cmd_slot_index))
+
+    def _run_from_shortcut(self, _event=None):
+        self.toggle_instruction()
+        return "break"
 
     def stop_instruction(self) -> None:
         if self.instruction_runner.running:
@@ -2422,6 +2974,11 @@ class AppUI:
     def _on_instruction_step(self, index: int, total: int, text: str) -> None:
         """运行器线程回调：只丢队列，界面由主线程 _pump_cmd_events 更新。"""
         self._cmd_events.put(("step", index, total, text))
+
+    def _instruction_log(self, text: str) -> None:
+        """运行器日志：同时写队列（状态条显示传送/采集等细节）。"""
+        self.append_log(text)
+        self._cmd_events.put(("log", str(text)))
 
     def _on_instruction_finished(self, ok: bool, message: str) -> None:
         self._cmd_events.put(("done", ok, message))
@@ -2437,13 +2994,28 @@ class AppUI:
                 continue
             kind = event[0]
             try:
-                if kind == "step":
+                if kind == "slot":
+                    _, slot_no = event
+                    self._cmd_running_slot = int(slot_no)
+                    self._cmd_slot_index = max(0, min(SLOT_COUNT - 1, int(slot_no) - 1))
+                    self._load_slot_into_editor()
+                    self.cmd_status.set("运行中：%s" % self._slot_label(self._cmd_slot_index))
+                elif kind == "step":
                     _, index, total, raw = event
-                    self.cmd_status.set("运行中 %d/%d：%s" % (index, total, raw))
+                    self.cmd_status.set(
+                        "运行中 槽位%d %d/%d：%s"
+                        % (self._cmd_running_slot, index, total, raw)
+                    )
                     self._highlight_step(str(raw))
+                elif kind == "log":
+                    _, text = event
+                    text = str(text).strip()
+                    if text:
+                        self.cmd_status.set(text)
                 elif kind == "done":
                     _, ok, message = event
                     self._set_run_button(False)
+                    self._set_commands_editable(True)
                     self.cmd_status.set(("✔ " if ok else "■ ") + str(message or ""))
                     self.cmd_text.tag_remove("run", "1.0", tk.END)
             except tk.TclError:
@@ -2452,26 +3024,6 @@ class AppUI:
             self.root.after(150, self._pump_cmd_events)
         except tk.TclError:
             pass
-
-    def copy_instruction(self) -> None:
-        item = self._selected_command()
-        if not item:
-            return
-        content = format_content(str(item.get("content") or ""))
-        self.root.clipboard_clear()
-        self.root.clipboard_append(content)
-        self.cmd_status.set("已复制到剪贴板")
-
-    def delete_instruction(self) -> None:
-        item = self._selected_command()
-        if not item or not item.get("custom"):
-            messagebox.showinfo("删除指令", "只能删除「我的」里的指令")
-            return
-        if not messagebox.askyesno("删除指令", "删除「%s」？" % (item.get("title") or "")):
-            return
-        delete_user_instruction(str(item.get("title") or ""))
-        self.refresh_command_list()
-        self.cmd_status.set("已删除")
 
     def _restore_feature(self, feature: str, seconds: float, btn, status, attempt: int = 0) -> None:
         """恢复上次开着的刷新；刚启动时运行时可能还没装好，失败就过几秒重试。"""
@@ -2691,7 +3243,487 @@ class AppUI:
         self.assist.reconnect()
         self.append_log("已重新连接游戏窗口：正在重新注入运行时…")
 
+    def _pump_auto_chest_log(self) -> None:
+        while True:
+            try:
+                text = self._auto_chest_q.get_nowait()
+            except queue.Empty:
+                break
+            self.append_log(text)
+        try:
+            self.root.after(300, self._pump_auto_chest_log)
+        except tk.TclError:
+            pass
+
+    def _auto_chest_loop(self) -> None:
+        while not self._auto_chest_stop.is_set():
+            if not self.assist.running:
+                time.sleep(0.5)
+                continue
+            adapter = _AutoChestAdapter(
+                lambda: getattr(self.assist, "bridge", None),
+                self._auto_chest_q.put,
+                self._auto_chest_stop,
+            )
+            try:
+                run_chest_4758a(adapter, 0, "auto")
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc) or exc.__class__.__name__
+                if "已停止" not in msg:
+                    self._auto_chest_q.put("自动宝箱：" + msg)
+            for _ in range(80):
+                if self._auto_chest_stop.is_set():
+                    break
+                time.sleep(0.1)
+
+    def toggle_auto_chest(self) -> None:
+        on = bool(self.assist_auto_chest_var.get())
+        if on:
+            if not self.assist.running:
+                try:
+                    self.start_assist()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._auto_chest_stop.clear()
+            if self._auto_chest_thread is None or not self._auto_chest_thread.is_alive():
+                self._auto_chest_thread = threading.Thread(
+                    target=self._auto_chest_loop, daemon=True
+                )
+                self._auto_chest_thread.start()
+            self.append_log("自动宝箱：开启（每 8 秒检查一次）")
+            self.assist_auto_status.set("自动宝箱：运行中")
+        else:
+            self._auto_chest_stop.set()
+            self.append_log("自动宝箱：关闭")
+            self.assist_auto_status.set("自动宝箱：已关闭")
+
+    @staticmethod
+    def _guild_power_text(value: Any) -> str:
+        try:
+            return format(int(value), ",")
+        except (TypeError, ValueError):
+            return "0"
+
+    @staticmethod
+    def _guild_power_placeholder(value: Any) -> bool:
+        """100/200/300 是游戏给未配置队伍下发的占位战力，不是真实战力。"""
+        try:
+            power = int(value)
+        except (TypeError, ValueError):
+            return False
+        return 0 <= power <= 300 and power % 100 == 0
+
+    @classmethod
+    def _guild_member_power_text(cls, value: Any) -> str:
+        return "未配置" if cls._guild_power_placeholder(value) else cls._guild_power_text(value)
+
+    @classmethod
+    def _guild_group_power(cls, members: List[Dict[str, Any]]):
+        real = [m for m in members if not cls._guild_power_placeholder(m.get("power"))]
+        power = sum(int(m.get("power") or 0) for m in real)
+        return power, len(members) - len(real), bool(real)
+
+    def _build_guild_panel(self, parent: ttk.Frame) -> None:
+        note = tk.Label(
+            parent,
+            text=(
+                "说明：战力 100 / 200 / 300 是游戏给未配置队伍下发的占位值"
+                "（每队默认 100），不是真实战力。\n"
+                "工具会显示为「未配置」，并且不计入总战力；配置好队伍后才会显示真实战力。"
+            ),
+            foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=700, padx=10, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        )
+        note.pack(fill=tk.X, pady=(0, 6))
+
+        bar = ttk.Frame(parent)
+        bar.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(bar, text="阵营").pack(side=tk.LEFT)
+        self._guild_camp_var = tk.StringVar(value="全部")
+        ttk.Combobox(
+            bar, textvariable=self._guild_camp_var, values=["全部", "我方", "敌方"],
+            width=6, state="readonly",
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Button(bar, text="查询", width=8, command=self._guild_query).pack(side=tk.LEFT)
+        ttk.Button(bar, text="复制结果", width=9, command=self._guild_copy).pack(
+            side=tk.LEFT, padx=(6, 0)
+        )
+
+        self._guild_status = tk.StringVar(value="点「查询」读取据点成员与战力（每方 1~13 号据点）")
+        ttk.Label(
+            parent, textvariable=self._guild_status, foreground="#1a4d8f",
+        ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
+
+        body = ttk.Frame(parent)
+        body.pack(fill=tk.BOTH, expand=True)
+        columns = ("camp", "stronghold", "count", "power", "members")
+        tree = ttk.Treeview(body, columns=columns, show="headings", height=8)
+        for col, text, width, anchor_side in (
+            ("camp", "阵营", 60, tk.CENTER),
+            ("stronghold", "据点", 70, tk.CENTER),
+            ("count", "人数", 50, tk.CENTER),
+            ("power", "总战力", 110, tk.E),
+            ("members", "成员", 360, tk.W),
+        ):
+            tree.heading(col, text=text)
+            tree.column(col, width=width, anchor=anchor_side, stretch=(col == "members"))
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        detail = ttk.LabelFrame(parent, text="成员明细", padding=4)
+        detail.pack(fill=tk.X, pady=(6, 0))
+        text = tk.Text(detail, height=5, wrap=tk.WORD, font=("Microsoft YaHei UI", 9))
+        tsb = ttk.Scrollbar(detail, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=tsb.set, state=tk.DISABLED)
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._guild_tree = tree
+        self._guild_text = text
+        tree.bind("<<TreeviewSelect>>", self._guild_show_detail)
+
+    def _guild_query(self) -> None:
+        tree = getattr(self, "_guild_tree", None)
+        if tree is None or not tree.winfo_exists():
+            return
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        camp = {"我方": 1, "敌方": 2}.get(self._guild_camp_var.get(), 0)
+        result = self.assist.guild_intel_start(camp)
+        if not result.get("ok"):
+            self._guild_status.set("查询失败：%s" % (result.get("error") or "未知原因"))
+            return
+        self._guild_status.set("查询中 0/%s…" % (result.get("total") or 26))
+        if not getattr(self, "_guild_polling", False):
+            self._guild_polling = True
+            self.root.after(300, self._guild_poll)
+
+    def _guild_poll(self) -> None:
+        tree = getattr(self, "_guild_tree", None)
+        if tree is None or not tree.winfo_exists():
+            self._guild_polling = False
+            return
+        state = self.assist.guild_intel_state()
+        if not state:
+            self.root.after(400, self._guild_poll)
+            return
+        done = int(state.get("done") or 0)
+        total = int(state.get("total") or 0)
+        if state.get("running"):
+            self._guild_status.set("查询中 %d/%d…" % (done, total))
+            self.root.after(350, self._guild_poll)
+            return
+        self._guild_polling = False
+        self._guild_render(state.get("rows") or [])
+
+    def _guild_render(self, rows: List[Dict[str, Any]]) -> None:
+        tree = getattr(self, "_guild_tree", None)
+        if tree is None:
+            return
+        rows = sorted(
+            rows,
+            key=lambda row: (int(row.get("camp") or 0), int(row.get("id") or 0)),
+        )
+        self._guild_rows = rows
+        try:
+            tree.delete(*tree.get_children())
+        except tk.TclError:
+            return
+        own_count = own_power = enemy_count = enemy_power = 0
+        own_unset = enemy_unset = 0
+        for row in rows:
+            camp = int(row.get("camp") or 0)
+            label = "我方" if camp == 1 else "敌方"
+            error = str(row.get("error") or "")
+            members = row.get("members") or []
+            if error:
+                count = 0
+                power_text = "0"
+                summary = "查询失败：%s" % error
+            else:
+                count = int(row.get("count") or len(members))
+                power, unset, has_real = self._guild_group_power(members)
+                power_text = "未配置" if members and not has_real else self._guild_power_text(power)
+                if members:
+                    parts = []
+                    for member in members[:3]:
+                        name = str(member.get("name") or member.get("id") or "?")
+                        parts.append("%s(%s)" % (name, self._guild_member_power_text(member.get("power"))))
+                    summary = "、".join(parts)
+                    if len(members) > 3:
+                        summary += " 等 %d 人" % len(members)
+                else:
+                    summary = "（无人驻守）"
+                if camp == 1:
+                    own_count += count
+                    own_power += power
+                    own_unset += unset
+                elif camp == 2:
+                    enemy_count += count
+                    enemy_power += power
+                    enemy_unset += unset
+            tree.insert("", "end", values=(
+                label,
+                "%d 号" % int(row.get("id") or 0),
+                count,
+                power_text,
+                summary,
+            ))
+        unset_hint = ""
+        if own_unset or enemy_unset:
+            unset_hint = "（%d 人未配置队伍）" % (own_unset + enemy_unset)
+        self._guild_status.set(
+            "我方 %d 人 / 战力 %s；敌方 %d 人 / 战力 %s%s"
+            % (own_count, self._guild_power_text(own_power), enemy_count,
+               self._guild_power_text(enemy_power), unset_hint)
+        )
+        if rows:
+            first = tree.get_children()
+            if first:
+                tree.selection_set(first[0])
+
+    def _guild_show_detail(self, _event=None) -> None:
+        tree = getattr(self, "_guild_tree", None)
+        text = getattr(self, "_guild_text", None)
+        if tree is None or text is None:
+            return
+        selection = tree.selection()
+        if not selection:
+            return
+        index = tree.index(selection[0])
+        rows = getattr(self, "_guild_rows", [])
+        if index < 0 or index >= len(rows):
+            return
+        row = rows[index]
+        camp = "我方" if int(row.get("camp") or 0) == 1 else "敌方"
+        members = row.get("members") or []
+        power, unset, has_real = self._guild_group_power(members)
+        power_text = "未配置" if members and not has_real else self._guild_power_text(power)
+        lines = [
+            "%s %d 号据点｜人数 %s｜总战力 %s"
+            % (camp, int(row.get("id") or 0), row.get("count") or 0, power_text)
+        ]
+        error = str(row.get("error") or "")
+        if error:
+            lines.append("查询失败：%s" % error)
+        if unset:
+            lines.append("其中 %d 人未配置队伍，占位战力（100/200/300）不计入总战力。" % unset)
+        for member_index, member in enumerate(members, 1):
+            lines.append(
+                "%2d. %s  战力 %s  等级 %s  区服 %s  ID %s"
+                % (
+                    member_index,
+                    member.get("name") or "?",
+                    self._guild_member_power_text(member.get("power")),
+                    member.get("level") or 0,
+                    member.get("server") or "-",
+                    member.get("id") or "-",
+                )
+            )
+        text.configure(state=tk.NORMAL)
+        text.delete("1.0", tk.END)
+        text.insert("1.0", "\n".join(lines))
+        text.configure(state=tk.DISABLED)
+
+    def _guild_copy(self) -> None:
+        rows = getattr(self, "_guild_rows", [])
+        if not rows:
+            self._guild_status.set("还没有查询结果")
+            return
+        lines: List[str] = []
+        for row in rows:
+            camp = "我方" if int(row.get("camp") or 0) == 1 else "敌方"
+            members = row.get("members") or []
+            power, unset, has_real = self._guild_group_power(members)
+            power_text = "未配置" if members and not has_real else self._guild_power_text(power)
+            lines.append(
+                "%s %d 号据点  人数 %s  总战力 %s"
+                % (camp, int(row.get("id") or 0), row.get("count") or 0, power_text)
+            )
+            if unset:
+                lines.append("  其中 %d 人未配置队伍（占位战力不计入总战力）" % unset)
+            if row.get("error"):
+                lines.append("  查询失败：%s" % row.get("error"))
+                continue
+            for member in members:
+                lines.append(
+                    "  %s  战力 %s  等级 %s  区服 %s  ID %s"
+                    % (
+                        member.get("name") or "?",
+                        self._guild_member_power_text(member.get("power")),
+                        member.get("level") or 0,
+                        member.get("server") or "-",
+                        member.get("id") or "-",
+                    )
+                )
+        self.root.clipboard_clear()
+        self.root.clipboard_append("\n".join(lines))
+        self._guild_status.set("已复制 %d 条据点记录" % len(rows))
+
+    def _build_maze_panel(self, parent: ttk.Frame) -> None:
+        note = tk.Label(
+            parent,
+            text=(
+                "说明：只读取当前公会迷宫首领的血量、抗暴击、抗暴伤、命中和全部属性，"
+                "不会发起挑战或修改游戏数据。\n"
+                "请在「公会迷宫首领战斗」中点查询；离开战斗后仍会保留本次结果，刷新页面后清空。"
+            ),
+            foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=700, padx=10, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        )
+        note.pack(fill=tk.X, pady=(0, 6))
+
+        bar = ttk.Frame(parent)
+        bar.pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(bar, text="查询首领", width=10, command=self._maze_query).pack(side=tk.LEFT)
+        ttk.Button(bar, text="复制结果", width=9, command=self._maze_copy).pack(
+            side=tk.LEFT, padx=(6, 0)
+        )
+        self._maze_status = tk.StringVar(value="进入公会迷宫首领战斗后点「查询首领」")
+        ttk.Label(
+            parent, textvariable=self._maze_status, foreground="#1a4d8f",
+            wraplength=700, justify=tk.LEFT,
+        ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
+
+        self._maze_summary = tk.StringVar(value="尚未查询")
+        ttk.Label(
+            parent, textvariable=self._maze_summary, foreground="#334155",
+            wraplength=700, justify=tk.LEFT, font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
+
+        body = ttk.Frame(parent)
+        body.pack(fill=tk.BOTH, expand=True)
+        tree = ttk.Treeview(body, columns=("name", "value"), show="headings", height=8)
+        tree.heading("name", text="属性")
+        tree.heading("value", text="数值")
+        tree.column("name", width=240, anchor=tk.W, stretch=False)
+        tree.column("value", width=430, anchor=tk.W, stretch=True)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+        self._maze_tree = tree
+
+    def _maze_auto_poll(self) -> None:
+        """选中「公会迷宫」时自动观察，进入首领战斗后自动记录一次。"""
+        if not getattr(self, "_maze_auto", False) or getattr(self, "_play_current", None) != "maze":
+            self._maze_auto = False
+            return
+        try:
+            result = self.assist.maze_query()
+            snapshot = result.get("snapshot")
+            stamp = str((snapshot or {}).get("capturedAt") or "")
+            if result.get("ok") and snapshot and stamp != getattr(self, "_maze_last_stamp", ""):
+                self._maze_last_stamp = stamp
+                self._maze_render(snapshot, cached=False)
+            elif not self._maze_last_stamp:
+                cached = result.get("cached")
+                if cached:
+                    self._maze_last_stamp = str(cached.get("capturedAt") or "cached")
+                    self._maze_render(cached, cached=True)
+                    self._maze_status.set("等待进入首领战斗…（下面是上次结果）")
+        except Exception:  # noqa: BLE001
+            pass
+        if getattr(self, "_maze_auto", False) and getattr(self, "_play_current", None) == "maze":
+            self.root.after(2000, self._maze_auto_poll)
+
+    def _maze_query(self) -> None:
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        result = self.assist.maze_query()
+        snapshot = result.get("snapshot")
+        if result.get("ok") and snapshot:
+            self._maze_last_stamp = str(snapshot.get("capturedAt") or "")
+            self._maze_render(snapshot, cached=False)
+            return
+        error = str(result.get("error") or "未知原因")
+        cached = result.get("cached")
+        if cached:
+            self._maze_render(cached, cached=True)
+            self._maze_status.set("当前不在首领战斗：%s（下面是上次查询结果）" % error)
+        else:
+            self._maze_status.set("查询失败：%s" % error)
+            self._maze_summary.set("尚未查询")
+
+    def _maze_render(self, snapshot: Dict[str, Any], cached: bool = False) -> None:
+        def pct(value: Any) -> str:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return "-"
+            return "%.2f%%" % number
+
+        difficulty = snapshot.get("difficulty")
+        floor = snapshot.get("floor")
+        self._maze_summary.set(
+            "难度 %s · 第 %s 层 · 首领 %s · 总血量 %s · 抗暴击 %s · 抗暴伤 %s · 命中 %s"
+            % (
+                difficulty if difficulty not in (None, 0) else "-",
+                floor if floor not in (None, 0) else "-",
+                snapshot.get("bossId") or "-",
+                self._guild_power_text(snapshot.get("maxHp") or 0),
+                pct(snapshot.get("antiCrit")),
+                pct(snapshot.get("antiCritDamage")),
+                pct(snapshot.get("hitRate")),
+            )
+        )
+        tree = getattr(self, "_maze_tree", None)
+        if tree is not None:
+            try:
+                tree.delete(*tree.get_children())
+                for item in snapshot.get("attributes") or []:
+                    tree.insert("", "end", values=(
+                        item.get("name") or ("属性 #%s" % item.get("id")),
+                        item.get("value") or item.get("raw") or "",
+                    ))
+            except tk.TclError:
+                pass
+        stamp = str(snapshot.get("capturedAt") or "")
+        if cached:
+            self._maze_status.set("显示上次查询结果（%s）" % (stamp or "时间未知"))
+        else:
+            self._maze_status.set("查询成功：%s" % (stamp or "已记录"))
+
+    def _maze_copy(self) -> None:
+        snapshot = None
+        # 从面板当前显示内容复制，避免再发一次游戏请求
+        summary = getattr(self, "_maze_summary", None)
+        tree = getattr(self, "_maze_tree", None)
+        if summary is None or tree is None:
+            return
+        lines = [summary.get()]
+        for item in tree.get_children():
+            values = tree.item(item, "values")
+            if len(values) >= 2:
+                lines.append("%s：%s" % (values[0], values[1]))
+        self.root.clipboard_clear()
+        self.root.clipboard_append("\n".join(lines))
+        try:
+            self._maze_status.set("已复制首领属性")
+        except Exception:  # noqa: BLE001
+            pass
+
     def stop_assist(self) -> None:
+        self._disable_click_teleport()
+        try:
+            self.assist_auto_chest_var.set(False)
+            self._auto_chest_stop.set()
+        except Exception:  # noqa: BLE001
+            pass
         self.assist.stop()
         self.append_log("游戏辅助已停止（页面里的开关状态会在下次连接时恢复）")
 
@@ -2808,42 +3840,42 @@ class AppUI:
         status.set("正在关闭…" if closing else "正在应用…")
         self.append_log(f"已发送：{'关闭' if closing else '开启'}{label}")
 
-    def revive_click(self) -> None:
-        """单击=复活一次；双击（320ms 内点两下）=切换「一直开着」。"""
-        job = getattr(self, "_revive_click_job", None)
-        if job is not None:
-            try:
+    def _revive_flash(self, text: str) -> None:
+        """只显示按钮点击结果，1.6 秒后自动清掉。"""
+        try:
+            self.assist_revive_status.set(text)
+            job = getattr(self, "_revive_flash_job", None)
+            if job is not None:
                 self.root.after_cancel(job)
-            except Exception:  # noqa: BLE001
-                pass
-            self._revive_click_job = None
-            self.toggle_revive_auto()
-            return
-        self._revive_click_job = self.root.after(320, self._revive_single)
-
-    def _revive_single(self) -> None:
-        self._revive_click_job = None
-        self.revive_now()
+            self._revive_flash_job = self.root.after(
+                1600, lambda: self.assist_revive_status.set("")
+            )
+        except tk.TclError:
+            pass
 
     def toggle_revive_auto(self) -> None:
-        """切换「一直开着」：有人倒地就自动复活。"""
+        """开启/关闭自动复活。"""
         if not self.assist.running:
             self.start_assist()
         revive = (self.assist.state or {}).get("revive") or {}
+        self._revive_btn_pending = time.monotonic() + 1.5
         if revive.get("enabled"):
             self.assist.set_feature("revive", 0)
-            self.assist_revive_status.set("自动已关闭（点 2 次可再开）")
+            self.assist_revive_btn.configure(text="快速复活")
+            self._revive_flash("关闭成功")
             self.append_log("已发送：关闭自动复活")
             return
         self.assist.set_feature("revive", {"mode": "tp", "delay": 0})
-        self.assist_revive_status.set("一直开着：有人倒地就自动复活")
-        self.append_log("已发送：开启自动复活（一直开着）")
+        self.assist_revive_btn.configure(text="关闭")
+        self._revive_flash("开启成功")
+        self.append_log("已发送：开启自动复活")
 
     def clear_stuck(self) -> None:
         """清除卡住的切图标记：传送/回城点了没反应时用。"""
         if not self.assist.running:
             self.start_assist()
         result = self.assist.clear_stuck()
+        self._revive_flash("清除成功")
         message = str((result or {}).get("message") or "已尝试清除")
         try:
             self.append_log("已发送：" + message)
@@ -2855,7 +3887,7 @@ class AppUI:
         if not self.assist.running:
             self.start_assist()
         self.assist.set_feature("reviveNow", 1)
-        self.assist_revive_status.set("手动复活中…")
+        self._revive_flash("手动复活成功")
         self.append_log("已发送：立即复活（免费，瞬移营地复活后回到原地）")
 
     def refresh_blink_list(self) -> None:
@@ -2915,220 +3947,6 @@ class AppUI:
             % (len(rows), bosses, len(rows) - bosses, label, len(view))
         )
 
-    def auto_daily(self) -> None:
-        """自动去完成任务（传送/战斗/采集），做完自动领取。"""
-        if getattr(self, "_auto_daily_busy", False):
-            messagebox.showinfo("自动做日常", "上一次还在跑")
-            return
-        if not messagebox.askyesno(
-            "自动做日常",
-            "会自动传送、打怪、采集来完成任务（最多 4 分钟），完成后自动领取。\n继续？",
-        ):
-            return
-        if not self.assist.running:
-            self.start_assist()
-        self._auto_daily_busy = True
-        self.assist_daily_status.set("自动做日常：准备中…")
-        threading.Thread(target=self._auto_daily_worker, daemon=True).start()
-
-    def _auto_daily_log(self, text: str) -> None:
-        try:
-            self.root.after(0, lambda: self.assist_daily_status.set(text))
-        except tk.TclError:
-            pass
-
-    def _auto_daily_collect(self) -> None:
-        try:
-            runner = InstructionRunner(bridge_provider=lambda: self.assist.bridge, log=self.append_log)
-            runner._mapping = load_mapping()
-            runner._collect(["活动"])
-        except Exception as exc:  # noqa: BLE001
-            self.append_log("采集失败：%s" % exc)
-
-    def _auto_daily_hop_to(self, x: float, y: float, tries: int = 20) -> bool:
-        """分段瞬移过去（一次瞬移太远游戏会丢掉）；最远约 20 跳 ≈ 2 万米。"""
-        for _ in range(tries):
-            pos = self.assist.player_pos()
-            if len(pos) != 2:
-                return False
-            dx, dy = float(x) - pos[0], float(y) - pos[1]
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < 220:
-                return True
-            step = min(dist - 100, 1200)
-            self.assist.teleport_to(pos[0] + dx / dist * step, pos[1] + dy / dist * step)
-            time.sleep(0.7)
-        return False
-
-    def _auto_daily_walk_search(self, boss_name: str, seconds: float = 1.2) -> bool:
-        """传送落地后 BOSS 还没刷出来：按 8 个方向走一圈找它，找到就贴脸。"""
-        try:
-            runner = InstructionRunner(bridge_provider=lambda: self.assist.bridge, log=lambda _m: None)
-            runner._mapping = load_mapping()
-        except Exception:  # noqa: BLE001
-            return False
-        for _round in range(3):
-            for direction in ("上", "右上", "右", "右下", "下", "左下", "左", "左上"):
-                try:
-                    runner._move([direction, str(seconds)])
-                except Exception:  # noqa: BLE001
-                    pass
-                monsters = self.assist.list_monsters()
-                cand = [m for m in monsters if boss_name in str(m.get("name") or "")]
-                if cand:
-                    nearest = min(cand, key=lambda m: int(m.get("d") or 0))
-                    self._auto_daily_log("自动做日常：找到 %s（%s 米）" % (boss_name, nearest.get("d")))
-                    self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
-                    return True
-        return False
-
-    def _auto_daily_kill_boss(self, task: Dict[str, Any], boss_name: str) -> None:
-        """击杀指定 BOSS：走游戏的「前往 → 传送并追踪」，过去之后再闪现贴脸打。"""
-        task_id = task.get("id")
-        deadline = time.monotonic() + 90
-        tried_go = False
-        while time.monotonic() < deadline:
-            fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
-            if int(fresh.get("progress") or 0) >= int(fresh.get("target") or 1):
-                return
-            # 第一次：开面板 → 前往 → 传送并追踪
-            if not tried_go:
-                tried_go = True
-                self._auto_daily_log("自动做日常：打开任务面板，前往「%s」" % boss_name)
-                self.assist.open_daily_tasks()
-                time.sleep(1.0)
-                go = self.assist.task_go(boss_name)
-                if go.get("ok"):
-                    time.sleep(0.8)
-                    self.assist.task_teleport_track()
-                    time.sleep(3.0)
-                else:
-                    self._auto_daily_log("自动做日常：面板里没找到「%s」，直接闪现找" % boss_name)
-            monsters = self.assist.list_monsters()
-            cand = [m for m in monsters if boss_name in str(m.get("name") or "")]
-            if cand:
-                nearest = min(cand, key=lambda m: int(m.get("d") or 0))
-                self._auto_daily_log("自动做日常：去找 %s（%s 米）" % (boss_name, nearest.get("d")))
-                self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
-                time.sleep(8.0)
-            else:
-                self._auto_daily_log("自动做日常：全图没刷出 %s，朝任务方向走一段" % boss_name)
-                if self._auto_daily_walk_search(boss_name):
-                    time.sleep(8.0)
-                else:
-                    time.sleep(2.0)
-
-    def _auto_daily_kill_count(self, task: Dict[str, Any]) -> None:
-        """击杀 N 只怪：闪现到怪堆 + 重进地图刷怪，直到任务进度达标或超时。"""
-        task_id = task.get("id")
-        target = int(task.get("target") or 0)
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task_id) or {}
-            if int(fresh.get("progress") or 0) >= target:
-                return
-            monsters = self.assist.list_monsters()
-            if monsters:
-                nearest = min(monsters, key=lambda m: int(m.get("d") or 0))
-                self._auto_daily_hop_to(nearest.get("x"), nearest.get("y"))
-                time.sleep(4.0)
-            else:
-                self.assist.reload_map_now()
-                time.sleep(3.5)
-
-    def _auto_daily_share(self) -> None:
-        """分享任务：调游戏分享入口 → 最小化/恢复窗口 → 等任务进度。"""
-        try:
-            self.assist.share_game()
-        except Exception as exc:  # noqa: BLE001
-            self.append_log("分享入口调用失败：%s" % exc)
-        # 模拟"分享出去再回来"：最小化再恢复游戏窗口
-        try:
-            import ctypes
-
-            user32 = ctypes.windll.user32
-            hwnd = 0
-
-            def _find(title_prefix: str) -> int:
-                found = []
-                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-
-                def cb(h, _):
-                    n = user32.GetWindowTextLengthW(h)
-                    if n:
-                        buf = ctypes.create_unicode_buffer(n + 1)
-                        user32.GetWindowTextW(h, buf, n + 1)
-                        if buf.value.startswith(title_prefix):
-                            found.append(h)
-                    return True
-
-                user32.EnumWindows(WNDENUMPROC(cb), 0)
-                return found[0] if found else 0
-
-            hwnd = _find("Zizuo游戏窗")
-            if hwnd:
-                user32.ShowWindow(hwnd, 6)   # 最小化
-                time.sleep(1.6)
-                user32.ShowWindow(hwnd, 9)   # 恢复
-        except Exception as exc:  # noqa: BLE001
-            self.append_log("最小化窗口失败：%s" % exc)
-        time.sleep(2.0)
-
-    def _auto_daily_worker(self) -> None:
-        deadline = time.monotonic() + 240
-        try:
-            for _round in range(5):
-                tasks = self.assist.daily_task_list()
-                if not tasks:
-                    break
-                pending = [t for t in tasks if not t.get("claimed") and t.get("progress", 0) < t.get("target", 0)]
-                if not pending:
-                    break
-                for task in pending:
-                    if time.monotonic() > deadline:
-                        break
-                    try:
-                        self.assist.claim_daily_tasks()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    name = DAILY_TASK_NAMES.get(task["id"], "任务%d" % task["id"])
-                    if any(word in name for word in DAILY_TASK_SKIP):
-                        continue
-                    self._auto_daily_log("自动做日常：%s（%s/%s）" % (name, task.get("progress"), task.get("target")))
-                    if "分享" in name:
-                        self._auto_daily_share()
-                        continue
-                    if name.startswith("击杀BOSS"):
-                        self._auto_daily_kill_boss(task, name[len("击杀BOSS"):].strip())
-                        continue
-                    if "只怪" in name:
-                        self._auto_daily_kill_count(task)
-                        continue
-                    if "采集" in name:
-                        self._auto_daily_collect()
-                        continue
-                    map_id = int(task.get("mapId") or 0)
-                    if not map_id:
-                        continue
-                    for _attempt in range(3):
-                        if time.monotonic() > deadline:
-                            break
-                        self.assist.goto_task_point(map_id, task.get("x") or 0, task.get("y") or 0)
-                        time.sleep(12)
-                        fresh = {t["id"]: t for t in self.assist.daily_task_list()}.get(task["id"])
-                        if fresh and fresh.get("progress", 0) >= fresh.get("target", 0):
-                            break
-            result = self.assist.claim_daily_tasks()
-            claimed = int(result.get("claimed") or 0)
-            left = int(result.get("waiting") or 0)
-            self._auto_daily_log("自动做日常结束：领了 %d 个，还剩 %d 个没完成" % (claimed, left))
-            self.append_log("自动做日常：领了 %d 个，还剩 %d 个" % (claimed, left))
-        except Exception as exc:  # noqa: BLE001
-            self.append_log("自动做日常出错：%s" % exc)
-            self._auto_daily_log("自动做日常出错：%s" % exc)
-        finally:
-            self._auto_daily_busy = False
-
     def fly_to_picked(self) -> None:
         """飞到最近一次「取坐标」取到的位置。"""
         point = getattr(self, "_picked_world", None)
@@ -3142,7 +3960,40 @@ class AppUI:
         self.assist_coord_status.set("正在飞过去…" if mode == "fly" else "正在瞬移…")
         self.append_log("已发送：飞到坐标 (%d, %d)" % (int(point[0]), int(point[1])))
 
+    def _disable_click_teleport(self) -> None:
+        try:
+            if getattr(self, "assist_click_tp_var", None) is not None:
+                self.assist_click_tp_var.set(False)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.assist.click_teleport(False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def toggle_click_teleport(self) -> None:
+        on = bool(self.assist_click_tp_var.get())
+        if on and not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        result = self.assist.click_teleport(on)
+        if result.get("ok"):
+            if on:
+                self.append_log("鼠标瞬移已开启：点地图任意位置即闪现")
+                self.assist_coord_status.set("鼠标瞬移：点地图任意位置")
+            else:
+                self.append_log("鼠标瞬移已关闭")
+                self.assist_coord_status.set("鼠标瞬移已关闭")
+        else:
+            self.assist_click_tp_var.set(False)
+            msg = result.get("error") or "未知原因"
+            self.assist_coord_status.set("鼠标瞬移开启失败：%s" % msg)
+
     def pick_coord(self) -> None:
+        if getattr(self, "assist_click_tp_var", None) is not None and self.assist_click_tp_var.get():
+            self._disable_click_teleport()
         """取坐标：先点按钮，再在游戏画面上点一下要记录的位置。"""
         if not self.assist.running:
             self.start_assist()
@@ -3185,41 +4036,6 @@ class AppUI:
             return
         if attempt < 60:
             self.root.after(500, lambda: self._poll_picked(attempt + 1))
-
-    def complete_daily(self) -> None:
-        """用任务卡把没做完的日常任务秒完成（会消耗任务卡）。"""
-        if not self.assist.running:
-            self.start_assist()
-        if not messagebox.askyesno(
-            "一键完成日常",
-            "会用「任务卡」把没完成的日常任务直接完成，每一条消耗一张任务卡。\n确定继续？",
-        ):
-            return
-        self.assist_daily_status.set("正在用任务卡完成…")
-        result = self.assist.complete_daily_with_cards()
-        if not result.get("ok"):
-            self.assist_daily_status.set("完成失败：%s" % (result.get("error") or "未知原因"))
-            return
-        used = int(result.get("used") or 0)
-        failed = int(result.get("failed") or 0)
-        self.assist_daily_status.set("已用任务卡完成 %d 条（失败 %d）" % (used, failed))
-        self.append_log("一键完成日常：任务卡 %d 张，失败 %d" % (used, failed))
-        self.root.after(1500, self.claim_daily)
-
-    def claim_daily(self) -> None:
-        """一键领日常：直接调游戏任务服务，把能领的奖励全部领掉（不开面板）。"""
-        if not self.assist.running:
-            self.start_assist()
-        self.assist_daily_status.set("正在领取…")
-        result = self.assist.claim_daily_tasks()
-        if not result.get("ok"):
-            self.assist_daily_status.set("领取失败：%s" % (result.get("error") or "未知原因"))
-            return
-        claimed = int(result.get("claimed") or 0)
-        waiting = int(result.get("waiting") or 0)
-        text = "已领取 %d 个，未完成 %d 个" % (claimed, waiting)
-        self.assist_daily_status.set(text)
-        self.append_log("一键领日常：" + text)
 
     def blink_assist(self) -> None:
         """过去：瞬移或飞过去（选列表里那只怪）。"""
@@ -3301,7 +4117,8 @@ class AppUI:
                        self.assist_red_btn, self.assist_wish_btn,
                        self.assist_damage_btn, self.assist_shield_btn,
                        self.assist_cooldown_btn, self.assist_vision_btn,
-                       self.assist_revive_btn):
+                       self.assist_revive_btn, self.assist_revive_now_btn,
+                       self.assist_clear_stuck_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
 
         self.assist_mob_btn.configure(text="关闭" if mob.get("enabled") else "开启")
@@ -3321,13 +4138,10 @@ class AppUI:
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
-        revive_reason = str(revive.get("reason") or ("需要版本映射" if gap else "尚未开启"))
-        if revive.get("count"):
-            revive_reason += f" · 今日复活 {int(revive.get('count') or 0)} 次"
-        self.assist_revive_status.set(revive_reason)
-        self.assist_revive_btn.configure(
-            text="快速复活 · 自动开" if revive.get("enabled") else "快速复活"
-        )
+        if time.monotonic() >= getattr(self, "_revive_btn_pending", 0.0):
+            self.assist_revive_btn.configure(
+                text="关闭" if revive.get("enabled") else "快速复活"
+            )
 
         green, green_gem, gold = self.assist.display_stats()
         self.assist_green_var.set(f"已领 {green} 个红包 · {green_gem} 绿钻")
@@ -3491,28 +4305,8 @@ class AppUI:
             + "，".join(parts)
         )
 
-    def _on_gacha_progress(self, info: Dict[str, Any]) -> None:
-        draws = info.get("draws", 0)
-        target_hits = info.get("target_hits", 0)
-        counts = info.get("counts") or {}
-        # 只展示目标卡数量，如 李白:2 狂战士:1
-        detail = " ".join(f"{k}:{v}" for k, v in counts.items()) or "无"
-
-        def _do() -> None:
-            self.gacha_status.set(
-                f"抽卡中… 总抽 {draws}，目标 {target_hits}（{detail}）"
-            )
-
-        self.root.after(0, _do)
-
     def _tick_cursor(self) -> None:
-        from .capture import get_cursor_pos
-
         self._drain_logs()
-        x, y = get_cursor_pos()
-        self.pos_var.set(f"鼠标: ({x}, {y})")
-        if self.recorder.recording:
-            self.record_status.set(f"游戏内录制中… 已录 {len(self.recorder.steps)} 步")
         self.root.after(200, self._tick_cursor)
 
     def append_log(self, msg: str) -> None:
@@ -3596,192 +4390,6 @@ class AppUI:
         webbrowser.open(url)
         self.append_log(f"已用系统浏览器打开: {url}")
 
-    def refresh_slot_list(self, select: Optional[int] = None) -> None:
-        current = self._selected_slot_index()
-        self.slot_list.delete(0, tk.END)
-        for i in range(SLOT_COUNT):
-            self.slot_list.insert(tk.END, slot_label(self.slots, i))
-        idx = select if select is not None else current
-        if idx is None:
-            idx = max(0, int(self.config.get("selected_slot", 1)) - 1)
-        idx = max(0, min(SLOT_COUNT - 1, idx))
-        self.slot_list.selection_clear(0, tk.END)
-        self.slot_list.selection_set(idx)
-        self.slot_list.activate(idx)
-        self.slot_list.see(idx)
-        self._load_slot_into_editor(idx, force=True)
-
-    def _selected_slot_index(self) -> Optional[int]:
-        sel = self.slot_list.curselection()
-        if not sel:
-            return None
-        return int(sel[0])
-
-    def _on_slot_select(self, _event=None) -> None:
-        idx = self._selected_slot_index()
-        if idx is None:
-            return
-        self.config["selected_slot"] = idx + 1
-        self._load_slot_into_editor(idx)
-        self.slot_hint.set(f"当前选中存档 {idx + 1}，F8 将运行此存档")
-
-    def _load_slot_into_editor(self, index: int, force: bool = False) -> None:
-        if self._loading_slot and not force:
-            return
-        self._loading_slot = True
-        try:
-            lines = self.slots[index] if 0 <= index < len(self.slots) else []
-            text = "\n".join(lines)
-            self.script_text.delete("1.0", tk.END)
-            if text:
-                self.script_text.insert("1.0", text)
-            self.slot_hint.set(f"当前选中存档 {index + 1}，F8 将运行此存档")
-        finally:
-            self._loading_slot = False
-
-    def get_editor_script(self) -> str:
-        return self.script_text.get("1.0", tk.END).strip()
-
-    def set_editor_script(self, script: str) -> None:
-        self.script_text.delete("1.0", tk.END)
-        if script:
-            self.script_text.insert("1.0", script)
-
-    def save_editor_to_slot(self) -> None:
-        idx = self._selected_slot_index()
-        if idx is None:
-            messagebox.showinfo("提示", "请先选择存档 1-10")
-            return
-        script = self.get_editor_script()
-        try:
-            if script:
-                script_to_steps(script)
-            set_slot(self.slots, idx, script)
-            save_slots(self.slots)
-            self.refresh_slot_list(select=idx)
-            self.append_log(f"已写入存档 {idx + 1}")
-        except ValueError as exc:
-            messagebox.showerror("脚本错误", str(exc))
-
-    def clear_selected_slot(self) -> None:
-        idx = self._selected_slot_index()
-        if idx is None:
-            return
-        if not messagebox.askyesno("确认", f"清空存档 {idx + 1}？"):
-            return
-        set_slot(self.slots, idx, [])
-        save_slots(self.slots)
-        self.refresh_slot_list(select=idx)
-        self.append_log(f"已清空存档 {idx + 1}")
-
-    def write_to_slot_dialog(self) -> None:
-        script = self.get_editor_script()
-        if not script:
-            messagebox.showinfo("提示", "编辑器里没有脚本代码")
-            return
-        try:
-            script_to_steps(script)
-        except ValueError as exc:
-            messagebox.showerror("脚本错误", str(exc))
-            return
-        raw = simpledialog.askstring(
-            "写入存档",
-            "写入到哪个存档？输入 1-10：",
-            initialvalue=str(self.config.get("selected_slot", 1)),
-            parent=self.root,
-        )
-        if not raw:
-            return
-        try:
-            n = int(raw.strip())
-        except ValueError:
-            messagebox.showerror("错误", "请输入 1-10 的数字")
-            return
-        if n < 1 or n > SLOT_COUNT:
-            messagebox.showerror("错误", "存档编号必须是 1-10")
-            return
-        idx = n - 1
-        set_slot(self.slots, idx, script)
-        save_slots(self.slots)
-        self.refresh_slot_list(select=idx)
-        self.append_log(f"脚本已写入存档 {n}")
-
-    def copy_script(self) -> None:
-        script = self.get_editor_script()
-        if not script:
-            messagebox.showinfo("提示", "没有可复制的脚本")
-            return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(script)
-        self.append_log("脚本已复制到剪贴板，可粘贴到任意存档")
-
-    def paste_script(self) -> None:
-        try:
-            text = self.root.clipboard_get()
-        except tk.TclError:
-            messagebox.showinfo("提示", "剪贴板为空")
-            return
-        self.set_editor_script(str(text).strip())
-        self.append_log("已从剪贴板粘贴到编辑器，再点「保存到选中存档」或「写入存档…」")
-
-    def toggle_record(self) -> None:
-        if self.recorder.recording:
-            steps = self.recorder.stop()
-            self.record_status.set("录制: 未开始（游戏窗口内相对坐标）")
-            if not steps:
-                self.append_log("没有录到任何点击（请点在游戏浏览器窗口内）")
-                return
-            default_name = time.strftime("游戏录制_%H%M%S")
-            name = simpledialog.askstring(
-                "脚本名称", "生成脚本代码的名称：", initialvalue=default_name, parent=self.root
-            )
-            if not name:
-                name = default_name
-            # 必须用实际录制客户区尺寸，不能用表单里的预设宽高（否则坐标会漂）
-            window_size = self.recorder.recorded_size
-            if window_size is None and self.recorder.window_region:
-                window_size = (
-                    self.recorder.window_region.width,
-                    self.recorder.window_region.height,
-                )
-            script = steps_to_script(steps, name=name, window_size=window_size)
-            self.set_editor_script(script)
-            self.root.clipboard_clear()
-            self.root.clipboard_append(script)
-            rel_n = sum(1 for s in steps if s.get("relative"))
-            self.append_log(
-                f"已生成脚本代码: {name}（{len(steps)} 步，相对坐标 {rel_n}），"
-                "已复制到剪贴板。选存档后点「保存到选中存档」，或点「写入存档…」"
-            )
-            messagebox.showinfo(
-                "录制完成",
-                "脚本代码已生成并复制。\n\n"
-                "选左边存档 1-10 →「保存到选中存档」\n"
-                "或点「写入存档…」填编号。\n"
-                "然后选中该存档按 F8 运行。",
-            )
-            return
-
-        if self.runner.running or self.gacha_runner.running:
-            messagebox.showinfo("提示", "请先停止运行/抽卡再录制")
-            return
-
-        title = self.window_var.get().strip()
-        if not title:
-            messagebox.showinfo(
-                "提示",
-                "请先填写「目标窗口标题」并打开游戏。\n"
-                "可点「打开游戏窗口」，标题含 Zizuo游戏窗。",
-            )
-            return
-
-        self.config["target_window_title"] = title
-        self.recorder.start(title)
-        if not self.recorder.recording:
-            self.record_status.set("录制失败：未找到窗口")
-            return
-        self.record_status.set("游戏内录制中… 已录 0 步")
-
     def _read_gacha_into_config(self) -> bool:
         try:
             slot_text = self.gacha_slot_var.get().strip().replace("存档", "")
@@ -3815,7 +4423,6 @@ class AppUI:
             self.config["loop_interval_ms"] = int(self.interval_var.get().strip())
             self.config["game_width"] = int(self.width_var.get().strip())
             self.config["game_height"] = int(self.height_var.get().strip())
-            self.config["loop_playback"] = bool(self.loop_var.get())
             try:
                 self.config["gacha_cdp"] = {
                     "checked": [
@@ -3826,9 +4433,6 @@ class AppUI:
                 }
             except tk.TclError:
                 pass
-            idx = self._selected_slot_index()
-            if idx is not None:
-                self.config["selected_slot"] = idx + 1
             if not self.config.get("game_url"):
                 self.config["game_url"] = DEFAULT_GAME_URL
         except ValueError:
@@ -3841,115 +4445,7 @@ class AppUI:
         if not self._read_form_into_config():
             return
         save_config(self.config)
-        save_slots(self.slots)
-        self.append_log("配置与存档已保存")
-
-    def start_run(self) -> None:
-        if self.recorder.recording:
-            messagebox.showinfo("提示", "正在录制，请先 F6 结束录制")
-            return
-        if self.gacha_runner.running:
-            messagebox.showinfo("提示", "正在抽卡，请先停止")
-            return
-        if not self._read_form_into_config():
-            return
-
-        idx = self._selected_slot_index()
-        if idx is None:
-            messagebox.showinfo("提示", "请先选择存档 1-10")
-            return
-
-        script = self.get_editor_script()
-        lines = script_to_lines(script) if script else list(self.slots[idx])
-        if not lines:
-            messagebox.showinfo("提示", f"存档 {idx + 1} 为空，请先录制并写入")
-            return
-        try:
-            steps = script_to_steps(lines)
-        except ValueError as exc:
-            messagebox.showerror("脚本错误", str(exc))
-            return
-        if not steps:
-            messagebox.showinfo("提示", "脚本里没有可执行的点击/等待")
-            return
-
-        set_slot(self.slots, idx, lines)
-        save_slots(self.slots)
-        save_config(self.config)
-        self.refresh_slot_list(select=idx)
-
-        name = f"存档{idx + 1}:{slot_title(lines, idx)}"
-        task = new_task(name=name, mode="record", steps=steps)
-        loop = bool(self.loop_var.get())
-        self._lock_game_window("存档运行")
-        self.runner.start(self.config, slot_task=task, loop=loop)
-        self.append_log(
-            f"运行存档 {idx + 1}（{len(steps)} 步，{'循环' if loop else '单次'}）"
-        )
-
-    def insert_find_teleport(self) -> None:
-        line = "找图点击(传送)\n"
-        self.script_text.insert(tk.INSERT, line)
-        tpl = templates_dir() / "ui" / "传送.png"
-        if not tpl.exists() and not (templates_dir() / "传送.png").exists():
-            self.append_log(
-                "已插入 找图点击(传送)。请先把鼠标移到传送按钮上，点「截取模板」保存为 传送"
-            )
-        else:
-            self.append_log("已插入 找图点击(传送)")
-
-    def capture_template(self) -> None:
-        name = simpledialog.askstring(
-            "截取模板",
-            "模板名称：\n"
-            "按钮用 金币招募 / 最大 / 刷新 / 放弃\n"
-            "英雄用卡名如 李白（保存到人物图片目录）\n"
-            "请先把鼠标移到目标正中再点确定：",
-            initialvalue="招募",
-            parent=self.root,
-        )
-        if not name:
-            return
-        name = name.strip().replace(".png", "").replace(".jpg", "")
-        if not name:
-            return
-        messagebox.showinfo(
-            "准备截取",
-            "点确定后请在 2 秒内把鼠标移到目标按钮中心，不要点助手窗口。",
-        )
-        self.root.after(2000, lambda: self._do_capture_template(name))
-
-    def _do_capture_template(self, name: str) -> None:
-        import cv2
-
-        try:
-            # 按钮用稍扁的裁切；英雄脸可再截大一点
-            half_w, half_h = (70, 36)
-            if name in CARD_CATALOG:
-                half_w, half_h = (55, 70)
-            patch, (mx, my) = grab_cursor_patch(half_w=half_w, half_h=half_h)
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("截取失败", str(exc))
-            return
-
-        if name in CARD_CATALOG:
-            out_dir = cards_dir()
-        else:
-            out_dir = ui_dir()
-        out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f"{name}.png"
-        ok, buf = cv2.imencode(".png", patch)
-        if not ok:
-            messagebox.showerror("截取失败", "编码 PNG 失败")
-            return
-        path.write_bytes(buf.tobytes())
-        self.append_log(f"已保存模板: {path}（鼠标@{mx},{my}）")
-        self.refresh_gacha_templates()
-        if name not in CARD_CATALOG and messagebox.askyesno(
-            "插入脚本",
-            f"模板已保存为 {name}.png\n是否在编辑器插入 找图点击({name})？",
-        ):
-            self.script_text.insert(tk.INSERT, f"找图点击({name})\n")
+        self.append_log("配置已保存")
 
     # ---- 直连抽卡（CDP，调游戏招募接口） ----
 
@@ -4284,31 +4780,6 @@ class AppUI:
         except tk.TclError:
             return
 
-    def start_gacha(self) -> None:
-        if self.recorder.recording:
-            messagebox.showinfo("提示", "正在录制，请先结束")
-            return
-        if self.runner.running:
-            messagebox.showinfo("提示", "正在运行存档，请先停止")
-            return
-        if self.gacha_runner.running:
-            messagebox.showinfo("提示", "抽卡已在运行")
-            return
-        if not self._read_form_into_config():
-            return
-
-        gacha = normalize_gacha(self.config.get("gacha"))
-        if not gacha.get("enabled_cards"):
-            messagebox.showinfo("提示", "请至少勾选一张目标英雄")
-            return
-
-        save_config(self.config)
-        self.refresh_gacha_templates()
-        self._lock_game_window("抽卡")
-        self.gacha_status.set("抽卡进行中…")
-        self.gacha_runner.start(config=self.config)
-        self.append_log("已开始常驻招募抽卡")
-
     def _lock_game_window(self, reason: str) -> None:
         title = (self.window_var.get() or GAME_WINDOW_TITLE).strip()
         try:
@@ -4338,25 +4809,10 @@ class AppUI:
             pass
 
     def _unlock_game_window_if_idle(self) -> None:
-        if self.runner.running or self.gacha_runner.running:
-            return
         if unlock_game_window():
             self.append_log("已解锁游戏窗，可拖拽移动/缩放")
 
-    def _on_run_finished(self) -> None:
-        def _do() -> None:
-            if not self.gacha_runner.running:
-                self.gacha_status.set("抽卡: 空闲")
-            self._unlock_game_window_if_idle()
-
-        self.root.after(0, _do)
-
     def stop_run(self) -> None:
-        if self.runner.running:
-            self.runner.stop()
-        if self.gacha_runner.running:
-            self.gacha_runner.stop()
-            self.gacha_status.set("抽卡: 已停止")
         try:
             self.stop_gacha_cdp()
         except Exception:  # noqa: BLE001
@@ -4367,31 +4823,35 @@ class AppUI:
         if self._hotkeys_bound:
             return
 
-        def on_start():
-            self.root.after(0, self.start_run)
-
         def on_stop():
             self.root.after(0, self.stop_run)
-
-        def on_record():
-            self.root.after(0, self.toggle_record)
 
         if keyboard is None:
             self._hotkeys_bound = True
             self.append_log("当前系统不支持全局热键，用界面按钮操作即可")
             return
-        keyboard.add_hotkey("f8", on_start)
         keyboard.add_hotkey("f9", on_stop)
-        keyboard.add_hotkey("f6", on_record)
         self._hotkeys_bound = True
-        self.append_log("热键: F6录制  F8运行存档  F9停止(含抽卡)")
-        self.append_log(f"存档: saves/script.json  抽卡结果: saves/gacha_result.json")
+        self.append_log("热键: F9 停止（含抽卡）")
+        self.append_log("抽卡结果: saves/gacha_result.json")
 
     def on_close(self) -> None:
-        if self.recorder.recording:
-            self.recorder.stop()
-        self.runner.stop()
-        self.gacha_runner.stop()
+        self._disable_click_teleport()
+        try:
+            self.assist_auto_chest_var.set(False)
+            self._auto_chest_stop.set()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._cmd_recorder.recording:
+                self._cmd_recorder.stop()
+            self.instruction_runner.stop()
+            self.arena_runner.stop()
+            if not getattr(self, "_cmd_preset_loaded", False):
+                self._save_current_slot_into_memory()
+            self._persist_slots()
+        except Exception:  # noqa: BLE001
+            pass
         try:
             self.stop_gacha_cdp()
             self._gacha_cdp().close()
@@ -4409,7 +4869,6 @@ class AppUI:
         try:
             if self._read_form_into_config():
                 save_config(self.config)
-                save_slots(self.slots)
         except Exception:  # noqa: BLE001
             pass
         try:

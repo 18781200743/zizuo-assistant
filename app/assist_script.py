@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 134
+RUNTIME_VERSION = 141
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 134
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 134;
+  const VERSION = 141;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -95,6 +95,10 @@ RUNTIME_JS = r"""
       waiting: [],
     },
     gold: { today: 0, date: '' },
+    // 公会情报：查询我方/敌方据点驻守成员与三队总战力。
+    guildIntel: { running: false, rows: [], error: '', done: 0, total: 0, camp: 0 },
+    // 公会迷宫首领：保存最近一次查询到的首领快照。
+    maze: { last: null },
     // 快速复活：全灭面板出现后自动复活（道具 / 广告 / 回营地），延迟可配
     revive: {
       enabled: false,
@@ -1336,7 +1340,9 @@ RUNTIME_JS = r"""
       values.push(keep <= 0 ? 0 : packet[name] * keep);
     }
     fields.numbers.forEach((name, index) => { packet[name] = values[index]; });
-    if (packet.UEAT !== undefined && keep <= 0) packet.UEAT = 0;
+    if (fields.zeroField && packet[fields.zeroField] !== undefined && keep <= 0) {
+      packet[fields.zeroField] = 0;
+    }
   }
 
   /** 装伤害结算钩子（倍伤 / 免伤 共用同一个，避免重复包一层）。 */
@@ -1485,10 +1491,11 @@ RUNTIME_JS = r"""
       for (const id of members) {
         const unit = core[cfg.world.read](id);
         const attr = unit ? unit[cfg.world.attribute] : null;
-        const list = attr && attr.CNIS;
+        const list = attr && attr[cfg.world.attributeList || 'CNIS'];
         if (!Array.isArray(list)) continue;
         for (const row of list) {
-          if (row && Number.isSafeInteger(row.ZLTC)) ids.add(row.ZLTC);
+          const skillKey = cfg.world.skillId || 'ZLTC';
+          if (row && Number.isSafeInteger(row[skillKey])) ids.add(row[skillKey]);
         }
       }
     } catch (_) { /* 不在普通地图时返回空的，调用方会退化成全局 */ }
@@ -2917,6 +2924,446 @@ RUNTIME_JS = r"""
     }
   }
 
+  /**
+   * 鼠标瞬移：点地图任意位置，换算成地图坐标后直接调用游戏闪现。
+   * 换算方式与 pickCoord 一致：用 GameMapCamera 的 worldToScreen 反推仿射矩阵。
+   */
+  function clickTeleport(on) {
+    try {
+      if (window.__zzClickTpOff) { try { window.__zzClickTpOff(); } catch (_) {} }
+      if (window.__zzPickOff) { try { window.__zzPickOff(); } catch (_) {} }
+      window.__zzClickTp = { on: !!on, last: null, error: '', count: 0 };
+      if (!on) return { ok: true, on: false };
+      const canvas = window.cc && window.cc.game && window.cc.game.canvas;
+      if (!canvas) return { ok: false, error: '找不到画布' };
+      const handler = function (ev) {
+        try {
+          if (!window.__zzClickTp || !window.__zzClickTp.on) return;
+          const scene = window.cc.director.getScene();
+          let cam = null;
+          try {
+            const camNode = window.cc.find('Root/GameScene/GameMapCamera/Camera', scene);
+            if (camNode) cam = camNode.getComponent(window.cc.Camera);
+          } catch (_) { cam = null; }
+          if (!cam) {
+            (function walk(n, d) {
+              if (!n || cam || d > 10) return;
+              const c = n.getComponent && n.getComponent(window.cc.Camera);
+              if (c && c.projection === 1) cam = c;
+              (n.children || []).forEach(k => walk(k, d + 1));
+            })(scene, 0);
+          }
+          let baseX = 0, baseY = 0;
+          try {
+            const mv = window.cc.find('Root/GameScene/GameMapCanvas/MapView', scene);
+            if (mv) {
+              const bp = mv.getWorldPosition();
+              baseX = bp.x; baseY = bp.y;
+            }
+          } catch (_) { baseX = 0; baseY = 0; }
+          const rect = canvas.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          const cy = ev.clientY - rect.top;
+          const cx = ev.clientX - rect.left;
+          // 避开顶部 HUD 和底部摇杆/按钮区
+          if (cy < rect.height * 0.12 || cy > rect.height * 0.84) return;
+          const vp = window.cc.view.getVisibleSizeInPixel();
+          const sx = cx * vp.width / rect.width;
+          const sy = vp.height - cy * vp.height / rect.height;
+          let wx = null, wy = null;
+          if (cam) {
+            try {
+              const cp = cam.node.getWorldPosition();
+              const gx0 = cp.x - baseX, gy0 = cp.y - baseY;
+              const toScreen = (gx, gy) => {
+                const sc = cam.worldToScreen(new window.cc.Vec3(gx + baseX, gy + baseY, 0));
+                return [sc.x, sc.y];
+              };
+              const p0 = toScreen(gx0, gy0);
+              const p1 = toScreen(gx0 + 1000, gy0);
+              const p2 = toScreen(gx0, gy0 + 1000);
+              const m00 = (p1[0] - p0[0]) / 1000, m01 = (p2[0] - p0[0]) / 1000;
+              const m10 = (p1[1] - p0[1]) / 1000, m11 = (p2[1] - p0[1]) / 1000;
+              const det = m00 * m11 - m01 * m10;
+              if (Math.abs(det) > 1e-9) {
+                const dx = sx - p0[0], dy = sy - p0[1];
+                wx = Math.round(gx0 + (m11 * dx - m01 * dy) / det);
+                wy = Math.round(gy0 + (-m10 * dx + m00 * dy) / det);
+              }
+            } catch (_) { wx = null; wy = null; }
+          }
+          if (wx === null || wy === null) {
+            try {
+              if (cam && typeof cam.screenToWorld === 'function') {
+                const w = cam.screenToWorld(new window.cc.Vec3(sx, sy, 0));
+                if (w) { wx = Math.round(w.x - baseX); wy = Math.round(w.y - baseY); }
+              }
+            } catch (_) { /* ignore */ }
+          }
+          if (wx === null || wy === null) {
+            window.__zzClickTp.error = '坐标换算失败';
+            return;
+          }
+          window.__zzClickTp.last = { x: wx, y: wy, client: [Math.round(ev.clientX), Math.round(ev.clientY)] };
+          window.__zzClickTp.count += 1;
+          try {
+            const p = blinkToCoords(wx, wy, 'instant');
+            if (p && typeof p.catch === 'function') {
+              p.catch(function (e) { window.__zzClickTp.error = msgOf(e); });
+            }
+          } catch (e) {
+            window.__zzClickTp.error = msgOf(e);
+          }
+        } catch (e) {
+          try { window.__zzClickTp.error = String((e && e.message) || e); } catch (_) {}
+        }
+      };
+      canvas.addEventListener('pointerdown', handler, true);
+      window.__zzClickTpOff = function () {
+        try { canvas.removeEventListener('pointerdown', handler, true); } catch (_) {}
+        window.__zzClickTpOff = null;
+        if (window.__zzClickTp) window.__zzClickTp.on = false;
+      };
+      return { ok: true, on: true };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
+  /** 公会迷宫：配置（按当前游戏版本的字段名）。 */
+  function mazeConfig() {
+    state.build = state.build || detectBuild();
+    const map = mapping();
+    return (map && map.maze) || null;
+  }
+
+  function mazeText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'bigint') return String(value);
+    return String(value);
+  }
+
+  function mazePercent(fn) {
+    try {
+      const value = fn();
+      return typeof value === 'number' && Number.isFinite(value) ? value / 100 : null;
+    } catch (_) { return null; }
+  }
+
+  /** 从战斗内核里遍历当前单位，找配置编号等于首领编号的怪物。 */
+  function mazeBossUnits(cfg, engine, bossId) {
+    const units = [];
+    const manager = engine && engine[cfg.unitManager];
+    if (typeof manager !== 'function') throw Error('战斗单位管理器还没加载');
+    const root = manager.call(engine);
+    const container = root && root[cfg.unitContainer] && root[cfg.unitContainer]();
+    if (!container || typeof container[cfg.unitIterate] !== 'function') throw Error('战斗单位容器还没加载');
+    container[cfg.unitIterate](function (_id, raw) {
+      try {
+        if (String(raw[cfg.unitConfig]) !== String(bossId)) return;
+        const isMonster = typeof raw[cfg.isMonster] === 'function' ? raw[cfg.isMonster]() : true;
+        if (isMonster) units.push(raw);
+      } catch (_) { /* 单个单位读取失败不影响其他单位 */ }
+    });
+    return units;
+  }
+
+  /** 读取首领血量/抗性/命中，并尽量补上全部属性名称和单位。 */
+  function mazeReadBoss(cfg, unit) {
+    const attrs = unit[cfg.unitAttrs] || {};
+    const result = {
+      maxHp: '',
+      antiCrit: null,
+      antiCritDamage: null,
+      hitRate: null,
+      attributes: [],
+    };
+    try { result.maxHp = mazeText(unit[cfg.maxHp]()); } catch (_) { result.maxHp = ''; }
+    result.antiCrit = mazePercent(attrs[cfg.antiCrit]);
+    result.antiCritDamage = mazePercent(attrs[cfg.antiCritDamage]);
+    result.hitRate = mazePercent(attrs[cfg.hitRate]);
+
+    let tools = null;
+    try {
+      const mod = System.get('chunks:///_virtual/' + cfg.attrTool + '.ts');
+      tools = mod && mod[cfg.attrTool];
+    } catch (_) { tools = null; }
+
+    try {
+      const container = attrs[cfg.attrContainer];
+      const readValue = attrs[cfg.attrValue];
+      if (!container || typeof container.keys !== 'function' || typeof readValue !== 'function') return result;
+      const ids = new Set();
+      for (const key of container.keys()) {
+        const id = Number(key);
+        if (Number.isFinite(id)) ids.add(id);
+      }
+      // 抗暴击 / 抗暴伤 / 命中即使容器里没有也补上；5 是生命上限，单独显示。
+      [8, 10, 12].forEach(id => ids.add(id));
+      const sorted = [...ids].filter(id => Number.isFinite(id) && id > 0 && id !== 5).sort((a, b) => a - b);
+      for (const id of sorted) {
+        let raw = null;
+        try { raw = readValue.call(attrs, id); } catch (_) { continue; }
+        if (raw === null || raw === undefined) continue;
+        let name = '属性 #' + id;
+        let text = String(raw);
+        if (tools) {
+          try {
+            const label = tools[cfg.attrName](id);
+            if (label) name = String(label).replace(/<[^>]*>/g, '');
+          } catch (_) { /* 名称没加载时保留编号 */ }
+          try {
+            const formatted = tools[cfg.attrText](id, raw);
+            if (formatted) text = String(formatted).replace(/<[^>]*>/g, '');
+          } catch (_) { /* 单位没加载时显示原始值 */ }
+        }
+        result.attributes.push({ id: id, name: name, value: text, raw: mazeText(raw) });
+      }
+    } catch (_) { /* 全部属性读取失败时至少保留血量和抗性 */ }
+    return result;
+  }
+
+  /**
+   * 查询公会迷宫当前首领（只读）。必须在首领战斗里执行；
+   * 不在战斗时返回上次查到的快照，方便对照。
+   */
+  function mazeQuery() {
+    const cfg = mazeConfig();
+    if (!cfg) return { ok: false, error: '当前游戏版本没有公会迷宫映射', cached: null };
+    const cached = state.maze.last || null;
+    try {
+      const holder = window[cfg.holder];
+      const scene = holder && holder[cfg.scene];
+      if (!scene) throw Error('不在游戏地图里');
+      const engine = scene[cfg.engine];
+      if (!engine) throw Error('当前不在公会迷宫首领战斗');
+      const bossData = engine[cfg.bossData];
+      const bossId = bossData && bossData[cfg.bossId];
+      if (!bossId) throw Error('首领战斗数据还没加载，请稍后再查');
+
+      let battleType = null;
+      try {
+        const challenge = holder[cfg.challengeService];
+        const model = challenge && challenge[cfg.model];
+        if (model && typeof model[cfg.battleType] === 'function') battleType = model[cfg.battleType]();
+      } catch (_) { battleType = null; }
+      if (battleType !== null && battleType !== undefined && Number(battleType) !== 2) {
+        throw Error('当前不是公会迷宫首领战斗');
+      }
+
+      const units = mazeBossUnits(cfg, engine, bossId);
+      if (!units.length) throw Error('首领实体还没加载，请稍后再查');
+      if (units.length > 1) throw Error('当前首领实体不唯一，先不要查询');
+
+      const stats = mazeReadBoss(cfg, units[0]);
+      let difficulty = null;
+      let floor = null;
+      try {
+        const maze = holder[cfg.mazeService];
+        const model = maze && maze[cfg.model];
+        if (model) difficulty = Number(model[cfg.difficulty]) || null;
+      } catch (_) { difficulty = null; }
+      try {
+        const challenge = holder[cfg.challengeService];
+        const model = challenge && challenge[cfg.model];
+        if (model && typeof model[cfg.floor] === 'function') floor = Number(model[cfg.floor]()) || null;
+      } catch (_) { floor = null; }
+
+      const snapshot = {
+        difficulty: difficulty,
+        floor: floor,
+        bossId: String(bossId),
+        maxHp: stats.maxHp,
+        antiCrit: stats.antiCrit,
+        antiCritDamage: stats.antiCritDamage,
+        hitRate: stats.hitRate,
+        attributes: stats.attributes,
+        capturedAt: new Date().toISOString(),
+      };
+      state.maze.last = snapshot;
+      return { ok: true, snapshot: snapshot, cached: false };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause), cached: cached };
+    }
+  }
+
+  /** 公会情报：配置（按当前游戏版本的字段名）。 */
+  function guildConfig() {
+    // 运行时刚注入时 state.build 可能还没填，先现场识别一次。
+    state.build = state.build || detectBuild();
+    const map = mapping();
+    return (map && map.guild) || null;
+  }
+
+  /** 依次读取候选字段，函数型 getter 会调用；空值继续下一个。 */
+  function guildValue(obj, names, fallback) {
+    const list = Array.isArray(names) ? names : [names];
+    for (const name of list) {
+      if (!name) continue;
+      let value = null;
+      try { value = obj ? obj[name] : null; } catch (_) { value = null; }
+      if (typeof value === 'function') {
+        try { value = value.call(obj); } catch (_) { value = null; }
+      }
+      if (value !== null && value !== undefined && String(value).trim() !== '') return value;
+    }
+    return fallback;
+  }
+
+  /** 从据点回包里取驻守成员数组。 */
+  function guildMemberList(cfg, raw) {
+    if (!raw || typeof raw !== 'object') return [];
+    const keys = Array.isArray(cfg.member) ? cfg.member : [cfg.member];
+    for (const key of keys) {
+      if (!key) continue;
+      let value = null;
+      try { value = raw[key]; } catch (_) { value = null; }
+      if (typeof value === 'function') {
+        try { value = value.call(raw); } catch (_) { value = null; }
+      }
+      if (Array.isArray(value)) return value;
+    }
+    try {
+      for (const key of Object.keys(raw)) {
+        const value = raw[key];
+        if (Array.isArray(value) && value.length && value[0] && typeof value[0] === 'object') return value;
+      }
+    } catch (_) { /* ignore */ }
+    return [];
+  }
+
+  /** 单条驻守成员：名字、战力、等级、区服。 */
+  function guildParseMember(cfg, member) {
+    const m = member && typeof member === 'object' ? member : {};
+    const player = guildValue(m, [cfg.playerA, cfg.playerB], null) || m;
+    const power = Number(guildValue(m, [cfg.powerB, cfg.powerA], 0));
+    return {
+      id: String(guildValue(player, [cfg.idB, cfg.idA], '')),
+      name: String(guildValue(player, [cfg.nameB, cfg.nameA, cfg.nameC, cfg.nameD], guildValue(m, [cfg.nameE], ''))),
+      power: Number.isFinite(power) && power > 0 ? Math.trunc(power) : 0,
+      level: Number(guildValue(player, [cfg.level], 0)) || 0,
+      server: String(guildValue(player, [cfg.server], '')),
+      teams: Number(guildValue(m, [cfg.teams], 0)) || 0,
+    };
+  }
+
+  function guildParseStronghold(cfg, camp, id, raw) {
+    const members = guildMemberList(cfg, raw).map(item => guildParseMember(cfg, item))
+      .filter(item => item.id || item.name);
+    const total = members.reduce((sum, item) => sum + (item.power || 0), 0);
+    return { camp: camp, id: id, count: members.length, totalPower: total, members: members, error: '' };
+  }
+
+  /** 在所有模块里找共享服务容器，再取公会战服务。 */
+  function guildFindService(cfg) {
+    const bagName = cfg.bag;
+    const serviceName = cfg.service;
+    let pairs = [];
+    try { pairs = [...System.entries()]; } catch (_) { pairs = []; }
+    for (const pair of pairs) {
+      const exports = pair[1];
+      if (!exports) continue;
+      const bags = [
+        exports,
+        exports[bagName],
+        exports.IZBA,
+        exports.IZBA && exports.IZBA[bagName],
+      ];
+      for (const bag of bags) {
+        if (!bag || typeof bag !== 'object') continue;
+        let service = null;
+        try { service = bag[serviceName]; } catch (_) { service = null; }
+        if (service && typeof service === 'object') return service;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 开始查询公会据点。camp：0=我方+敌方，1=我方，2=敌方；每方 1~13 号据点。
+   * 查询是异步的，用 guildIntelState() 轮询进度和结果。
+   */
+  function guildIntelStart(camp) {
+    const cfg = guildConfig();
+    if (!cfg || !cfg.query) return { ok: false, error: '当前游戏版本没有公会情报映射' };
+    const current = state.guildIntel;
+    if (current && current.running) return { ok: true, running: true, total: current.total, done: current.done };
+    const service = guildFindService(cfg);
+    if (!service || typeof service[cfg.query] !== 'function') {
+      return { ok: false, error: '公会战服务还没加载，请先在游戏里打开一次公会/公会战界面' };
+    }
+    const camps = camp === 1 || camp === 2 ? [camp] : [1, 2];
+    const job = {
+      running: true, rows: [], error: '', done: 0, total: camps.length * 13,
+      camp: camp || 0, startedAt: now(), finishedAt: 0,
+    };
+    state.guildIntel = job;
+    let campIndex = 0;
+    let stronghold = 1;
+    const step = function () {
+      if (campIndex >= camps.length) {
+        job.running = false;
+        job.finishedAt = now();
+        return;
+      }
+      const campId = camps[campIndex];
+      const strongholdId = stronghold;
+      let pending;
+      try {
+        pending = service[cfg.query](campId, strongholdId);
+      } catch (cause) {
+        job.rows.push({
+          camp: campId, id: strongholdId, count: 0, totalPower: 0, members: [],
+          error: msgOf(cause),
+        });
+        advance();
+        return;
+      }
+      Promise.resolve(pending).then(function (raw) {
+        try {
+          job.rows.push(guildParseStronghold(cfg, campId, strongholdId, raw));
+        } catch (cause) {
+          job.rows.push({
+            camp: campId, id: strongholdId, count: 0, totalPower: 0, members: [],
+            error: msgOf(cause),
+          });
+        }
+        advance();
+      }, function (cause) {
+        job.rows.push({
+          camp: campId, id: strongholdId, count: 0, totalPower: 0, members: [],
+          error: msgOf(cause),
+        });
+        advance();
+      });
+      function advance() {
+        job.done += 1;
+        stronghold += 1;
+        if (stronghold > 13) {
+          stronghold = 1;
+          campIndex += 1;
+        }
+        setTimeout(step, 120);
+      }
+    };
+    setTimeout(step, 30);
+    return { ok: true, total: job.total };
+  }
+
+  function guildIntelState() {
+    const job = state.guildIntel || { running: false, rows: [], error: '', done: 0, total: 0 };
+    return {
+      running: !!job.running,
+      rows: job.rows || [],
+      error: job.error || '',
+      done: job.done || 0,
+      total: job.total || 0,
+      camp: job.camp || 0,
+      startedAt: job.startedAt || 0,
+      finishedAt: job.finishedAt || 0,
+    };
+  }
+
   /** 在任务面板里找到指定名字的任务行，点它的「前往」。 */
   function clickTaskGo(taskName) {
     try {
@@ -4199,23 +4646,29 @@ RUNTIME_JS = r"""
     }
 
     if (feature === 'clearStuck') {
-      // 切图标记卡住时（XXNL/FZJB），游戏会静默忽略所有传送/回城
+      // 切图标记卡住时，游戏会静默忽略所有传送/回城（标记名按版本来）
+      const mapCfg = mapConfig() || {};
+      const cs = mapCfg.clearStuck || {};
+      const flags = Array.isArray(cs.flags) && cs.flags.length ? cs.flags : ['XXNL', 'FZJB'];
+      const loadingHolder = cs.loadingHolder || 'HOFK';
+      const loadingField = mapCfg.loading || 'MAOP';
       let w = null;
-      try { w = window[mapConfig().holder]; } catch (_) { w = null; }
+      try { w = window[mapCfg.holder]; } catch (_) { w = null; }
       if (!w) return { ok: false, message: '还没进入游戏（找不到世界服务）' };
       let before = {};
-      try { before = { xxnl: !!w.XXNL, fzjb: !!w.FZJB, loading: !!(w.HOFK && w.HOFK.VOAT) }; } catch (_) { before = {}; }
-      try { w.XXNL = false; } catch (_) { /* ignore */ }
-      try { w.FZJB = false; } catch (_) { /* ignore */ }
-      try { if (w.HOFK) w.HOFK.VOAT = false; } catch (_) { /* ignore */ }
       try {
-        const mapCfg = mapConfig();
-        const st = mapCfg && mapCfg.state ? w[mapCfg.state] : null;
-        if (st && mapCfg.loading && st[mapCfg.loading] !== undefined) st[mapCfg.loading] = false;
+        before = { loading: !!(w[loadingHolder] && w[loadingHolder][loadingField]) };
+        flags.forEach((name) => { if (w[name]) before[name] = true; });
+      } catch (_) { before = {}; }
+      flags.forEach((name) => { try { w[name] = false; } catch (_) { /* ignore */ } });
+      try { if (w[loadingHolder]) w[loadingHolder][loadingField] = false; } catch (_) { /* ignore */ }
+      try {
+        const st = mapCfg.state ? w[mapCfg.state] : null;
+        if (st && loadingField && st[loadingField] !== undefined) st[loadingField] = false;
       } catch (_) { /* ignore */ }
       return {
         ok: true,
-        message: '已清除卡住的切图标记（清除前：XXNL=' + (before.xxnl ? '卡住' : '正常')
+        message: '已清除卡住的切图标记（清除前：' + flags[0] + '=' + (before[flags[0]] ? '卡住' : '正常')
           + '，加载中=' + (before.loading ? '是' : '否') + '）',
       };
     }
@@ -4622,7 +5075,11 @@ RUNTIME_JS = r"""
     reloadMapNow,
     clickTaskGo,
     pickCoord,
+    clickTeleport,
     clickTeleportTrack,
+    guildIntelStart,
+    guildIntelState,
+    mazeQuery,
     set,
     diagnose,
     seedDaily: seedRedDay,
