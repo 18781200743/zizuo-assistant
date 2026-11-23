@@ -1106,91 +1106,26 @@ class AppUI:
         return out
 
     def _hex_photo(self, hexw: int, hexh: int):
-        """辅助工具六边形按钮：双描边 + 玻璃填充 + 底部光带 + 两侧细线。"""
+        """辅助工具按钮：直接使用设计好的图标（app/assets/hex_button.png）。"""
         cache = getattr(self, "_hex_cache", {})
         key = (int(hexw), int(hexh))
         if key in cache:
             return cache[key]
         result = None
         try:
-            from PIL import Image, ImageDraw, ImageFilter, ImageTk
+            from PIL import Image, ImageTk
 
-            ss = 3
-            margin = 40
-            W = int(hexw + margin * 2)
-            H = int(hexh + margin * 2)
-            img = Image.new("RGBA", (W * ss, H * ss), (0, 0, 0, 0))
-            mx, my = margin * ss, margin * ss
-            hw, hh = hexw * ss, hexh * ss
-            cy = my + hh / 2
-            cut = hh * 0.58
-            outer = [
-                (mx, cy),
-                (mx + cut, my),
-                (mx + hw - cut, my),
-                (mx + hw, cy),
-                (mx + hw - cut, my + hh),
-                (mx + cut, my + hh),
-            ]
-            inner = self._offset_polygon(outer, 7 * ss)
-
-            # 外发光
-            glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(glow).line(
-                outer + [outer[0]], fill=(80, 230, 255, 230), width=6 * ss, joint="curve"
-            )
-            glow = glow.filter(ImageFilter.GaussianBlur(8 * ss))
-            glow = Image.alpha_composite(glow, glow)
-            img = Image.alpha_composite(img, glow)
-
-            # 玻璃填充 + 上方柔光
-            fill = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(fill).polygon(outer, fill=(9, 44, 54, 215))
-            light = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(light).ellipse(
-                [mx + hw * 0.05, my - hh * 0.35, mx + hw * 0.75, my + hh * 0.9],
-                fill=(120, 235, 245, 60),
-            )
-            light = light.filter(ImageFilter.GaussianBlur(9 * ss))
-            mask = Image.new("L", img.size, 0)
-            ImageDraw.Draw(mask).polygon(outer, fill=255)
-            light.putalpha(
-                Image.composite(light.getchannel("A"), Image.new("L", img.size, 0), mask)
-            )
-            img = Image.alpha_composite(img, fill)
-            img = Image.alpha_composite(img, light)
-
-            # 双描边
-            d = ImageDraw.Draw(img)
-            d.line(outer + [outer[0]], fill=(150, 245, 255, 255), width=2 * ss, joint="curve")
-            d.line(inner + [inner[0]], fill=(120, 225, 245, 175), width=1 * ss, joint="curve")
-
-            # 底部光带
-            streak = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(streak).ellipse(
-                [mx + hw * 0.10, my + hh - 10 * ss, mx + hw * 0.90, my + hh + 14 * ss],
-                fill=(140, 248, 255, 235),
-            )
-            streak = streak.filter(ImageFilter.GaussianBlur(5 * ss))
-            img = Image.alpha_composite(img, streak)
-
-            # 两侧细线
-            lines = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ld = ImageDraw.Draw(lines)
-            ld.line([(0, cy), (mx - 2 * ss, cy)], fill=(120, 230, 250, 130), width=max(1, ss))
-            ld.line(
-                [(mx + hw + 2 * ss, cy), (W * ss, cy)],
-                fill=(120, 230, 250, 130), width=max(1, ss),
-            )
-            img = Image.alpha_composite(img, lines)
-
-            result = (ImageTk.PhotoImage(img.resize((W, H), Image.LANCZOS)), margin, margin)
+            base = getattr(self, "_hex_button_src", None)
+            if base is None:
+                base = Image.open(os.path.join(self.ASSET_DIR, "hex_button.png")).convert("RGBA")
+                self._hex_button_src = base
+            img = base.resize((max(1, int(hexw)), max(1, int(hexh))), Image.LANCZOS)
+            result = (ImageTk.PhotoImage(img), 0, 0)
         except Exception:  # noqa: BLE001
             result = None
         cache[key] = result
         self._hex_cache = cache
         return result
-
     def _build_home_tab(self, parent: tk.Frame) -> None:
         """首页：原画背景 + 卡片 + 发光按钮。"""
         parent.configure(bg=self.BG_TOP)
