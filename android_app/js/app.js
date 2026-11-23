@@ -33,7 +33,7 @@
   var rpcSeq = 0;
 
   // 屏幕常亮：挂机时不让手机自动息屏/锁屏。
-  // 需要 manifest.json 里声明 android.permission.WAKE_LOCK（正式打包才生效）。
+  // 需要 manifest.json 里声明 Android 唤醒锁权限（正式打包才生效）。
   function keepAwake(on) {
     try {
       if (window.plus && plus.device && plus.device.setWakelock) {
@@ -58,7 +58,7 @@
 
   function $(id) { return document.getElementById(id); }
 
-  // 复制文本：优先用页面剪贴板，失败再退回 HTML5+ 的剪贴板接口
+  // 复制文本：优先用页面剪贴板，失败再退回 5+ 的剪贴板接口
   function copyText(text) {
     try {
       var ta = document.createElement("textarea");

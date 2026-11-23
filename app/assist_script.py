@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 145
+RUNTIME_VERSION = 146
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 145
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 145;
+  const VERSION = 146;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -88,6 +88,9 @@ RUNTIME_JS = r"""
     red: {
       enabled: false, reason: '尚未开启', today: 0, date: '', claimed: 0, failed: 0,
       pending: 0, seen: Object.create(null), lastAt: 0, available: false,
+      // 失败重试：id -> { tries, at }；seen[id] = -2 表示等重试
+      retry: Object.create(null),
+      lastCode: 0, lastFailId: '', failReason: '', hookId: '',
       // day：今天（用于跨天清零）；green：今日领到的绿钻；greenSeen：上一次读到的绿钻余额
       day: '', green: 0, greenSeen: null, greenUntil: 0,
     },
@@ -313,6 +316,7 @@ RUNTIME_JS = r"""
     }
 
     state.ctx = { map, reg, redPacket, chat, hub, redCfg, chatCfg };
+    try { installRedHooks(); } catch (_) { /* 钩子失败不影响轮询兜底 */ }
     return state.ctx;
   }
 
@@ -445,42 +449,63 @@ RUNTIME_JS = r"""
     return value === undefined || value === null ? '' : String(value);
   }
 
+  /** 领取失败：短时间内重试；确认抢完/已领才永久跳过。 */
+  function retryRed(id) {
+    const retry = state.red.retry || (state.red.retry = Object.create(null));
+    const item = retry[id] || { tries: 0 };
+    item.tries += 1;
+    state.red.failed += 1;
+    if (item.tries >= 3) {
+      state.red.seen[id] = -1;
+      delete retry[id];
+      return;
+    }
+    state.red.seen[id] = -2;
+    item.at = now() + 120 * item.tries;
+    retry[id] = item;
+  }
+
   function claim(info) {
     const ctx = state.ctx;
     const fields = ctx.redCfg.fields || {};
     const id = packetId(info);
     if (!id) return;
     state.red.pending += 1;
-    const failed = () => {
+    const success = () => {
+      delete state.red.retry[id];
+      state.red.seen[id] = 1;
+      rollRedDay();
+      state.red.claimed += 1;
+      state.red.today += 1;
+      state.red.date = today();
+      saveRedDay();
+      // 余额更新可能比 Promise 晚一点，接下来几轮都对一次余额
+      state.red.greenUntil = now() + 2500;
+      syncRedGreen();
+      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+    };
+    const settle = code => {
       state.red.pending = Math.max(0, state.red.pending - 1);
-      state.red.failed += 1;
-      state.red.seen[id] = -1;
+      if (Number(code) === 1) success();
+      else retryRed(id);
     };
     try {
-      const done = ctx.redPacket[ctx.redCfg.claim](id, info[fields.channel], info[fields.type], failed);
+      // 第 4 个参数是游戏的失败回调；传空函数，避免服务器返回 303005 时内部调用 undefined 抛错
+      const done = ctx.redPacket[ctx.redCfg.claim](
+        id, info[fields.channel], info[fields.type], function () {}
+      );
       if (done && typeof done.then === 'function') {
-        done.then(code => {
+        done.then(settle, () => {
           state.red.pending = Math.max(0, state.red.pending - 1);
-          if (Number(code) === 1) {
-            rollRedDay();
-            state.red.claimed += 1;
-            state.red.today += 1;
-            state.red.date = today();
-            saveRedDay();
-            // 余额更新可能比 Promise 晚一点，接下来 8 秒内每轮都对一次余额
-            state.red.greenUntil = now() + 2500;
-            syncRedGreen();
-            state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
-          } else {
-            state.red.seen[id] = -1;
-          }
-        }, () => failed());
+          retryRed(id);
+        });
       } else {
-        state.red.pending = Math.max(0, state.red.pending - 1);
+        settle(done);
       }
     } catch (cause) {
-      failed();
+      state.red.pending = Math.max(0, state.red.pending - 1);
       state.red.reason = '领取调用失败：' + msgOf(cause);
+      retryRed(id);
     }
   }
 
@@ -490,13 +515,22 @@ RUNTIME_JS = r"""
     if (keys.length <= RED_SEEN_MAX) return;
     // 全清会重复问状态，但比重扫整个历史便宜；24 条窗口内重复次数很少
     state.red.seen = Object.create(null);
+    state.red.retry = Object.create(null);
   }
 
-  function tickRed() {
+  /** 按红包自身的发送时间取排序值（新的优先）；没有时间字段就保持原顺序。 */
+  function redTime(info, fields) {
+    const key = fields && fields.time;
+    if (!key) return 0;
+    const value = Number(info[key]);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function tickRed(force) {
     rollRedDay();
     if (!state.red.enabled || !state.ready) return;
     if (state.red.greenUntil && now() < state.red.greenUntil) syncRedGreen();
-    if (now() - state.red.lastAt < CLAIM_GAP_MS) return;
+    if (!force && now() - state.red.lastAt < CLAIM_GAP_MS) return;
     // 已经有几个请求在飞就别再堆，避免瞬间并发被服务端限流
     if (state.red.pending >= 6) return;
     pruneRedSeen();
@@ -506,22 +540,117 @@ RUNTIME_JS = r"""
     if (!list.length) return;
 
     const claimable = (state.ctx.map.statusCodes || {}).claimable;
-    let picks = 0;
+    const fields = (state.ctx.redCfg && state.ctx.redCfg.fields) || {};
+    const nowMs = now();
+    const candidates = [];
     for (const info of list) {
       const id = packetId(info);
-      if (!id || state.red.seen[id] !== undefined) continue;
+      if (!id) continue;
+      const known = state.red.seen[id];
+      if (known !== undefined && known !== -2) continue;
+      if (known === -2) {
+        const item = state.red.retry[id];
+        if (item && nowMs < item.at) continue;
+      }
       let status = -1;
       try { status = state.ctx.redPacket[state.ctx.redCfg.status](info); } catch (_) { continue; }
       if (Number(status) !== Number(claimable)) {
         state.red.seen[id] = Number(status);
+        if (state.red.retry) delete state.red.retry[id];
         continue;
       }
-      state.red.seen[id] = 9;  // 先占位，防同一 tick 重复
+      candidates.push({ info, id, ts: redTime(info, fields), seq: candidates.length });
+    }
+    // 新包优先：刚发出来的 10 个名额都在，老包可能已经快满
+    candidates.sort((a, b) => (b.ts - a.ts) || (a.seq - b.seq));
+
+    let picks = 0;
+    for (const item of candidates) {
+      if (state.red.seen[item.id] === 9) continue;
+      state.red.seen[item.id] = 9;  // 先占位，防同一 tick 重复
       state.red.lastAt = now();
-      claim(info);
+      claim(item.info);
       picks += 1;
       if (picks >= 3) break;
     }
+
+    // 清掉很久以前的失败记录，避免 map 无限增长
+    const retry = state.red.retry;
+    if (retry) {
+      for (const id of Object.keys(retry)) {
+        if (nowMs - (retry[id].at || 0) > 15000) delete retry[id];
+      }
+    }
+  }
+
+  /**
+   * 红包事件钩子：
+   *   1) 新红包的聊天事件一到就立刻抢（不等 60ms 轮询）；
+   *   2) 顺便记下领取请求的服务器返回码，方便判断是「已抢完」还是「请求太快」。
+   * 钩子挂在游戏单例上；重装运行时（同版本不同内容）会先拆掉旧钩子再挂新的。
+   */
+  function installRedHooks() {
+    try {
+      const ctx = state.ctx;
+      if (!ctx || !ctx.redPacket || !ctx.redCfg) return;
+      const svc = ctx.redPacket;
+      const token = (typeof STAMP === 'string' ? STAMP : String(VERSION)) + '|' + VERSION;
+      if (svc.__zzRedHookId === token) return;
+
+      // 拆旧钩子（可能是上一套运行时挂的）
+      if (svc.__zzRedHookId) {
+        try {
+          if (svc.__zzOrigRecv && ctx.redCfg.onReceive) {
+            svc[ctx.redCfg.onReceive] = svc.__zzOrigRecv;
+          }
+        } catch (_) { /* ignore */ }
+        try { if (svc.__zzOrigEjim) svc.EJIM = svc.__zzOrigEjim; } catch (_) { /* ignore */ }
+      }
+      svc.__zzOrigRecv = null;
+      svc.__zzOrigEjim = null;
+
+      const recv = ctx.redCfg.onReceive;
+      if (recv && typeof svc[recv] === 'function') {
+        const orig = svc[recv];
+        svc.__zzOrigRecv = orig;
+        svc[recv] = function () {
+          const result = orig.apply(this, arguments);
+          try {
+            setTimeout(() => { try { tickRed(true); } catch (_) { /* ignore */ } }, 0);
+          } catch (_) { /* ignore */ }
+          return result;
+        };
+      }
+
+      if (typeof svc.EJIM === 'function') {
+        const origEjim = svc.EJIM;
+        svc.__zzOrigEjim = origEjim;
+        svc.EJIM = function (request) {
+          const promise = origEjim.apply(this, arguments);
+          try {
+            // 领取请求是带「红包编号/频道/类型」的请求；详情请求没有类型字段，排除掉
+            if (promise && typeof promise.then === 'function'
+              && request && request.FDUU !== undefined
+              && request.JFFB !== undefined) {
+              promise.then(resp => {
+                const code = resp && resp.ZMCL ? Number(resp.ZMCL.TCFK) : null;
+                if (code !== null && code !== 0) {
+                  state.red.lastCode = code;
+                  state.red.lastFailId = String(request.FDUU);
+                  state.red.failReason = '领取失败：服务器返回 ' + code;
+                }
+              }, () => {
+                state.red.failReason = '领取请求失败（网络）';
+              });
+            }
+          } catch (_) { /* ignore */ }
+          return promise;
+        };
+      }
+
+      svc.__zzRedHookId = token;
+      state.red.hookId = token;
+    } catch (_) { /* 钩子失败不影响轮询兜底 */ }
   }
 
   /* ------------------------------------------------------------------ *
@@ -4553,6 +4682,10 @@ RUNTIME_JS = r"""
         failed: red.failed,
         pending: red.pending,
         green: red.green,
+        hooked: !!red.hookId,
+        retry: red.retry ? Object.keys(red.retry).length : 0,
+        lastCode: red.lastCode || 0,
+        failReason: red.failReason || '',
       },
       wish: {
         enabled: state.wish.enabled,
@@ -4884,6 +5017,7 @@ RUNTIME_JS = r"""
         return { ok: false, message: state.error || '辅助未就绪' };
       }
       state.red.enabled = !!value;
+      try { installRedHooks(); } catch (_) { /* ignore */ }
       if (value) {
         rollRedDay();
         state.red.greenSeen = greenBalance();
@@ -4891,7 +5025,7 @@ RUNTIME_JS = r"""
         state.red.greenUntil = 0;
       }
       state.red.reason = value
-        ? '监控中：60ms 一轮，红包一进聊天就领'
+        ? '监控中：红包一进聊天立刻领（60ms 轮询兜底）'
         : '已关闭（今日 ' + state.red.today + ' 个 / ' + state.red.green + ' 绿钻）';
       return {
         ok: true,

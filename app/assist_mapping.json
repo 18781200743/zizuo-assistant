@@ -491,13 +491,15 @@
     "status": "BQPY",
     "claim": "IVOK",
     "claimable": "YXUJ",
+    "onReceive": "YCYL",
     "fields": {
      "id": "FDUU",
      "channel": "QZRJ",
      "type": "JFFB",
      "total": "PNAE",
      "expire": "CMVA",
-     "claims": "JWTZ"
+     "claims": "JWTZ",
+     "time": "DKZF"
     }
    },
    "chat": {
