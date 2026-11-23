@@ -42,6 +42,16 @@ _FEATURE_LABEL = {
 # 战斗参数放在快照的 combat 段里
 _COMBAT_KEYS = ("damage", "vision", "cooldown")
 
+# 页面重载后需要补发的「持续开关」。
+# 闪现/飞过去/立即复活/清卡图都是一次性动作，不能补发：
+# 以前把 _desired 全量重放，页面每次重载都会再闪一次/再飞一次，
+# 表现就是「人在走，但一直被拽回上一个闪现点」。
+_PERSISTENT_FEATURES = {
+    "mob", "boss", "redPacket", "wish",
+    "revive", "heroRevive",
+    "damage", "shield", "vision", "cooldown",
+}
+
 
 def stats_path() -> Path:
     path = project_root() / "saves"
@@ -898,9 +908,12 @@ class GameAssist:
             pass
 
     def _reapply(self) -> None:
-        """页面重载后运行时是新装的，把用户之前开着的功能补回来。"""
+        """页面重载后运行时是新装的，把用户之前开着的功能补回来。
+
+        只补「持续开关」；一次性动作（闪现、飞过去、立即复活等）绝不重放。
+        """
         for feature, value in list(self._desired.items()):
-            if feature == "stopAll":
+            if feature == "stopAll" or feature not in _PERSISTENT_FEATURES:
                 continue
             self._apply(feature, value)
 

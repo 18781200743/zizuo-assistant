@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 144
+RUNTIME_VERSION = 145
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 144
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 144;
+  const VERSION = 145;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4735,6 +4735,11 @@ RUNTIME_JS = r"""
       const range = cfg.range || [1, 60];
       if (seconds < range[0] || seconds > range[1]) {
         throw Error('复活时间需要在 ' + range[0] + ' - ' + range[1] + ' 秒之间');
+      }
+      // 重复下发同样的设置（页面刚重载后的状态补发）不要清空倒地计时
+      if (box.enabled && Number(box.seconds) === seconds
+        && box.ad === !!raw.ad && box.campfly === !!raw.campfly && box.timer === !!raw.timer) {
+        return { ok: true, message: '英雄复活已在运行（无需重复开启）' };
       }
       box.enabled = true;
       box.seconds = seconds;
