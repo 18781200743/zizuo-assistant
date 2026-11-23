@@ -2337,7 +2337,7 @@ class AppUI:
 
         # ---- 灵路寻宝 ----
         treasure = ttk.LabelFrame(content, text="灵路寻宝", padding=8)
-        self.treasure_status = tk.StringVar(value="点「查询」看本轮幸运格和大奖宝箱")
+        self.treasure_status = tk.StringVar(value="点「查询」看完整 4×4 格子、隐藏奖项和大奖宝箱")
         ttk.Label(
             treasure, textvariable=self.treasure_status, foreground="#1a4d8f",
             wraplength=460, justify=tk.LEFT,
@@ -2346,7 +2346,7 @@ class AppUI:
             treasure, text="查询", width=10, command=self.treasure_query,
         ).pack(anchor=tk.W, pady=(0, 6))
         self.treasure_text = tk.Text(
-            treasure, height=10, wrap=tk.WORD, state=tk.DISABLED,
+            treasure, height=18, wrap="char", state=tk.DISABLED,
             font=("Microsoft YaHei UI", 9), background="#f8fafc",
         )
         self.treasure_text.pack(fill=tk.BOTH, expand=True)
@@ -2404,6 +2404,16 @@ class AppUI:
             return ""
         return name + (" ×%d" % count if count else "")
 
+    def _treasure_cell_text(self, cell: Any) -> str:
+        if not isinstance(cell, dict):
+            return "?"
+        reward = self._reward_text(cell.get("reward"))
+        if reward:
+            return reward
+        if cell.get("opened"):
+            return "已翻开"
+        return "未翻"
+
     def _set_treasure_text(self, text: str) -> None:
         widget = getattr(self, "treasure_text", None)
         if widget is None:
@@ -2445,11 +2455,29 @@ class AppUI:
         keys = str(result.get("keys") or "")
         best = result.get("best") or {}
         stages = result.get("stages") or []
-        lucky = result.get("lucky") or []
+        special = result.get("special") or {}
+        grid = result.get("grid") or []
+        hidden = result.get("hidden") or []
+        pool = result.get("pool") or []
         milestone = str(result.get("milestone") or "")
+        try:
+            opened_count = int(result.get("openedCount") or 0)
+        except (TypeError, ValueError):
+            opened_count = 0
+        try:
+            hidden_count = int(result.get("hiddenCount") or len(hidden))
+        except (TypeError, ValueError):
+            hidden_count = len(hidden)
+        try:
+            total = int(result.get("total") or len(grid) or 16)
+        except (TypeError, ValueError):
+            total = 16
+
         lines = [title + (("    钥匙 " + keys) if keys else "")]
         if isinstance(best, dict) and best:
-            lines.append("大奖宝箱：" + self._reward_text(best))
+            lines.append("大奖宝箱：" + self._reward_text(best) + (("（" + milestone + "）") if milestone else ""))
+        if isinstance(special, dict) and special:
+            lines.append("本轮自选大奖（藏在未翻开格中）：" + self._reward_text(special))
         stage_parts = []
         for stage in stages:
             if not isinstance(stage, dict):
@@ -2462,28 +2490,55 @@ class AppUI:
         if stage_parts:
             lines.append("阶段奖励：" + "；".join(stage_parts))
         lines.append("")
-        if lucky:
-            lines.append("本轮幸运格（4×4）：")
-            for item in lucky:
-                if not isinstance(item, dict):
+        if grid:
+            lines.append("4×4 实况（已翻开 %d/%d，未翻开 %d 格）：" % (opened_count, total, hidden_count))
+            by_pos = {}
+            for cell in grid:
+                if not isinstance(cell, dict):
                     continue
                 try:
-                    row = int(item.get("row") or 0)
-                    col = int(item.get("col") or 0)
+                    key = (int(cell.get("row") or 0), int(cell.get("col") or 0))
                 except (TypeError, ValueError):
                     continue
-                opened = "（已开）" if item.get("opened") else ""
-                lines.append(
-                    "  第%d行第%d列：%s%s"
-                    % (row, col, self._reward_text(item.get("reward")), opened)
-                )
+                by_pos[key] = cell
+            marks = ("①", "②", "③", "④")
+            for row in range(1, 5):
+                row_cells = [by_pos.get((row, col)) for col in range(1, 5)]
+                parts = []
+                for col, cell in enumerate(row_cells):
+                    parts.append("%s %s" % (marks[col], self._treasure_cell_text(cell)))
+                lines.append("第%d行  %s    %s" % (row, parts[0], parts[1]))
+                lines.append("        %s    %s" % (parts[2], parts[3]))
         else:
-            lines.append("本轮没有读到幸运格（可能活动数据还没刷新）。")
-        if milestone:
-            lines.append("")
-            lines.append("大奖条件：" + milestone)
+            lines.append("本轮没有读到 4×4 格子（可能活动数据还没刷新）。")
         lines.append("")
-        lines.append("说明：4×4 格子里是小奖励；「大奖」在右上角「大奖宝箱」，不是格子奖励。")
+        if hidden:
+            hidden_text = "、".join(
+                "第%d行第%d列" % (int(h.get("row") or 0), int(h.get("col") or 0))
+                for h in hidden
+                if isinstance(h, dict)
+            )
+            lines.append("未翻开的 %d 格：%s" % (hidden_count, hidden_text))
+            if isinstance(special, dict) and special:
+                lines.append(
+                    "其中 1 格是「自选大奖」（%s 概率）：%s"
+                    % (str(result.get("specialChance") or "6.25%"), self._reward_text(special))
+                )
+                lines.append(
+                    "其余 %d 格是普通格（93.75%% 概率），翻开时从下面的奖池随机。"
+                    % max(hidden_count - 1, 0)
+                )
+        if pool:
+            lines.append("")
+            lines.append("普通格奖池（游戏内规则，原文每项标注 6.25%；每轮奖池可能有差异）：")
+            lines.append("  " + "、".join(str(item) for item in pool))
+        lines.append("")
+        lines.append(
+            "说明：未翻格的具体奖励是服务器在翻开时才随机生成的，助手也读不到；"
+            "能提前确定的就是上面那 1 格「本轮自选大奖」。"
+        )
+        if milestone:
+            lines.append("大奖条件：" + milestone)
         self._set_treasure_text("\n".join(lines))
         try:
             self.treasure_status.set("查询完成（只读，不会花钥匙）")

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 152
+RUNTIME_VERSION = 153
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 152
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 152;
+  const VERSION = 153;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2807,6 +2807,24 @@ RUNTIME_JS = r"""
 
   /* ---- 灵路寻宝（活动 4×4 幸运格 / 大奖宝箱） ---- */
 
+  /* 4×4 普通格奖励池：取自游戏内「灵路寻宝」帮助里的“奖励概率”，
+     游戏原文每项标注 6.25%，且每一轮奖池可能有差异。 */
+  const TREASURE_POOL = [
+    '碎铁×200', '碎铁×300',
+    '高级幸运草×1', '高级幸运草×2', '高级幸运草×3',
+    '红矿石×1',
+    '金币×200', '金币×300', '金币×500',
+    '白色随机符文×1', '白色随机符文×2',
+    '灵晶×1000', '灵晶×1200', '灵晶×1500', '灵晶×2000',
+    '普通召唤券×2', '高级召唤券×1', '普通凝晶×1',
+    '祈祷石×100', '祈祷石×120', '祈祷石×150',
+    '升星石×3', '升星石×5',
+    '觉醒石×1', '觉醒石×2',
+    '普通召唤石×15', '普通召唤石×10',
+    '高级召唤石×5', '噩梦召唤石×5',
+    '蓝矿石×100', '女神进阶石', '绿钻×88',
+  ];
+
   let treasureRewardHelperCache = null;
 
   function treasureRewardHelper(factoryName) {
@@ -2912,23 +2930,44 @@ RUNTIME_JS = r"""
       });
 
       const active = Object.keys(data[cfg.active] || {}).map(Number).sort(function (a, b) { return a - b; });
-      const cells = data[cfg.cells] || {};
-      const opened = data[cfg.opened] || {};
+      const records = data[cfg.opened] || {};
+      const offset = cfg.positionOffset === undefined ? 0 : Number(cfg.positionOffset) || 0;
+      const grid = [];
       const lucky = [];
+      let openedCount = 0;
       active.forEach(function (id, index) {
-        const cell = cells[id];
-        const items = cell && rc.items ? cell[rc.items] : null;
-        if (!Array.isArray(items) || !items.length) return;
-        const reward = treasureReward(items[0], rc);
-        if (!reward) return;
-        lucky.push({
+        const row = Math.floor(index / 4) + 1;
+        const col = (index % 4) + 1;
+        const pos = id + offset;
+        const record = records[pos];
+        const items = record && rc.items ? record[rc.items] : null;
+        let reward = null;
+        if (Array.isArray(items) && items.length) {
+          reward = treasureReward(items[0], rc);
+        }
+        const opened = !!record;
+        if (opened) openedCount += 1;
+        const cell = {
           id: id,
-          row: Math.floor(index / 4) + 1,
-          col: (index % 4) + 1,
-          opened: !!(opened && opened[id]),
+          pos: pos,
+          row: row,
+          col: col,
+          opened: opened,
           reward: reward,
-        });
+        };
+        grid.push(cell);
+        if (reward) lucky.push(cell);
       });
+      const hidden = grid.filter(function (cell) { return !cell.opened; });
+
+      const bestIndex = Number(data[cfg.bestIndex]) || 0;
+      let special = null;
+      if (bestIndex > 0) {
+        const stage = (data[cfg.stages] || [])[bestIndex - 1];
+        const item = stage && rc.items ? (stage[rc.items] || [])[0] : null;
+        special = treasureReward(item, rc);
+      }
+
       return {
         ok: true,
         title: title || '灵路寻宝',
@@ -2937,8 +2976,20 @@ RUNTIME_JS = r"""
         round: Number(data[cfg.round]) || 0,
         best: best,
         stages: stages,
+        grid: grid,
         lucky: lucky,
-        bestIndex: Number(data[cfg.bestIndex]) || 0,
+        hidden: hidden.map(function (cell) {
+          return { row: cell.row, col: cell.col, pos: cell.pos };
+        }),
+        openedCount: openedCount,
+        hiddenCount: hidden.length,
+        total: grid.length,
+        special: special,
+        specialIndex: bestIndex,
+        bestIndex: bestIndex,
+        specialChance: '6.25%',
+        pool: TREASURE_POOL.slice(),
+        poolChance: '6.25%',
       };
     } catch (cause) {
       return { ok: false, error: msgOf(cause) };

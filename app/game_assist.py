@@ -837,7 +837,7 @@ class GameAssist:
             return {"ok": False, "error": str(exc)}
 
     def treasure_hunt(self) -> dict:
-        """查询灵路寻宝：本轮幸运格、当前大奖宝箱内容。"""
+        """查询灵路寻宝：完整 4×4 格子、未翻格隐藏信息、本轮自选大奖和大奖宝箱。"""
         try:
             raw = self.bridge.eval_js(
                 "JSON.stringify(window.__zzAssist && window.__zzAssist.treasureHunt "

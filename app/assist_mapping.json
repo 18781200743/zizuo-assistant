@@ -514,6 +514,7 @@
     "active": "HJSK",
     "cells": "WYTG",
     "opened": "GMOM",
+    "positionOffset": 1,
     "reward": {
      "factory": "VKBV",
      "rawType": "PWSP",
