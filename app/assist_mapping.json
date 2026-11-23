@@ -505,6 +505,7 @@
    "treasureHunt": {
     "node": "ActivityNationalDayView",
     "component": "ALCI",
+    "holder": "FIKA",
     "data": "HBJS",
     "round": "GZBR",
     "best": "SUPT",

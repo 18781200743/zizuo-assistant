@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 150
+RUNTIME_VERSION = 152
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 150
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 150;
+  const VERSION = 152;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2873,6 +2873,7 @@ RUNTIME_JS = r"""
 
   function treasureQuery() {
     try {
+      state.build = state.build || detectBuild();
       const map = mapping();
       const cfg = map && map.treasureHunt;
       if (!cfg) return { ok: false, error: '当前版本还没有灵路寻宝映射' };
@@ -2888,7 +2889,8 @@ RUNTIME_JS = r"""
             if (data) return;
             try {
               if (cc.js.getClassName(c) !== cfg.component) return;
-              const payload = c[cfg.data];
+              const holder = cfg.holder ? c[cfg.holder] : c;
+              const payload = holder && holder[cfg.data];
               if (payload) { viewNode = n; comp = c; data = payload; }
             } catch (_) { /* ignore */ }
           });
