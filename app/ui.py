@@ -3099,10 +3099,6 @@ class AppUI:
 
     def start_assist(self) -> None:
         self._read_assist_into_config()
-        try:
-            self.assist.set_feature("revive", 0)  # 现在只有手动复活，自动一律关
-        except Exception:  # noqa: BLE001
-            pass
         self.assist.set_names(self._assist_names())
         if not self.assist.running:
             self.assist.start()
@@ -3110,8 +3106,16 @@ class AppUI:
         self._restore_assist_features()
 
     def _restore_assist_features(self) -> None:
-        """重启工具后恢复上次开着的「小怪 / BOSS 地图刷新」。"""
+        """重启工具后恢复上次开着的「小怪 / BOSS 地图刷新 / 自动复活」。"""
         cfg = normalize_assist(self.config.get("assist"))
+        if cfg.get("revive_enabled"):
+            try:
+                self.assist.set_feature("revive", {
+                    "mode": cfg.get("revive_mode") or "tp",
+                    "delay": cfg.get("revive_delay") or 0,
+                })
+            except Exception:  # noqa: BLE001
+                pass
         rows = (
             ("mob", "mob_enabled", getattr(self, "assist_mob_var", None),
              getattr(self, "assist_mob_btn", None), getattr(self, "assist_mob_status", None)),
@@ -3858,8 +3862,18 @@ class AppUI:
         if not self.assist.running:
             self.start_assist()
         revive = (self.assist.state or {}).get("revive") or {}
+        enabled = bool(revive.get("enabled"))
+        try:
+            assist_cfg = normalize_assist(self.config.get("assist"))
+            assist_cfg["revive_enabled"] = not enabled
+            assist_cfg["revive_mode"] = "tp"
+            assist_cfg["revive_delay"] = 0
+            self.config["assist"] = assist_cfg
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
         self._revive_btn_pending = time.monotonic() + 1.5
-        if revive.get("enabled"):
+        if enabled:
             self.assist.set_feature("revive", 0)
             self.assist_revive_btn.configure(text="快速复活")
             self._revive_flash("关闭成功")

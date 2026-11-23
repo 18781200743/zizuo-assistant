@@ -311,7 +311,8 @@ class AssistBridge:
 
         prefix = (
             "window.__zzAssistMapping = %s;\n"
-            "window.__zzAssistStamp = %s;\n" % (mapping_json, json.dumps(stamp))
+            "window.__zzAssistStamp = %s;\n"
+            "window.__zzAssistNextStamp = %s;\n" % (mapping_json, json.dumps(stamp), json.dumps(stamp))
         )
         if names:
             prefix += "window.__zzAssistNames = %s;" % json.dumps(names, ensure_ascii=False)
@@ -328,6 +329,20 @@ class AssistBridge:
             self.last_error = str(exc)
             return f"fail:{exc}"
         text = str(value or "")
+        if text == "installed":
+            # 注入脚本里「版本号相同就直接 return」的旧逻辑会让页面留着旧代码，
+            # 外层却以为装好了，于是每次轮询都重发开关（BOSS 死亡计时被反复清零）。
+            # 这里再核对一次内容指纹，没真装上就明确报错，绝不当成成功。
+            try:
+                fresh = self.eval_js(
+                    "!!(window.__zzAssist && window.__zzAssist.__stamp === %s)"
+                    % json.dumps(stamp)
+                )
+            except RuntimeError:
+                fresh = False
+            if fresh is not True:
+                self.last_error = "游戏页里的运行时没更新（旧代码版本号相同）"
+                return "fail:游戏页里的运行时没更新，请关闭游戏窗口后重新打开"
         if text.startswith("fail:"):
             self.last_error = text[5:]
         return text

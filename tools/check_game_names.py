@@ -35,7 +35,7 @@ SCAN = [
 # 本地变量 / 常量 / Python 标注，和游戏无关。
 LOCAL_NAMES = {
     "BLE001", "MAPPING", "VERSION", "TICK_MS", "RETRY_MS", "CAN_OPEN", "HAS_OPEN",
-    "OVER", "INVALID", "HUD", "XXXX", "ANGLES", "OUT", "ROOT", "E402",
+    "OVER", "INVALID", "HUD", "XXXX", "ANGLES", "OUT", "ROOT", "E402", "STAMP",
     "CMD_KEY", "GAME_URL", "POLL_MS", "BOTH", "RGBA", "FLAT", "VERTICAL", "PIL",
     "LANCZOS", "NORMAL", "DISABLED", "DARK_TXT", "BG_TOP", "DARK_SUB", "HOME_W",
     "HOME_H", "INSERT", "CARD_BG", "TXT", "SUB", "APP", "UI", "OK", "ERR", "JSON",

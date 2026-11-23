@@ -30,6 +30,8 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     # 快速复活：mode = item 道具 / ad 广告 / camp 放弃回城；delay 秒
     "revive_mode": "tp",
     "revive_delay": 0.5,
+    # 自动复活开关：重启助手后按这里恢复（之前重启一律被关掉）
+    "revive_enabled": False,
     # 单英雄复活：倒地多少秒后动手；hero_revive_mode = item / ad / campfly
     "hero_revive_seconds": 1,
     "hero_revive_mode": "item",
@@ -70,7 +72,7 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
             if key not in value:
                 continue
             item = value[key]
-            if key in ("mob_enabled", "boss_enabled"):
+            if key in ("mob_enabled", "boss_enabled", "revive_enabled"):
                 data[key] = bool(item)
             elif key in ("mob_seconds", "boss_seconds"):
                 try:

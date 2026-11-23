@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 141
+RUNTIME_VERSION = 144
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,12 +35,18 @@ RUNTIME_VERSION = 141
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 142;
+  const VERSION = 144;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
+  //
+  // 只比版本号不够：改了运行时代码但忘了 +1 时，页面会一直留着旧代码，
+  // 外层又以为「已是最新」，于是每次轮询都重发一次开关，
+  // 把 BOSS/小怪 的死亡计时反复清零（表现为「BOSS 死了不刷新」）。
+  // 所以再比一个内容指纹（由注入方写进 __zzAssistNextStamp）。
+  const STAMP = typeof window.__zzAssistNextStamp === 'string' ? window.__zzAssistNextStamp : '';
   const previous = window.__zzAssist;
-  if (previous && previous.version === VERSION) return;
+  if (previous && previous.version === VERSION && (!STAMP || previous.__stamp === STAMP)) return;
   if (previous) {
     try { if (previous.__timer) clearInterval(previous.__timer); } catch (_) { /* ignore */ }
     try { if (previous.__redTimer) clearInterval(previous.__redTimer); } catch (_) { /* ignore */ }
@@ -4422,8 +4428,11 @@ RUNTIME_JS = r"""
     // 地图同理：红包/祈愿都不可用时，打怪重进地图照样能跑。
     try { tickMap(); } catch (cause) {
       const text = msgOf(cause);
-      if (state.mob.enabled) state.mob.reason = text;
-      if (state.boss.enabled) state.boss.reason = text;
+      // 重进地图的加载窗口里实体世界会短暂不可用，这不算失败，别把状态刷成报错
+      if (!state.map.entering) {
+        if (state.mob.enabled) state.mob.reason = text;
+        if (state.boss.enabled) state.boss.reason = text;
+      }
     }
     // 战斗参数：只做「会话是否还有效」的守护，不改数值
     try { tickCombat(); } catch (_) { /* 守护失败不影响其它功能 */ }
@@ -4771,6 +4780,10 @@ RUNTIME_JS = r"""
       let seconds = Number(raw.delay);
       if (!Number.isFinite(seconds) || seconds < 0) seconds = 0.5;
       seconds = Math.min(10, seconds);
+      // 同样避免「每次轮询都重发」把正在进行的复活流程重置
+      if (box.enabled && box.mode === mode && box.delayMs === Math.round(seconds * 1000)) {
+        return { ok: true, message: '快速复活已在运行（无需重复开启）' };
+      }
       if (mode === 'item' || mode === 'ad') {
         try {
           const cfg = reviveConfig();
@@ -4830,6 +4843,11 @@ RUNTIME_JS = r"""
         state.map.mobAt = feature === 'mob' ? 0 : state.map.mobAt;
         state.map.bossAt = feature === 'boss' ? 0 : state.map.bossAt;
         return { ok: true, message: '已关闭' };
+      }
+      // 重复下发同样的等待秒数（例如助手每次轮询补状态）不能清掉死亡计时，
+      // 否则 BOSS 一死、倒计时刚走一半又被重置，永远等不到重进地图。
+      if (target.enabled && Number(target.seconds) === seconds && !state.map.enterBlocked) {
+        return { ok: true, message: label + '死亡后等待已是 ' + seconds + ' 秒（无需重复开启）' };
       }
       // 参考工具同样要求：改过战斗数值就先别开地图刷新（重进会把配置冲掉、数值也可能错乱）
       if (combatActive()) {
@@ -5261,6 +5279,7 @@ RUNTIME_JS = r"""
 
   window.__zzAssist = {
     version: VERSION,
+    __stamp: STAMP,
     snapshot,
     heroes: heroList,
     monsters: monsterList,

@@ -349,6 +349,7 @@
       "delete window.__zzAssist;" +
       "window.__zzAssistMapping=" + mappingJson + ";" +
       "window.__zzAssistStamp='android-app';" +
+      "window.__zzAssistNextStamp='android-app';" +
       "window.__zzRpcHandle=" + String(handleGameRpc) + ";" +
       js;
     evalGame(code);
