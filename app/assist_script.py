@@ -5178,10 +5178,6 @@ RUNTIME_JS = r"""
         return;
       }
     }
-    if (view.TLZS.PKHE !== true || !view.TLZS.ZKTA || !view.TLZS.ZKTA.length) {
-      plankJump.timer = setTimeout(plankTick, 120);
-      return;
-    }
     if (view.TLZS.BVWD) {
       plankJump.timer = setTimeout(plankTick, 100);
       return;
@@ -5193,7 +5189,7 @@ RUNTIME_JS = r"""
     const power = plankChoose(view);
     if (!power) {
       plankJump.empty += 1;
-      if (plankJump.empty < 10) {
+      if (plankJump.empty < 60) {
         plankJump.timer = setTimeout(plankTick, 150);
         return;
       }
@@ -5231,6 +5227,9 @@ RUNTIME_JS = r"""
     const view = plankFindView();
     if (!view || !view.BHQS || !view.TLZS) {
       return { ok: false, message: '请先进入秘境探宝，并等界面加载完' };
+    }
+    if (view.VJMK) {
+      return { ok: false, message: '本局已结束，请重新进入秘境探宝' };
     }
     plankJump.view = view;
     plankJump.running = true;
