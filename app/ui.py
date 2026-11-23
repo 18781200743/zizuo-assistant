@@ -1401,8 +1401,28 @@ class AppUI:
             w / 2, sy(1912), text="说明：使用脚本，封号自己负责",
             fill="#f97316", font=(ui_font, 10),
         )
+        qq_item = c.create_text(
+            w / 2, sy(1952), text="QQ群：1125675701（点击复制）",
+            fill="#9fd0ff", font=(ui_font, 10), tags=("home_qq",),
+        )
+
+        def copy_qq(_event=None) -> None:
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append("1125675701")
+                c.itemconfigure(qq_item, text="QQ群：1125675701（已复制）")
+                self.root.after(
+                    1500,
+                    lambda: c.itemconfigure(qq_item, text="QQ群：1125675701（点击复制）"),
+                )
+            except tk.TclError:
+                pass
+
+        c.tag_bind("home_qq", "<Button-1>", copy_qq)
+        c.tag_bind("home_qq", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_qq", "<Leave>", lambda _e: c.configure(cursor=""))
         c.create_text(
-            w / 2, sy(1984), text="脚本版本 %s" % APP_VERSION,
+            w / 2, sy(2006), text="脚本版本 %s" % APP_VERSION,
             fill="#a9b8d4", font=(ui_font, 9),
         )
 

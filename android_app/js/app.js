@@ -58,6 +58,30 @@
 
   function $(id) { return document.getElementById(id); }
 
+  // 复制文本：优先用页面剪贴板，失败再退回 HTML5+ 的剪贴板接口
+  function copyText(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) return true;
+    } catch (e) { /* ignore */ }
+    try {
+      if (window.plus && plus.navigator && plus.navigator.setClipboard) {
+        plus.navigator.setClipboard(text);
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
   function showPage(id) {
     ["pageHome", "pageFunc", "list"].forEach(function (p) {
       var el = $(p);
@@ -1543,6 +1567,14 @@
       sponsorClose.onclick = function () {
         var mask = $("sponsorMask");
         if (mask) mask.classList.remove("active");
+      };
+    }
+    var qqEl = $("homeQQ");
+    if (qqEl) {
+      qqEl.onclick = function () {
+        if (!copyText("1125675701")) return;
+        qqEl.textContent = "QQ群：1125675701（已复制）";
+        setTimeout(function () { qqEl.textContent = "QQ群：1125675701（点击复制）"; }, 1500);
       };
     }
     $("btnBackHome").onclick = function () {
