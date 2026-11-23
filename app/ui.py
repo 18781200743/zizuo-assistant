@@ -2226,6 +2226,7 @@ class AppUI:
             ("talisman", "护符升级"),
             ("guild", "公会情报"),
             ("maze", "公会迷宫"),
+            ("treasure", "灵路寻宝"),
         )):
             row, col = divmod(index, 2)
             button = tk.Button(
@@ -2334,6 +2335,23 @@ class AppUI:
         self._build_maze_panel(maze)
         self._play_panels["maze"] = maze
 
+        # ---- 灵路寻宝 ----
+        treasure = ttk.LabelFrame(content, text="灵路寻宝", padding=8)
+        self.treasure_status = tk.StringVar(value="点「查询」看本轮幸运格和大奖宝箱")
+        ttk.Label(
+            treasure, textvariable=self.treasure_status, foreground="#1a4d8f",
+            wraplength=460, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        ttk.Button(
+            treasure, text="查询", width=10, command=self.treasure_query,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self.treasure_text = tk.Text(
+            treasure, height=10, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Microsoft YaHei UI", 9), background="#f8fafc",
+        )
+        self.treasure_text.pack(fill=tk.BOTH, expand=True)
+        self._play_panels["treasure"] = treasure
+
     def _play_select(self, key: str) -> None:
         """点功能按钮：只显示选中功能的下面内容，并高亮按钮。"""
         panel = self._play_panels.get(key)
@@ -2368,6 +2386,109 @@ class AppUI:
                 self.root.after(800, self._maze_auto_poll)
         else:
             self._maze_auto = False
+        if key == "treasure":
+            try:
+                self.treasure_query()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _reward_text(self, reward: Any) -> str:
+        if not isinstance(reward, dict):
+            return ""
+        name = str(reward.get("name") or "").strip()
+        try:
+            count = int(reward.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if not name:
+            return ""
+        return name + (" ×%d" % count if count else "")
+
+    def _set_treasure_text(self, text: str) -> None:
+        widget = getattr(self, "treasure_text", None)
+        if widget is None:
+            return
+        try:
+            widget.configure(state=tk.NORMAL)
+            widget.delete("1.0", tk.END)
+            widget.insert("1.0", str(text))
+            widget.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def treasure_query(self) -> None:
+        """查询灵路寻宝：本轮幸运格 + 大奖宝箱内容（只读）。"""
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self.treasure_status.set("正在查询…")
+        except tk.TclError:
+            pass
+        result = {}
+        try:
+            result = self.assist.treasure_hunt() or {}
+        except Exception as exc:  # noqa: BLE001
+            result = {"ok": False, "error": str(exc)}
+        if not result.get("ok"):
+            msg = str(result.get("error") or "没读到活动数据")
+            try:
+                self.treasure_status.set("查询失败：" + msg)
+            except tk.TclError:
+                pass
+            self._set_treasure_text("")
+            return
+
+        title = str(result.get("title") or "灵路寻宝")
+        keys = str(result.get("keys") or "")
+        best = result.get("best") or {}
+        stages = result.get("stages") or []
+        lucky = result.get("lucky") or []
+        milestone = str(result.get("milestone") or "")
+        lines = [title + (("    钥匙 " + keys) if keys else "")]
+        if isinstance(best, dict) and best:
+            lines.append("大奖宝箱：" + self._reward_text(best))
+        stage_parts = []
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            try:
+                no = int(stage.get("stage") or 0)
+            except (TypeError, ValueError):
+                no = 0
+            stage_parts.append("第%d阶段 %s" % (no, self._reward_text(stage.get("reward"))))
+        if stage_parts:
+            lines.append("阶段奖励：" + "；".join(stage_parts))
+        lines.append("")
+        if lucky:
+            lines.append("本轮幸运格（4×4）：")
+            for item in lucky:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    row = int(item.get("row") or 0)
+                    col = int(item.get("col") or 0)
+                except (TypeError, ValueError):
+                    continue
+                opened = "（已开）" if item.get("opened") else ""
+                lines.append(
+                    "  第%d行第%d列：%s%s"
+                    % (row, col, self._reward_text(item.get("reward")), opened)
+                )
+        else:
+            lines.append("本轮没有读到幸运格（可能活动数据还没刷新）。")
+        if milestone:
+            lines.append("")
+            lines.append("大奖条件：" + milestone)
+        lines.append("")
+        lines.append("说明：4×4 格子里是小奖励；「大奖」在右上角「大奖宝箱」，不是格子奖励。")
+        self._set_treasure_text("\n".join(lines))
+        try:
+            self.treasure_status.set("查询完成（只读，不会花钥匙）")
+        except tk.TclError:
+            pass
 
     def _update_arena_button(self) -> None:
         if getattr(self, "arena_runner", None) is not None and self.arena_runner.running:

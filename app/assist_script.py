@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 147
+RUNTIME_VERSION = 150
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 147
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 147;
+  const VERSION = 150;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2805,6 +2805,144 @@ RUNTIME_JS = r"""
     }
   }
 
+  /* ---- 灵路寻宝（活动 4×4 幸运格 / 大奖宝箱） ---- */
+
+  let treasureRewardHelperCache = null;
+
+  function treasureRewardHelper(factoryName) {
+    if (!factoryName) return null;
+    if (treasureRewardHelperCache) return treasureRewardHelperCache;
+    try {
+      const system = window.System;
+      if (!system || typeof system.entries !== 'function') return null;
+      for (const pair of system.entries()) {
+        const exports = pair && pair[1];
+        if (!exports) continue;
+        let keys = [];
+        try { keys = Object.getOwnPropertyNames(exports); } catch (_) { continue; }
+        for (const key of keys) {
+          let value;
+          try { value = exports[key]; } catch (_) { continue; }
+          if (value && value.IZBA && typeof value.IZBA[factoryName] === 'function') {
+            treasureRewardHelperCache = value.IZBA;
+            return value.IZBA;
+          }
+        }
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function treasureReward(raw, cfg) {
+    if (!raw) return null;
+    const rc = cfg || {};
+    let model = raw;
+    const helper = treasureRewardHelper(rc.factory);
+    if (helper && rc.factory && rc.rawType && rc.rawItem
+      && raw[rc.rawType] !== undefined && raw[rc.rawItem] !== undefined) {
+      try { model = helper[rc.factory](raw); } catch (_) { /* ignore */ }
+    }
+    let name = '';
+    let count = 0;
+    let quality = 0;
+    let id = 0;
+    try { if (rc.name && model && typeof model[rc.name] === 'function') name = String(model[rc.name]() || ''); } catch (_) { /* ignore */ }
+    try { if (rc.count && model && typeof model[rc.count] === 'function') count = Number(model[rc.count]()) || 0; } catch (_) { /* ignore */ }
+    try { if (rc.quality && model && typeof model[rc.quality] === 'function') quality = Number(model[rc.quality]()) || 0; } catch (_) { /* ignore */ }
+    try { if (rc.id && model && typeof model[rc.id] === 'function') id = Number(model[rc.id]()) || 0; } catch (_) { /* ignore */ }
+    if (!count && rc.rawCount) count = Number(raw[rc.rawCount] || 0) || 0;
+    if (!id && rc.rawItem) id = Number(raw[rc.rawItem] || 0) || 0;
+    if (!name) name = id ? ('物品 ' + id) : '奖励';
+    return { id: id, name: name, count: count, quality: quality };
+  }
+
+  function treasureLabelText(viewNode, parentName, nodeName) {
+    let text = '';
+    (function walk(n) {
+      if (!n || text) return;
+      if (String(n.name || '') === nodeName
+        && String((n.parent && n.parent.name) || '') === parentName) {
+        (n.components || []).forEach(function (c) {
+          try { if (!text && c instanceof cc.Label && c.string) text = String(c.string); } catch (_) { /* ignore */ }
+        });
+      }
+      (n.children || []).forEach(walk);
+    })(viewNode);
+    return text;
+  }
+
+  function treasureQuery() {
+    try {
+      const map = mapping();
+      const cfg = map && map.treasureHunt;
+      if (!cfg) return { ok: false, error: '当前版本还没有灵路寻宝映射' };
+      const scene = window.cc && window.cc.director ? window.cc.director.getScene() : null;
+      if (!scene) return { ok: false, error: '游戏还没加载完' };
+      let viewNode = null;
+      let comp = null;
+      let data = null;
+      (function walk(n) {
+        if (!n || data) return;
+        if (String(n.name || '') === cfg.node && n.activeInHierarchy) {
+          (n.components || []).forEach(function (c) {
+            if (data) return;
+            try {
+              if (cc.js.getClassName(c) !== cfg.component) return;
+              const payload = c[cfg.data];
+              if (payload) { viewNode = n; comp = c; data = payload; }
+            } catch (_) { /* ignore */ }
+          });
+        }
+        (n.children || []).forEach(walk);
+      })(scene);
+      if (!data) return { ok: false, error: '请先打开「灵路寻宝」活动界面（或等界面加载完）' };
+
+      const title = treasureLabelText(viewNode, 'top', 'tittleText');
+      const keys = treasureLabelText(viewNode, 'cost', 'count');
+      const milestone = treasureLabelText(viewNode, 'bestReward', 'tips');
+      const rc = cfg.reward || {};
+      const best = treasureReward(data[cfg.best], rc);
+      const stages = [];
+      (data[cfg.stages] || []).forEach(function (stage) {
+        const item = rc.items ? (stage[rc.items] || [])[0] : null;
+        const reward = treasureReward(item, rc);
+        if (reward) stages.push({ stage: Number(stage[rc.stage]) || 0, reward: reward });
+      });
+
+      const active = Object.keys(data[cfg.active] || {}).map(Number).sort(function (a, b) { return a - b; });
+      const cells = data[cfg.cells] || {};
+      const opened = data[cfg.opened] || {};
+      const lucky = [];
+      active.forEach(function (id, index) {
+        const cell = cells[id];
+        const items = cell && rc.items ? cell[rc.items] : null;
+        if (!Array.isArray(items) || !items.length) return;
+        const reward = treasureReward(items[0], rc);
+        if (!reward) return;
+        lucky.push({
+          id: id,
+          row: Math.floor(index / 4) + 1,
+          col: (index % 4) + 1,
+          opened: !!(opened && opened[id]),
+          reward: reward,
+        });
+      });
+      return {
+        ok: true,
+        title: title || '灵路寻宝',
+        keys: keys,
+        milestone: milestone || ('到达第' + (Number(data[cfg.round]) || 19) + '轮，可获得大奖'),
+        round: Number(data[cfg.round]) || 0,
+        best: best,
+        stages: stages,
+        lucky: lucky,
+        bestIndex: Number(data[cfg.bestIndex]) || 0,
+      };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
+    }
+  }
+
   /* ---- 日常任务（任务面板 UI） ---- */
 
   /** 在场景里按名字找节点（浅层守卫，够用）。 */
@@ -5505,6 +5643,7 @@ RUNTIME_JS = r"""
     guildIntelStart,
     guildIntelState,
     mazeQuery,
+    treasureHunt: treasureQuery,
     set,
     diagnose,
     seedDaily: seedRedDay,

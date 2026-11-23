@@ -836,6 +836,17 @@ class GameAssist:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 
+    def treasure_hunt(self) -> dict:
+        """查询灵路寻宝：本轮幸运格、当前大奖宝箱内容。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.treasureHunt "
+                "? window.__zzAssist.treasureHunt() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
     def reload_map_now(self) -> bool:
         """立刻重进当前地图（刷怪）。"""
         try:
