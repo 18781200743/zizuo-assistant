@@ -1031,6 +1031,26 @@
     "configModule": "XFNM.ts",
     "setupModule": "JJQL.ts"
    },
+   "buildPlank": {
+    "note": "秘境探宝（BuildPlank）小游戏：按力度条 UCLH 的落点 VXKA 选择力度，直接调用 HFSI 起跳",
+    "viewClass": "CYNF",
+    "powerBars": "BHQS",
+    "powerItems": "UCLH",
+    "maxPower": "DTAG",
+    "targetGroup": "TLZS",
+    "groups": "NERB",
+    "jump": "HFSI",
+    "power": "MFZL",
+    "charging": "SKBB",
+    "finished": "VJMK",
+    "ready": "PKHE",
+    "moving": "BVWD",
+    "targets": "ZKTA",
+    "check": "VXKA",
+    "center": "MGTV",
+    "marker": "NSBI",
+    "failType": "FVML"
+   },
    "translatedFrom": "f61cf",
    "runtimeNames": {
     "AGDA": "QESF",

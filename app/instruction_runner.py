@@ -923,6 +923,11 @@ class InstructionRunner:
             if slot_no < 1 or slot_no > SLOT_COUNT:
                 raise RuntimeError("跳转的槽位编号必须是 1-%d" % SLOT_COUNT)
             raise _JumpTo(slot_no)
+        if name in ("跳一跳", "自动跳", "jumpjump"):
+            if args:
+                raise RuntimeError("跳一跳指令不接收参数，请使用「跳一跳()」")
+            self._auto_jump()
+            return
         if name in ("采集", "collect"):
             if len(args) != 1 or not str(args[0]).strip() or len(str(args[0])) > 40:
                 raise RuntimeError("采集指令需要一个物品名称或「活动」，例如「采集(红矿石)」或「采集(活动)」")
@@ -1104,6 +1109,49 @@ class InstructionRunner:
             except Exception:  # noqa: BLE001
                 pass
         self._sleep(0.2)
+
+    def _auto_jump(self) -> None:
+        """秘境探宝（BuildPlank）：自动选力度并连续跳。"""
+        started = self._eval(
+            "(function(){try{var a=window.__zzAssist;"
+            "if(!a||!a.autoJumpStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+            "return JSON.stringify(a.autoJumpStart({}));}"
+            "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+        )
+        try:
+            result = json.loads(str(started))
+        except (TypeError, ValueError):
+            result = {"ok": False, "message": str(started)}
+        if not result.get("ok"):
+            raise RuntimeError("跳一跳启动失败：%s" % (result.get("message") or "未知原因"))
+        self._log_line("    开始自动跳（秘境探宝）")
+        last = ""
+        while True:
+            if self._stop.is_set():
+                try:
+                    self._eval("window.__zzAssist&&window.__zzAssist.autoJumpStop&&window.__zzAssist.autoJumpStop()")
+                except Exception:  # noqa: BLE001
+                    pass
+                raise _Stopped()
+            raw = self._eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "return a&&a.autoJumpState?JSON.stringify(a.autoJumpState()):'{}';}"
+                "catch(e){return '{}'}})()"
+            )
+            try:
+                state_ = json.loads(str(raw))
+            except (TypeError, ValueError):
+                state_ = {}
+            if state_.get("error"):
+                raise RuntimeError("跳一跳失败：%s" % state_.get("error"))
+            if not state_.get("running"):
+                self._log_line("    自动跳结束：%s" % (state_.get("last") or "完成"))
+                return
+            line = str(state_.get("last") or "")
+            if line and line != last:
+                last = line
+                self._log_line("    %s" % line)
+            time.sleep(0.5)
 
     # ---- 地图指令
 

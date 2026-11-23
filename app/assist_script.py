@@ -35,7 +35,7 @@ RUNTIME_VERSION = 141
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 141;
+  const VERSION = 142;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5061,6 +5061,205 @@ RUNTIME_JS = r"""
     return out;
   }
 
+  // ---------- 秘境探宝（BuildPlank）自动跳 ----------
+  const plankJump = {
+    running: false, done: false, stop: false, view: null,
+    jumps: 0, power: 0, last: '', error: '', failType: null,
+    timer: 0, maxJumps: 500, empty: 0, probe: [],
+  };
+
+  function plankFindView() {
+    try {
+      const cc = window.cc;
+      if (!cc || !cc.director || !cc.director.getScene) return null;
+      const scene = cc.director.getScene();
+      if (!scene) return null;
+      const stack = [scene];
+      while (stack.length) {
+        const node = stack.pop();
+        if (!node) continue;
+        const comps = node.components || node._components || [];
+        for (let i = 0; i < comps.length; i += 1) {
+          const c = comps[i];
+          if (!c) continue;
+          if (typeof c.HFSI === 'function' && 'BHQS' in c && 'TLZS' in c && c.NERB) {
+            if (node.activeInHierarchy) return c;
+          }
+        }
+        const children = node.children || [];
+        for (let i = 0; i < children.length; i += 1) stack.push(children[i]);
+      }
+      return null;
+    } catch (_) { return null; }
+  }
+
+  function plankFailType(view) {
+    try {
+      if (!view || !view.TLZS || typeof view.TLZS.VXKA !== 'function') return null;
+      const cc = window.cc;
+      if (!cc || !cc.Vec3) return null;
+      const far = new cc.Vec3(1e9, 1e9, 0);
+      const r = view.TLZS.VXKA(far);
+      return r && r.resultType !== undefined ? r.resultType : null;
+    } catch (_) { return null; }
+  }
+
+  function plankChoose(view) {
+    try {
+      if (!view || !view.BHQS || !view.TLZS) return 0;
+      const items = view.BHQS.UCLH || [];
+      const max = Math.min(items.length, Number(view.BHQS.DTAG) || items.length);
+      let bestPower = 0;
+      let bestScore = -Infinity;
+      const probe = [];
+      for (let i = 1; i <= max; i += 1) {
+        const item = items[i - 1];
+        if (!item || !item.NSBI) continue;
+        const pos = item.NSBI.worldPosition;
+        if (!pos) continue;
+        const r = view.TLZS.VXKA(pos);
+        if (!r || r.beyond === -1 || r.resultType === undefined) {
+          probe.push({ power: i, type: r && r.resultType, beyond: r && r.beyond });
+          continue;
+        }
+        probe.push({ power: i, type: r.resultType, beyond: r.beyond });
+        if (plankJump.failType !== null && r.resultType === plankJump.failType) continue;
+        let score = 0;
+        try {
+          if (r.resultItem && typeof r.resultItem.MGTV === 'function') {
+            const center = r.resultItem.MGTV();
+            const dx = pos.x - center.x;
+            const dy = pos.y - center.y;
+            score = -(dx * dx + dy * dy);
+          }
+        } catch (_) { score = 0; }
+        if (score > bestScore) { bestScore = score; bestPower = i; }
+      }
+      plankJump.probe = probe;
+      return bestPower;
+    } catch (_) { return 0; }
+  }
+
+  function plankStop(reason) {
+    plankJump.running = false;
+    plankJump.stop = false;
+    plankJump.done = true;
+    if (reason) plankJump.last = String(reason);
+    if (plankJump.timer) { clearTimeout(plankJump.timer); plankJump.timer = 0; }
+  }
+
+  function plankFail(reason) {
+    plankJump.error = String(reason || '自动跳失败');
+    plankJump.last = plankJump.error;
+    plankStop(plankJump.last);
+  }
+
+  function plankTick() {
+    plankJump.timer = 0;
+    if (!plankJump.running) return;
+    if (plankJump.stop) return plankStop('已停止');
+    let view = plankJump.view;
+    if (!view || !view.isValid) { view = plankFindView(); plankJump.view = view; }
+    if (!view) return plankFail('请先进入秘境探宝');
+    if (view.VJMK) return plankStop('本局结束');
+    if (!view.BHQS || !view.TLZS) {
+      plankJump.timer = setTimeout(plankTick, 150);
+      return;
+    }
+    if (view.SKBB) {
+      plankJump.timer = setTimeout(plankTick, 100);
+      return;
+    }
+    if (plankJump.jumps >= plankJump.maxJumps) return plankStop('达到最大跳数');
+    if (plankJump.failType === null) {
+      plankJump.failType = plankFailType(view);
+      if (plankJump.failType === null) {
+        plankJump.timer = setTimeout(plankTick, 150);
+        return;
+      }
+    }
+    if (view.TLZS.PKHE !== true || !view.TLZS.ZKTA || !view.TLZS.ZKTA.length) {
+      plankJump.timer = setTimeout(plankTick, 120);
+      return;
+    }
+    if (view.TLZS.BVWD) {
+      plankJump.timer = setTimeout(plankTick, 100);
+      return;
+    }
+    if (!view.BHQS.UCLH || !view.BHQS.UCLH.length) {
+      plankJump.timer = setTimeout(plankTick, 120);
+      return;
+    }
+    const power = plankChoose(view);
+    if (!power) {
+      plankJump.empty += 1;
+      if (plankJump.empty < 10) {
+        plankJump.timer = setTimeout(plankTick, 150);
+        return;
+      }
+      return plankFail('找不到能落地的力度');
+    }
+    plankJump.empty = 0;
+    plankJump.power = power;
+    plankJump.jumps += 1;
+    plankJump.last = '第 ' + plankJump.jumps + ' 跳（力度 ' + power + '）';
+    const before = view.TLZS;
+    const startedAt = now();
+    try {
+      view.MFZL = power;
+      view.SKBB = false;
+      view.HFSI();
+    } catch (cause) {
+      plankFail('起跳失败：' + msgOf(cause));
+      return;
+    }
+    (function afterJump() {
+      if (!plankJump.running) return;
+      if (plankJump.stop) return plankStop('已停止');
+      if (view.VJMK) return plankStop('本局结束');
+      const elapsed = now() - startedAt;
+      if (elapsed < 300) { plankJump.timer = setTimeout(afterJump, 80); return; }
+      if (view.SKBB && elapsed < 6000) { plankJump.timer = setTimeout(afterJump, 80); return; }
+      if (view.TLZS === before && elapsed < 6000) { plankJump.timer = setTimeout(afterJump, 100); return; }
+      if (view.TLZS === before) return plankFail('跳跃没有完成');
+      plankJump.timer = setTimeout(plankTick, 180);
+    })();
+  }
+
+  function plankStart(opts) {
+    if (plankJump.running) return { ok: true, message: '已经在自动跳' };
+    const view = plankFindView();
+    if (!view || !view.BHQS || !view.TLZS) {
+      return { ok: false, message: '请先进入秘境探宝，并等界面加载完' };
+    }
+    plankJump.view = view;
+    plankJump.running = true;
+    plankJump.stop = false;
+    plankJump.done = false;
+    plankJump.error = '';
+    plankJump.jumps = 0;
+    plankJump.power = 0;
+    plankJump.last = '';
+    plankJump.failType = null;
+    plankJump.empty = 0;
+    plankJump.probe = [];
+    plankJump.maxJumps = Math.max(1, Number(opts && opts.maxJumps) || 500);
+    plankTick();
+    return { ok: true, message: '开始自动跳' };
+  }
+
+  function plankState() {
+    return {
+      running: plankJump.running,
+      done: plankJump.done,
+      jumps: plankJump.jumps,
+      power: plankJump.power,
+      last: plankJump.last,
+      error: plankJump.error,
+      probe: plankJump.probe || [],
+    };
+  }
+
   window.__zzAssist = {
     version: VERSION,
     snapshot,
@@ -5077,6 +5276,9 @@ RUNTIME_JS = r"""
     pickCoord,
     clickTeleport,
     clickTeleportTrack,
+    autoJumpStart: plankStart,
+    autoJumpState: plankState,
+    autoJumpStop: () => plankStop('已停止'),
     guildIntelStart,
     guildIntelState,
     mazeQuery,

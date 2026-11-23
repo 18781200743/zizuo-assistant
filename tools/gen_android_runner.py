@@ -299,6 +299,40 @@ RUNNER_JS = r"""
     return sleep(900);
   }
 
+  function cmdAutoJump(args) {
+    if (args && args.length) throw new Error("跳一跳指令不接收参数，请使用「跳一跳()」");
+    var res = evalJs(
+      "(function(){try{var a=window.__zzAssist;" +
+      "if(!a||!a.autoJumpStart)return JSON.stringify({ok:false,message:'运行时还没注入'});" +
+      "return JSON.stringify(a.autoJumpStart({}));}" +
+      "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+    );
+    var started = null;
+    try { started = JSON.parse(res); } catch (e) { started = null; }
+    if (!started || !started.ok) {
+      throw new Error((started && started.message) || "跳一跳启动失败");
+    }
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        if (state.stop) {
+          evalJs("window.__zzAssist&&window.__zzAssist.autoJumpStop&&window.__zzAssist.autoJumpStop()");
+          return reject(new Error("STOP"));
+        }
+        var raw = evalJs(
+          "(function(){try{var a=window.__zzAssist;" +
+          "return a&&a.autoJumpState?JSON.stringify(a.autoJumpState()):'{}';}" +
+          "catch(e){return '{}'}})()"
+        );
+        var st = null;
+        try { st = JSON.parse(raw); } catch (e) { st = null; }
+        if (!st) return setTimeout(poll, 500);
+        if (st.error) return reject(new Error(st.error));
+        if (!st.running) return resolve();
+        setTimeout(poll, 500);
+      })();
+    });
+  }
+
   function installCollectWatch() {
     try {
       var cfg = mapCfg(), b = cfg.b || {}, mc = cfg.mc || {}, ct = b.collect || {};
@@ -768,6 +802,7 @@ RUNNER_JS = r"""
     if (n === "移动" || n === "move") return cmdMove(step.args);
     if (n === "回城" || n === "home") return cmdHome();
     if (n === "传送" || n === "teleport") return cmdTeleport(step.args);
+    if (n === "跳一跳" || n === "自动跳" || n === "jumpjump") return cmdAutoJump(step.args);
     if (n === "采集" || n === "collect") return cmdCollect(step.args);
     if (n === "开宝箱" || n === "chest") return cmdChest(step.args);
     if (n === "跳转" || n === "jump") {
