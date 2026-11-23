@@ -1320,6 +1320,20 @@ class AppUI:
         c.tag_bind("home_about", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_about", "<Leave>", lambda _e: c.configure(cursor=""))
 
+        # ---------- 赞助 ----------
+        px0, py0, px1, py1 = sx(775), sy(108), sx(931), sy(195)
+        c.create_polygon(
+            self._round_points(px0, py0, px1, py1, sx(14)),
+            fill="#ffffff", outline="#e6ecf7", tags=("home_sponsor",),
+        )
+        c.create_text(
+            (px0 + px1) / 2, (py0 + py1) / 2, text="赞助", fill="#0f9d58",
+            font=(ui_font, 10, "bold"), tags=("home_sponsor",),
+        )
+        c.tag_bind("home_sponsor", "<Button-1>", lambda _e: self._show_sponsor())
+        c.tag_bind("home_sponsor", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_sponsor", "<Leave>", lambda _e: c.configure(cursor=""))
+
         # ---------- 辅助工具（发光六边形） ----------
         hx0, hx1 = sx(150), sx(1000)
         hy0, hy1 = sy(1145), sy(1345)
@@ -1401,6 +1415,59 @@ class AppUI:
             "功能：红包、复活、地图刷新、闪现、取坐标、运行命令\n\n"
             "说明：使用脚本，封号自己负责。" % APP_VERSION,
         )
+
+    def _show_sponsor(self) -> None:
+        """首页「赞助」：显示微信收款二维码。"""
+        win = tk.Toplevel(self.root)
+        win.title("赞助作者")
+        win.configure(bg="#f7f8fb")
+        win.transient(self.root)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+        tk.Label(
+            win, text="感谢支持！", bg="#f7f8fb", fg="#1f2937",
+            font=("Microsoft YaHei UI", 14, "bold"),
+        ).pack(pady=(16, 2))
+        tk.Label(
+            win, text="微信扫码赞助，金额随意", bg="#f7f8fb", fg="#4b5768",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(pady=(0, 10))
+        photo = None
+        try:
+            from PIL import Image, ImageTk
+
+            path = os.path.join(self.ASSET_DIR, "sponsor_qr.png")
+            if os.path.exists(path):
+                im = Image.open(path).convert("RGB")
+                im.thumbnail((340, 340), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+        except Exception:  # noqa: BLE001
+            photo = None
+        if photo is not None:
+            label = tk.Label(win, image=photo, bg="#ffffff", bd=0)
+            label.image = photo  # type: ignore[attr-defined]  # 防止被回收
+            label.pack(padx=18, pady=(0, 8))
+        else:
+            tk.Label(
+                win, text="二维码图片还没放好：\napp/assets/sponsor_qr.png",
+                bg="#f7f8fb", fg="#b45309", font=("Microsoft YaHei UI", 10),
+                justify="center",
+            ).pack(padx=24, pady=10)
+        tk.Label(
+            win, text="赞助完全自愿，不影响任何功能", bg="#f7f8fb", fg="#8a94a6",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(pady=(0, 8))
+        tk.Button(win, text="关闭", width=14, command=win.destroy).pack(pady=(0, 14))
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - win.winfo_width()) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - win.winfo_height()) // 2)
+            win.geometry("+%d+%d" % (x, y))
+        except tk.TclError:
+            pass
 
     ASSIST_TOP_H = 352
 

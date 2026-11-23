@@ -53,6 +53,31 @@
     }
     body.day .theme-btn { background: #eef2f8; border-color: #c9d3e4; color: #33405a; }
 
+    .head-btns { display: flex; align-items: center; gap: 8px; }
+
+    /* 赞助二维码弹层 */
+    .sponsor-mask {
+      position: fixed; inset: 0; z-index: 60; display: none;
+      align-items: center; justify-content: center; padding: 24px;
+      background: rgba(4, 8, 18, .72);
+    }
+    .sponsor-mask.active { display: flex; }
+    .sponsor-box {
+      width: 100%; max-width: 340px; padding: 16px; text-align: center;
+      background: #ffffff; border-radius: 18px; box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+    }
+    .sponsor-box h3 { margin: 4px 0 2px; color: #1f2937; font-size: 18px; }
+    .sponsor-box p { margin: 0 0 10px; color: #4b5768; font-size: 13px; }
+    .sponsor-box img {
+      display: block; width: 100%; max-width: 300px; margin: 0 auto;
+      border-radius: 10px;
+    }
+    .sponsor-box .fine { margin: 8px 0 0; color: #8a94a6; font-size: 11px; }
+    .sponsor-box button {
+      width: 100%; margin-top: 12px; border: 0; border-radius: 12px;
+      padding: 12px; background: #2f7fe8; color: #fff; font-size: 15px; font-weight: 700;
+    }
+
     .card {
       background: var(--card); border: 1px solid var(--card-line);
       border-radius: 16px; padding: 16px; box-shadow: var(--shadow);
@@ -394,7 +419,10 @@
         <div class="home-title">百炼英雄 · 助手</div>
         <div class="home-sub">百炼英雄 · 安卓版</div>
       </div>
-      <button class="theme-btn" id="btnTheme">☾ 夜间</button>
+      <div class="head-btns">
+        <button class="theme-btn" id="btnSponsor">赞助</button>
+        <button class="theme-btn" id="btnTheme">☾ 夜间</button>
+      </div>
     </div>
 
     <div class="card">
@@ -422,6 +450,17 @@
 
     <div class="tip">说明：使用脚本，封号自己负责</div>
     <div class="tip" id="homeVer">脚本版本 —</div>
+  </div>
+
+  <!-- 赞助二维码 -->
+  <div class="sponsor-mask" id="sponsorMask">
+    <div class="sponsor-box">
+      <h3>赞助作者</h3>
+      <p>微信扫码赞助，金额随意，感谢支持！</p>
+      <img src="img/sponsor_qr.png" alt="微信收款二维码">
+      <p class="fine">赞助完全自愿，不影响任何功能</p>
+      <button id="sponsorClose">关闭</button>
+    </div>
   </div>
 
   <!-- 功能页 -->

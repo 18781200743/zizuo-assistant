@@ -1528,6 +1528,23 @@
   function bind() {
     $("btnOpen").onclick = function () { openGame(); };
     $("btnFunc").onclick = function () { backToApp(); showPage("pageFunc"); };
+    var sponsorBtn = $("btnSponsor");
+    var sponsorMask = $("sponsorMask");
+    if (sponsorBtn && sponsorMask) {
+      sponsorBtn.onclick = function () { sponsorMask.classList.add("active"); };
+    }
+    if (sponsorMask) {
+      sponsorMask.onclick = function (e) {
+        if (e.target === sponsorMask) sponsorMask.classList.remove("active");
+      };
+    }
+    var sponsorClose = $("sponsorClose");
+    if (sponsorClose) {
+      sponsorClose.onclick = function () {
+        var mask = $("sponsorMask");
+        if (mask) mask.classList.remove("active");
+      };
+    }
     $("btnBackHome").onclick = function () {
       if (backToGame()) return;
       showPage("pageHome");
