@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 146
+RUNTIME_VERSION = 147
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 146
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 146;
+  const VERSION = 147;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2687,6 +2687,70 @@ RUNTIME_JS = r"""
   }
 
   /** 当前地图里活着的怪（名字/坐标/距离），按距离从近到远。 */
+  let statsHelperCache = null;
+
+  /** 找游戏的属性格式化工具：导出对象里带 GKNU（格式化数值）和 DAIC（属性名）的那个。 */
+  function statsHelper() {
+    if (statsHelperCache) return statsHelperCache;
+    try {
+      const system = window.System;
+      if (!system || typeof system.entries !== 'function') return null;
+      for (const pair of system.entries()) {
+        const exports = pair && pair[1];
+        if (!exports) continue;
+        let keys = [];
+        try { keys = Object.getOwnPropertyNames(exports); } catch (_) { continue; }
+        for (const key of keys) {
+          let value;
+          try { value = exports[key]; } catch (_) { continue; }
+          if (value && typeof value.GKNU === 'function' && typeof value.DAIC === 'function') {
+            statsHelperCache = value;
+            return value;
+          }
+        }
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** 读一只怪的属性（攻击/攻速/移速/命中/暴击…）：值来自游戏属性组件，文案用游戏自己的格式化函数。 */
+  function monsterStatsOf(unit, mapCfg) {
+    try {
+      const cfg = mapCfg && mapCfg.monsterStats;
+      const u = mapCfg && mapCfg.unit;
+      if (!cfg || !u || !u.attribute) return [];
+      const attr = unit[u.attribute];
+      if (!attr) return [];
+      const helper = statsHelper();
+      const out = [];
+      for (const key of Object.keys(cfg)) {
+        const item = cfg[key] || {};
+        const method = item.method || item;
+        if (typeof attr[method] !== 'function') continue;
+        let value;
+        try { value = attr[method](); } catch (_) { continue; }
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+        let label = String(item.label || key);
+        let text = String(value);
+        const attrId = Number(item.attr);
+        if (helper && attrId) {
+          try {
+            const found = helper.DAIC(attrId);
+            if (found) label = String(found);
+          } catch (_) { /* ignore */ }
+          try {
+            const shown = helper.GKNU(attrId, value);
+            if (shown !== undefined && shown !== null && String(shown) !== '') text = String(shown);
+          } catch (_) { /* ignore */ }
+        }
+        out.push({ key: key, label: label, value: value, text: text });
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
   function monsterList() {
     try {
       const mapCfg = mapConfig();
@@ -2719,6 +2783,7 @@ RUNTIME_JS = r"""
         let hp = null, maxHp = null;
         try { if (typeof unit.VTGJ === 'function') hp = unit.VTGJ(); } catch (_) { hp = null; }
         try { if (typeof unit.NXDX === 'function') maxHp = unit.NXDX(); } catch (_) { maxHp = null; }
+        const stats = monsterStatsOf(unit, mapCfg);
         out.push({
           x: Math.round(unit.ADUX),
           y: Math.round(unit.WUZI),
@@ -2728,6 +2793,7 @@ RUNTIME_JS = r"""
           d: Math.round(Math.hypot(unit.ADUX - lx, unit.WUZI - ly)),
           hp: Number.isFinite(hp) ? Math.round(hp) : null,
           maxHp: Number.isFinite(maxHp) ? Math.round(maxHp) : null,
+          stats: stats,
         });
         return false;
       });

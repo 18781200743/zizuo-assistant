@@ -636,6 +636,16 @@
      "头目"
     ],
     "bossIds": [],
+    "monsterStats": {
+     "atk": { "method": "NAFL", "attr": 1, "label": "攻击力" },
+     "aspd": { "method": "JXFH", "attr": 3, "label": "攻速" },
+     "mspd": { "method": "QGMI", "attr": 13, "label": "移速" },
+     "hit": { "method": "XMKX", "attr": 12, "label": "命中率" },
+     "crit": { "method": "MQGE", "attr": 7, "label": "暴击率" },
+     "critDmg": { "method": "LCWY", "attr": 9, "label": "暴伤加成" },
+     "eva": { "method": "JMXA", "attr": 11, "label": "闪避率" },
+     "critRes": { "method": "IUUT", "attr": 8, "label": "抗暴击率" }
+    },
     "gold": {
      "node": "CoinCurrencyItem",
      "label": "NumberLabel"

@@ -1055,8 +1055,14 @@
       row.className = "item" + (m.boss ? " boss" : "") + (index === selectedMonster ? " sel" : "");
       var left = document.createElement("div");
       var hp = (m.hp !== null && m.maxHp) ? " · 血 " + fmtNum(m.hp) + "/" + fmtNum(m.maxHp) : "";
+      var stats = (m.stats || []).map(function (s) {
+        var label = s && (s.label || s.key);
+        var text = s && (s.text !== undefined && s.text !== null ? s.text : s.value);
+        return label ? (label + " " + text) : "";
+      }).filter(function (x) { return !!x; }).join(" · ");
       left.innerHTML = '<div class="name">' + (m.boss ? "★ " : "") + escapeHtml(m.name || "怪") + "</div>" +
-        '<div class="meta">' + Math.round(m.d || 0) + " 米" + hp + "</div>";
+        '<div class="meta">' + Math.round(m.d || 0) + " 米" + hp + "</div>" +
+        (stats ? '<div class="stats">' + escapeHtml(stats) + "</div>" : "");
       row.appendChild(left);
       row.onclick = function () {
         selectedMonster = index;

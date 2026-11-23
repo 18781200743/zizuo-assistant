@@ -1879,6 +1879,12 @@ class AppUI:
         self.assist_monster_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
         list_sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.assist_monster_list.bind("<Double-Button-1>", lambda _e: self.blink_assist())
+        self.assist_monster_list.bind("<<ListboxSelect>>", lambda _e: self._update_monster_stats())
+        self.assist_monster_stats = tk.StringVar(value="")
+        ttk.Label(
+            blink, textvariable=self.assist_monster_stats, foreground="#c7d2fe",
+            wraplength=460, justify=tk.LEFT,
+        ).grid(row=3, column=0, columnspan=7, sticky=tk.W, pady=(3, 0))
         self._monster_rows: List[Dict[str, Any]] = []
         self._picked_world = None
         self.assist_blink_var = tk.StringVar(value=str(assist.get("blink_target", "")))
@@ -3975,6 +3981,7 @@ class AppUI:
 
         if not rows:
             self.assist_blink_status.set("没读到怪（先进地图、等辅助连上再刷新）")
+            self.assist_monster_stats.set("")
             return
         bosses = sum(1 for r in rows if r.get("boss"))
         label = {"BOSS": "BOSS", "小怪": "小怪"}.get(mode, "全部")
@@ -3982,6 +3989,49 @@ class AppUI:
             "当前地图 %d 只（BOSS %d / 小怪 %d）· %s：显示 %d 只"
             % (len(rows), bosses, len(rows) - bosses, label, len(view))
         )
+        self._update_monster_stats()
+
+    def _update_monster_stats(self) -> None:
+        """列表下方显示当前选中（没选就第一只）的属性。"""
+        var = getattr(self, "assist_monster_stats", None)
+        if var is None:
+            return
+        rows = getattr(self, "_monster_view", []) or []
+        if not rows:
+            var.set("")
+            return
+        sel = self.assist_monster_list.curselection()
+        idx = int(sel[0]) if sel else 0
+        if idx < 0 or idx >= len(rows):
+            idx = 0
+        item = rows[idx]
+        parts = []
+        for stat in item.get("stats") or []:
+            if not isinstance(stat, dict):
+                continue
+            name = str(stat.get("label") or stat.get("key") or "")
+            text = stat.get("text")
+            if text is None or text == "":
+                text = stat.get("value")
+            if name and text is not None:
+                parts.append("%s %s" % (name, text))
+        hp = item.get("hp")
+        max_hp = item.get("maxHp")
+        hp_text = ""
+        if isinstance(hp, (int, float)) and isinstance(max_hp, (int, float)) and max_hp > 0:
+            hp_text = "%s/%s" % (_fmt_hp(hp), _fmt_hp(max_hp))
+        elif isinstance(hp, (int, float)):
+            hp_text = _fmt_hp(hp)
+        head = "第%d只" % (idx + 1) if not sel else "选中"
+        detail = " · ".join(parts)
+        if hp_text:
+            detail = ("血量 " + hp_text + (" · " if detail else "")) + detail
+        if not detail:
+            detail = "该版本暂不支持读取属性"
+        try:
+            var.set(head + "：" + detail)
+        except tk.TclError:
+            pass
 
     def fly_to_picked(self) -> None:
         """飞到最近一次「取坐标」取到的位置。"""
