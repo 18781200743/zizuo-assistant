@@ -836,17 +836,6 @@ class GameAssist:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 
-    def treasure_hunt(self) -> dict:
-        """查询灵路寻宝：完整 4×4 格子、未翻格隐藏信息、本轮自选大奖和大奖宝箱。"""
-        try:
-            raw = self.bridge.eval_js(
-                "JSON.stringify(window.__zzAssist && window.__zzAssist.treasureHunt "
-                "? window.__zzAssist.treasureHunt() : null)"
-            )
-            return json.loads(raw or "null") or {}
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": str(exc)}
-
     def reload_map_now(self) -> bool:
         """立刻重进当前地图（刷怪）。"""
         try:

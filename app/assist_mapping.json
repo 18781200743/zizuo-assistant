@@ -502,32 +502,6 @@
      "time": "DKZF"
     }
    },
-   "treasureHunt": {
-    "node": "ActivityNationalDayView",
-    "component": "ALCI",
-    "holder": "FIKA",
-    "data": "HBJS",
-    "round": "GZBR",
-    "best": "SUPT",
-    "bestIndex": "KEXG",
-    "stages": "GFGV",
-    "active": "HJSK",
-    "cells": "WYTG",
-    "opened": "GMOM",
-    "positionOffset": 1,
-    "reward": {
-     "factory": "VKBV",
-     "rawType": "PWSP",
-     "rawItem": "AHJE",
-     "rawCount": "PHKL",
-     "name": "FKAZ",
-     "count": "SSYS",
-     "quality": "QDMP",
-     "id": "BWSK",
-     "items": "ICTR",
-     "stage": "HULT"
-    }
-   },
    "chat": {
     "service": "WRGQ",
     "messages": "RMEX",

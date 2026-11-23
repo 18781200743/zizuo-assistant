@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 153
+RUNTIME_VERSION = 147
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 153
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 153;
+  const VERSION = 147;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -2805,197 +2805,6 @@ RUNTIME_JS = r"""
     }
   }
 
-  /* ---- 灵路寻宝（活动 4×4 幸运格 / 大奖宝箱） ---- */
-
-  /* 4×4 普通格奖励池：取自游戏内「灵路寻宝」帮助里的“奖励概率”，
-     游戏原文每项标注 6.25%，且每一轮奖池可能有差异。 */
-  const TREASURE_POOL = [
-    '碎铁×200', '碎铁×300',
-    '高级幸运草×1', '高级幸运草×2', '高级幸运草×3',
-    '红矿石×1',
-    '金币×200', '金币×300', '金币×500',
-    '白色随机符文×1', '白色随机符文×2',
-    '灵晶×1000', '灵晶×1200', '灵晶×1500', '灵晶×2000',
-    '普通召唤券×2', '高级召唤券×1', '普通凝晶×1',
-    '祈祷石×100', '祈祷石×120', '祈祷石×150',
-    '升星石×3', '升星石×5',
-    '觉醒石×1', '觉醒石×2',
-    '普通召唤石×15', '普通召唤石×10',
-    '高级召唤石×5', '噩梦召唤石×5',
-    '蓝矿石×100', '女神进阶石', '绿钻×88',
-  ];
-
-  let treasureRewardHelperCache = null;
-
-  function treasureRewardHelper(factoryName) {
-    if (!factoryName) return null;
-    if (treasureRewardHelperCache) return treasureRewardHelperCache;
-    try {
-      const system = window.System;
-      if (!system || typeof system.entries !== 'function') return null;
-      for (const pair of system.entries()) {
-        const exports = pair && pair[1];
-        if (!exports) continue;
-        let keys = [];
-        try { keys = Object.getOwnPropertyNames(exports); } catch (_) { continue; }
-        for (const key of keys) {
-          let value;
-          try { value = exports[key]; } catch (_) { continue; }
-          if (value && value.IZBA && typeof value.IZBA[factoryName] === 'function') {
-            treasureRewardHelperCache = value.IZBA;
-            return value.IZBA;
-          }
-        }
-      }
-    } catch (_) { /* ignore */ }
-    return null;
-  }
-
-  function treasureReward(raw, cfg) {
-    if (!raw) return null;
-    const rc = cfg || {};
-    let model = raw;
-    const helper = treasureRewardHelper(rc.factory);
-    if (helper && rc.factory && rc.rawType && rc.rawItem
-      && raw[rc.rawType] !== undefined && raw[rc.rawItem] !== undefined) {
-      try { model = helper[rc.factory](raw); } catch (_) { /* ignore */ }
-    }
-    let name = '';
-    let count = 0;
-    let quality = 0;
-    let id = 0;
-    try { if (rc.name && model && typeof model[rc.name] === 'function') name = String(model[rc.name]() || ''); } catch (_) { /* ignore */ }
-    try { if (rc.count && model && typeof model[rc.count] === 'function') count = Number(model[rc.count]()) || 0; } catch (_) { /* ignore */ }
-    try { if (rc.quality && model && typeof model[rc.quality] === 'function') quality = Number(model[rc.quality]()) || 0; } catch (_) { /* ignore */ }
-    try { if (rc.id && model && typeof model[rc.id] === 'function') id = Number(model[rc.id]()) || 0; } catch (_) { /* ignore */ }
-    if (!count && rc.rawCount) count = Number(raw[rc.rawCount] || 0) || 0;
-    if (!id && rc.rawItem) id = Number(raw[rc.rawItem] || 0) || 0;
-    if (!name) name = id ? ('物品 ' + id) : '奖励';
-    return { id: id, name: name, count: count, quality: quality };
-  }
-
-  function treasureLabelText(viewNode, parentName, nodeName) {
-    let text = '';
-    (function walk(n) {
-      if (!n || text) return;
-      if (String(n.name || '') === nodeName
-        && String((n.parent && n.parent.name) || '') === parentName) {
-        (n.components || []).forEach(function (c) {
-          try { if (!text && c instanceof cc.Label && c.string) text = String(c.string); } catch (_) { /* ignore */ }
-        });
-      }
-      (n.children || []).forEach(walk);
-    })(viewNode);
-    return text;
-  }
-
-  function treasureQuery() {
-    try {
-      state.build = state.build || detectBuild();
-      const map = mapping();
-      const cfg = map && map.treasureHunt;
-      if (!cfg) return { ok: false, error: '当前版本还没有灵路寻宝映射' };
-      const scene = window.cc && window.cc.director ? window.cc.director.getScene() : null;
-      if (!scene) return { ok: false, error: '游戏还没加载完' };
-      let viewNode = null;
-      let comp = null;
-      let data = null;
-      (function walk(n) {
-        if (!n || data) return;
-        if (String(n.name || '') === cfg.node && n.activeInHierarchy) {
-          (n.components || []).forEach(function (c) {
-            if (data) return;
-            try {
-              if (cc.js.getClassName(c) !== cfg.component) return;
-              const holder = cfg.holder ? c[cfg.holder] : c;
-              const payload = holder && holder[cfg.data];
-              if (payload) { viewNode = n; comp = c; data = payload; }
-            } catch (_) { /* ignore */ }
-          });
-        }
-        (n.children || []).forEach(walk);
-      })(scene);
-      if (!data) return { ok: false, error: '请先打开「灵路寻宝」活动界面（或等界面加载完）' };
-
-      const title = treasureLabelText(viewNode, 'top', 'tittleText');
-      const keys = treasureLabelText(viewNode, 'cost', 'count');
-      const milestone = treasureLabelText(viewNode, 'bestReward', 'tips');
-      const rc = cfg.reward || {};
-      const best = treasureReward(data[cfg.best], rc);
-      const stages = [];
-      (data[cfg.stages] || []).forEach(function (stage) {
-        const item = rc.items ? (stage[rc.items] || [])[0] : null;
-        const reward = treasureReward(item, rc);
-        if (reward) stages.push({ stage: Number(stage[rc.stage]) || 0, reward: reward });
-      });
-
-      const active = Object.keys(data[cfg.active] || {}).map(Number).sort(function (a, b) { return a - b; });
-      const records = data[cfg.opened] || {};
-      const offset = cfg.positionOffset === undefined ? 0 : Number(cfg.positionOffset) || 0;
-      const grid = [];
-      const lucky = [];
-      let openedCount = 0;
-      active.forEach(function (id, index) {
-        const row = Math.floor(index / 4) + 1;
-        const col = (index % 4) + 1;
-        const pos = id + offset;
-        const record = records[pos];
-        const items = record && rc.items ? record[rc.items] : null;
-        let reward = null;
-        if (Array.isArray(items) && items.length) {
-          reward = treasureReward(items[0], rc);
-        }
-        const opened = !!record;
-        if (opened) openedCount += 1;
-        const cell = {
-          id: id,
-          pos: pos,
-          row: row,
-          col: col,
-          opened: opened,
-          reward: reward,
-        };
-        grid.push(cell);
-        if (reward) lucky.push(cell);
-      });
-      const hidden = grid.filter(function (cell) { return !cell.opened; });
-
-      const bestIndex = Number(data[cfg.bestIndex]) || 0;
-      let special = null;
-      if (bestIndex > 0) {
-        const stage = (data[cfg.stages] || [])[bestIndex - 1];
-        const item = stage && rc.items ? (stage[rc.items] || [])[0] : null;
-        special = treasureReward(item, rc);
-      }
-
-      return {
-        ok: true,
-        title: title || '灵路寻宝',
-        keys: keys,
-        milestone: milestone || ('到达第' + (Number(data[cfg.round]) || 19) + '轮，可获得大奖'),
-        round: Number(data[cfg.round]) || 0,
-        best: best,
-        stages: stages,
-        grid: grid,
-        lucky: lucky,
-        hidden: hidden.map(function (cell) {
-          return { row: cell.row, col: cell.col, pos: cell.pos };
-        }),
-        openedCount: openedCount,
-        hiddenCount: hidden.length,
-        total: grid.length,
-        special: special,
-        specialIndex: bestIndex,
-        bestIndex: bestIndex,
-        specialChance: '6.25%',
-        pool: TREASURE_POOL.slice(),
-        poolChance: '6.25%',
-      };
-    } catch (cause) {
-      return { ok: false, error: msgOf(cause) };
-    }
-  }
-
   /* ---- 日常任务（任务面板 UI） ---- */
 
   /** 在场景里按名字找节点（浅层守卫，够用）。 */
@@ -5696,7 +5505,6 @@ RUNTIME_JS = r"""
     guildIntelStart,
     guildIntelState,
     mazeQuery,
-    treasureHunt: treasureQuery,
     set,
     diagnose,
     seedDaily: seedRedDay,
