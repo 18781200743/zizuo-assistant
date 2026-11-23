@@ -32,6 +32,30 @@
   var clickTpOn = false;
   var rpcSeq = 0;
 
+  // 屏幕常亮：挂机时不让手机自动息屏/锁屏。
+  // 需要 manifest.json 里声明 android.permission.WAKE_LOCK（正式打包才生效）。
+  function keepAwake(on) {
+    try {
+      if (window.plus && plus.device && plus.device.setWakelock) {
+        plus.device.setWakelock(on !== false);
+      }
+    } catch (e) { /* 基座/没权限时忽略 */ }
+    // 第二层保险：新版 WebView 的屏幕唤醒锁（不支持就忽略）
+    try {
+      if (on !== false) {
+        if (navigator.wakeLock && !window.__zzScreenLock) {
+          navigator.wakeLock.request("screen").then(function (lock) {
+            window.__zzScreenLock = lock;
+            lock.addEventListener("release", function () { window.__zzScreenLock = null; });
+          }).catch(function () {});
+        }
+      } else if (window.__zzScreenLock) {
+        window.__zzScreenLock.release();
+        window.__zzScreenLock = null;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function $(id) { return document.getElementById(id); }
 
   function showPage(id) {
@@ -104,6 +128,7 @@
     lowerLaunch();
     game.show();
     showFloat();
+    keepAwake(true);
     $("homeState").textContent = "已打开";
     setStatus("正在连接游戏…");
   }
@@ -2038,6 +2063,14 @@
 
   function plusready() {
     try { plus.screen.lockOrientation("portrait-primary"); } catch (e) { /* ignore */ }
+    // 挂机时保持屏幕常亮，并定时补一次（部分系统会自己清掉唤醒锁）
+    keepAwake(true);
+    setInterval(function () { if (!document.hidden) keepAwake(true); }, 30000);
+    document.addEventListener("resume", function () { keepAwake(true); }, false);
+    document.addEventListener("pause", function () { keepAwake(false); }, false);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) keepAwake(true);
+    }, false);
     cleanupStaleWebviews();
     loadRunnerSource();
     bind();
