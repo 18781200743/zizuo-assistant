@@ -88,6 +88,59 @@ DISMISS_OVERLAY_JS = r"""
 })();
 """
 
+# 游戏默认用手机 UA，登录接口不会返回 wxPcLoginLink，登录页就把“微信扫码”藏了。
+# 这里在游戏窗进程里直接补上官方扫码链接并显示入口，不依赖助手 CDP 是否连上。
+WECHAT_LOGIN_JS = r"""
+(function () {
+  if (window.__zzWechatLoginInstalled) return;
+  window.__zzWechatLoginInstalled = true;
+
+  var QR_APPID = 'wx565e856587e12457';
+  var QR_REDIRECT = 'https%3A%2F%2Fsprogram.xnxykj.cn%2Fbox%2Fh5%2Fwxpc_login_redirect';
+
+  function wechatLink() {
+    var appid = '';
+    try {
+      var cfg = window.AladinConfig || {};
+      appid = (cfg.appIdConfig && cfg.appIdConfig.h5) || '';
+    } catch (e) {}
+    return 'https://open.weixin.qq.com/connect/qrconnect?appid=' + QR_APPID
+      + '&redirect_uri=' + QR_REDIRECT
+      + '&response_type=code&scope=snsapi_login&state='
+      + encodeURIComponent(appid || 'wx77200645d1c7f35f')
+      + '#wechat_redirect';
+  }
+
+  function showWechat() {
+    try {
+      var link = localStorage.getItem('wxPcLoginLink');
+      if (!link) {
+        link = wechatLink();
+        localStorage.setItem('wxPcLoginLink', link);
+      }
+      var frames = document.querySelectorAll('iframe');
+      var phone = null;
+      for (var i = 0; i < frames.length; i++) {
+        if (String(frames[i].src || '').indexOf('phone.html') >= 0) {
+          phone = frames[i];
+          break;
+        }
+      }
+      if (!phone) return;
+      var doc = phone.contentDocument;
+      if (!doc) return;
+      var section = doc.getElementById('other-login-section');
+      if (!section) return;
+      if (section.style.display !== 'flex') section.style.display = 'flex';
+    } catch (e) {}
+  }
+
+  showWechat();
+  setInterval(showWechat, 1000);
+})();
+"""
+
+
 
 def webview_storage_dir() -> Path:
     """持久化 WebView2 用户数据（Cookie/登录态），类似参考脚本的 config/web。"""
@@ -163,6 +216,10 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
         _refresh_title()
         try:
             window.evaluate_js(DISMISS_OVERLAY_JS)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            window.evaluate_js(WECHAT_LOGIN_JS)
         except Exception:  # noqa: BLE001
             pass
 
