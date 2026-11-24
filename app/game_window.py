@@ -234,13 +234,15 @@ def _keep_window_title(pid: int, title: str) -> None:
                     if int(win_pid) != int(pid):
                         return
                     if win32gui.GetWindowText(hwnd):
-                        matched.append(hwnd)
+                        rect = win32gui.GetWindowRect(hwnd)
+                        area = max(0, rect[2] - rect[0]) * max(0, rect[3] - rect[1])
+                        matched.append((area, hwnd))
                 except Exception:  # noqa: BLE001
                     return
 
             try:
                 win32gui.EnumWindows(callback, None)
-                for hwnd in matched:
+                for _, hwnd in sorted(matched, reverse=True)[:1]:
                     win32gui.SetWindowText(hwnd, title)
             except Exception:  # noqa: BLE001
                 pass

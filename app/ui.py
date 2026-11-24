@@ -4958,6 +4958,7 @@ class AppUI:
             "已开启调试端口用于稳定点击"
         )
         if launch_backend == "webview2":
+            self.append_log("正在检查调试端口；Win10 若 WebView2 不可用，会自动切换 Edge 兼容模式")
             self.root.after(1200, lambda: self._watch_game_port(self._game_proc, 0, "webview2"))
         else:
             self.root.after(1200, lambda: self._watch_game_port(self._game_proc, 0, launch_backend))
