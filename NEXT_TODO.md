@@ -8,7 +8,6 @@
 - 4758a 开宝箱：PC 走 `app/chest_4758a.py`，安卓走 `runner.js` 里的同一套字段。
 - 4758a 回城：优先主城地图传送 `LJCS(1,1)`，没反应再退回营地坐标。
 - 功能玩法：跳一跳、农场（自动循环：收菜/种菜/偷菜/施肥）已实现；日常任务/护符升级待实现。
-- 授权：离线账号绑定密钥的签发器（`tools/keygen.py`）和校验库（`app/license.py`）已完成；待接入 PC/安卓激活窗口和功能开关。
 - 死代码清理：
   - 旧指令库列表 UI、日常任务 UI/后端
   - 完整宝箱控制器（`_chest_controller` / `chest_bundle` / `app/chest_controller.js`）

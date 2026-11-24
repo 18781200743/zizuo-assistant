@@ -13,9 +13,6 @@ saves/
 templates/
 人物图片/
 
-# 授权私钥（只留本机，绝对不要上传）
-license_keys/
-
 # 逆向分析临时文件
 _re/
 _extract_blyx/
