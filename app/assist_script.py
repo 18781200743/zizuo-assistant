@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 149
+RUNTIME_VERSION = 150
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 149
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 149;
+  const VERSION = 150;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5529,9 +5529,10 @@ RUNTIME_JS = r"""
   const farmAuto = {
     running: false, mode: '', stop: false, timer: 0,
     steps: 0, last: '', action: '', error: '', busyUntil: 0,
-    noVisitTries: 0, noActionTries: 0, dryRun: false,
+    noVisitTries: 0, noActionTries: 0, noActionStreak: 0, dryRun: false,
     farmKey: '', didSteal: false, didHelp: false,
     service: null, serviceAt: 0,
+    counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
   };
 
   function farmFindService() {
@@ -5661,12 +5662,54 @@ RUNTIME_JS = r"""
     };
   }
 
+  function farmCounters(svc) {
+    try {
+      const znzx = svc && svc.HBJS && typeof svc.HBJS.ZNZX === 'function'
+        ? svc.HBJS.ZNZX() : null;
+      if (!znzx || typeof znzx !== 'object') {
+        return { steal: 0, fertilize: 0, water: 0, pest: 0, known: false };
+      }
+      const known = Object.getOwnPropertyNames(znzx).some(function (k) {
+        return ['MVSM', 'DRIF', 'XHNI', 'AIAD'].indexOf(k) >= 0;
+      });
+      return {
+        steal: Number(znzx.MVSM || 0) || 0,
+        fertilize: Number(znzx.DRIF || 0) || 0,
+        water: Number(znzx.XHNI || 0) || 0,
+        pest: Number(znzx.AIAD || 0) || 0,
+        known: known,
+      };
+    } catch (_) {
+      return { steal: 0, fertilize: 0, water: 0, pest: 0, known: false };
+    }
+  }
+
+  function farmNextMatureAt(svc) {
+    let soonest = 0;
+    try {
+      const model = svc && svc.HBJS ? svc.HBJS : null;
+      if (!model) return 0;
+      const nowSec = Math.floor(Date.now() / 1000);
+      (model.QCMZ || []).forEach(function (crop) {
+        if (!crop || !crop.IYHA) return;
+        try {
+          if (svc.OLYX && svc.OLYX(crop.HTGF)) return;
+        } catch (_) { /* ignore */ }
+        const at = Number(crop.IYHA.RMEQ || 0);
+        if (at > nowSec && (!soonest || at < soonest)) soonest = at;
+      });
+    } catch (_) { /* ignore */ }
+    return soonest;
+  }
+
   function farmProbe() {
     const svc = farmFindService();
     return {
       ok: !!svc,
       visiting: !!(svc && svc.OUDX && svc.OUDX()),
       farmKey: svc && svc.HBJS ? String(svc.HBJS.BZUO || '') : '',
+      nextMatureAt: svc ? farmNextMatureAt(svc) : 0,
+      counters: svc ? farmCounters(svc) : null,
       buttons: farmButtons(),
       state: farmState(),
     };
@@ -5683,6 +5726,8 @@ RUNTIME_JS = r"""
       farmKey: farmAuto.farmKey,
       didSteal: farmAuto.didSteal,
       didHelp: farmAuto.didHelp,
+      noActionStreak: farmAuto.noActionStreak,
+      counters: farmAuto.counters,
     };
   }
 
@@ -5706,25 +5751,41 @@ RUNTIME_JS = r"""
     farmAuto.timer = 0;
     if (!farmAuto.running) return;
     if (farmAuto.stop) return farmStop('已停止');
-    if (farmAuto.steps >= 200) return farmStop('已达到本轮上限 200 次');
+    if (farmAuto.mode !== 'own' && farmAuto.steps >= 200) {
+      return farmStop('已达到本轮上限 200 次');
+    }
     if (Date.now() < farmAuto.busyUntil) {
       farmAuto.timer = setTimeout(farmTick, 300);
       return;
     }
     const svc = farmFindService();
     if (!svc) return farmFail('农场数据还没加载，请先打开农场');
+    farmAuto.counters = farmCounters(svc);
+    if (farmAuto.mode !== 'own' && farmAuto.counters.known
+      && farmAuto.counters.steal <= 0 && farmAuto.counters.fertilize <= 0
+      && farmAuto.counters.water <= 0 && farmAuto.counters.pest <= 0) {
+      return farmStop('今日偷菜/施肥/照料次数已用完');
+    }
 
     if (farmAuto.mode === 'own') {
       if (svc.OUDX && svc.OUDX()) return farmFail('当前在好友农场，请先回到个人农场');
       farmAuto.action = '收自己的菜';
-      farmAuto.last = '收自己的菜…';
       farmAuto.steps += 1;
       try {
         const ret = svc.DNRQ();
         if (ret && typeof ret.catch === 'function') ret.catch(function () { /* ignore */ });
       } catch (_) { /* ignore */ }
-      farmAuto.busyUntil = Date.now() + 5000;
-      farmAuto.timer = setTimeout(farmTick, 5000);
+      const nextAt = farmNextMatureAt(svc);
+      let waitMs = 30000;
+      if (nextAt) {
+        const seconds = Math.max(0, nextAt - Math.floor(Date.now() / 1000));
+        waitMs = Math.max(5000, Math.min(300000, (seconds + 2) * 1000));
+        farmAuto.last = '收菜完成，等待下一批成熟';
+      } else {
+        farmAuto.last = '收菜完成，等待作物成熟';
+      }
+      farmAuto.busyUntil = Date.now() + waitMs;
+      farmAuto.timer = setTimeout(farmTick, waitMs);
       return;
     }
 
@@ -5771,6 +5832,7 @@ RUNTIME_JS = r"""
       farmAuto.last = buttons.stealText || '一键偷菜';
       farmClick('oneKeyStealBtn');
       farmAuto.didSteal = true;
+      farmAuto.noActionStreak = 0;
       farmAuto.steps += 1;
       farmAuto.busyUntil = Date.now() + 2000;
       farmAuto.timer = setTimeout(farmTick, 2000);
@@ -5781,12 +5843,22 @@ RUNTIME_JS = r"""
       farmAuto.last = buttons.helpText || '一键照料';
       farmClick('FarmOperationButton');
       farmAuto.didHelp = true;
+      farmAuto.noActionStreak = 0;
       farmAuto.steps += 1;
       farmAuto.busyUntil = Date.now() + 2000;
       farmAuto.timer = setTimeout(farmTick, 2000);
       return;
     }
     if (buttons.next) {
+      const didAnything = farmAuto.didSteal || farmAuto.didHelp;
+      if (didAnything) {
+        farmAuto.noActionStreak = 0;
+      } else {
+        farmAuto.noActionStreak += 1;
+        if (farmAuto.noActionStreak >= 5) {
+          return farmStop('连续 5 位好友没有可偷/可照料作物，可能今日次数或道具已用完');
+        }
+      }
       farmAuto.action = '下一位好友';
       farmAuto.last = '快速拜访下一位好友…';
       farmClick('GoVisitNextoneBtn');
@@ -5814,6 +5886,14 @@ RUNTIME_JS = r"""
     if (mode === 'own' && svc.OUDX && svc.OUDX()) {
       return { ok: false, message: '当前在好友农场，请先回到个人农场' };
     }
+    const counters = farmCounters(svc);
+    if (mode !== 'own' && counters.known
+      && counters.steal <= 0 && counters.fertilize <= 0
+      && counters.water <= 0 && counters.pest <= 0) {
+      farmAuto.counters = counters;
+      return { ok: false, message: '今日偷菜/施肥/照料次数已用完' };
+    }
+    farmAuto.counters = counters;
     farmAuto.running = true;
     farmAuto.mode = mode;
     farmAuto.stop = false;
@@ -5824,6 +5904,7 @@ RUNTIME_JS = r"""
     farmAuto.busyUntil = 0;
     farmAuto.noVisitTries = 0;
     farmAuto.noActionTries = 0;
+    farmAuto.noActionStreak = 0;
     farmAuto.dryRun = !!(opts && opts.dryRun);
     farmAuto.farmKey = '';
     farmAuto.didSteal = false;

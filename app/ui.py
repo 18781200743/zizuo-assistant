@@ -2668,6 +2668,14 @@ class AppUI:
         text = ("收菜" if mode == "own" else "偷菜/施肥") + "：已处理 %d 次" % steps
         if action:
             text += " · " + action
+        counters = state.get("counters") or {}
+        if mode != "own" and isinstance(counters, dict) and counters.get("known"):
+            try:
+                steal_left = int(counters.get("steal") or 0)
+                fert_left = int(counters.get("fertilize") or 0)
+                text += " · 偷菜剩 %d · 施肥剩 %d" % (steal_left, fert_left)
+            except (TypeError, ValueError):
+                pass
         if last:
             text += " · " + last
         try:
