@@ -23,6 +23,39 @@
 
 源码包需对方安装 Python；exe 包免 Python（体积更大）。
 
+## 授权密钥（离线，账号绑定）
+
+不需要服务器：密钥由你自己在本机签发，客户端用内置公钥验签。
+
+1. **首次生成签发密钥对**（只做一次）：
+
+   ```bat
+   .venv\Scripts\python.exe tools\keygen.py --init-keys
+   ```
+
+   - 私钥：`license_keys/private_key.pem`（**只留本机，务必备份，不要发给别人**）
+   - 公钥：`app/license_public.pem`（随程序发布）
+
+2. **签发密钥**：双击或运行 `python tools/keygen.py`，填写：
+
+   - 游戏 ID（账号绑定）
+   - 有效天数（可勾选永久）
+   - 功能（农场 / 跳一跳 / 抽卡 / 公会 / 迷宫 / 日常 / 护符）
+
+   点「生成密钥」→「复制密钥」。
+
+3. **命令行签发 / 校验**：
+
+   ```bat
+   python tools/keygen.py --id 214672988 --days 30 --features farm,plank
+   python tools/keygen.py --verify ZZK1-... --id 214672988
+   ```
+
+密钥约 121 个字符，账号绑定：换电脑/手机不影响，换游戏账号会失效。  
+签发和校验必须使用同一个游戏 ID（建议 openid 或角色 ID）。
+
+> 私钥丢失后无法再签发新密钥；已签发的密钥仍然有效。重建密钥对会让旧密钥全部失效。
+
 ## 运行命令
 
 从「辅助工具」→「运行命令」进入，一行一条：
