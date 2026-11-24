@@ -2281,29 +2281,36 @@ class AppUI:
         self._play_panels["plank"] = plank
 
         # ---- 农场 ----
-        farm = ttk.LabelFrame(content, text="农场（收菜 / 偷菜 / 施肥）", padding=8)
-        self.farm_status = tk.StringVar(value="个人农场点「收自己的菜」；拜访好友点「自动偷菜+施肥」")
+        farm = ttk.LabelFrame(content, text="农场（自动循环 / 收菜 / 偷菜 / 施肥）", padding=8)
+        self.farm_status = tk.StringVar(
+            value="推荐「自动循环」：自己的菜熟了就回去收+种，没熟就去偷菜施肥"
+        )
         ttk.Label(
             farm, textvariable=self.farm_status, foreground="#1a4d8f",
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=(0, 6))
         ttk.Label(
             farm,
-            text="偷菜/施肥需要先在农场打开「拜访好友」，进入好友农场或停在拜访列表；"
-                 "自动会点「快速拜访」逐位处理。",
+            text="自动循环会自己切换：个人农场收菜/种菜 → 好友农场偷菜/施肥 → 回来等成熟；"
+                 "每日次数用完就只等自己的菜。",
             foreground="#7a5b00",
             wraplength=440,
             justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=(0, 6))
         farm_btns = ttk.Frame(farm)
         farm_btns.pack(fill=tk.X, pady=(0, 6))
+        self.farm_auto_btn = ttk.Button(
+            farm_btns, text="自动循环（收菜+偷菜）", width=19, style="Accent.TButton",
+            command=lambda: self._farm_start("auto"),
+        )
+        self.farm_auto_btn.pack(side=tk.LEFT, padx=(0, 4))
         self.farm_own_btn = ttk.Button(
-            farm_btns, text="收自己的菜", width=11, style="Accent.TButton",
+            farm_btns, text="只收自己的菜", width=12,
             command=lambda: self._farm_start("own"),
         )
         self.farm_own_btn.pack(side=tk.LEFT, padx=(0, 4))
         self.farm_visit_btn = ttk.Button(
-            farm_btns, text="自动偷菜+施肥", width=13,
+            farm_btns, text="只偷菜+施肥", width=12,
             command=lambda: self._farm_start("visit"),
         )
         self.farm_visit_btn.pack(side=tk.LEFT, padx=(0, 4))
@@ -2544,6 +2551,7 @@ class AppUI:
 
     def _farm_reset_buttons(self) -> None:
         try:
+            self.farm_auto_btn.configure(state=tk.NORMAL)
             self.farm_own_btn.configure(state=tk.NORMAL)
             self.farm_visit_btn.configure(state=tk.NORMAL)
         except tk.TclError:
@@ -2563,7 +2571,7 @@ class AppUI:
                 self.start_assist()
             except Exception:  # noqa: BLE001
                 pass
-        mode_value = "own" if mode == "own" else "visit"
+        mode_value = mode if mode in ("own", "visit", "auto") else "visit"
         try:
             raw = self._farm_eval(
                 "(function(){try{var a=window.__zzAssist;"
@@ -2589,14 +2597,17 @@ class AppUI:
         self._farm_running = True
         self._farm_last = ""
         try:
+            self.farm_auto_btn.configure(state=tk.DISABLED)
             self.farm_own_btn.configure(state=tk.DISABLED)
             self.farm_visit_btn.configure(state=tk.DISABLED)
             self.farm_status.set("运行中…")
         except tk.TclError:
             pass
-        self._append_farm_log(
-            "开始收自己的菜" if mode_value == "own" else "开始偷菜/施肥（会快速拜访下一位好友）"
-        )
+        self._append_farm_log({
+            "auto": "开始自动循环：自己的菜优先收+种，没熟就去偷菜/施肥",
+            "own": "开始收自己的菜（熟了会种菜）",
+            "visit": "开始偷菜/施肥（会快速拜访下一位好友）",
+        }.get(mode_value, "开始农场自动"))
         self.root.after(300, self._farm_poll)
 
     def _farm_stop(self) -> None:
@@ -2665,7 +2676,27 @@ class AppUI:
             steps = 0
         action = str(state.get("action") or "")
         mode = str(state.get("mode") or "")
-        text = ("收菜" if mode == "own" else "偷菜/施肥") + "：已处理 %d 次" % steps
+        if mode == "auto":
+            phase = str(state.get("phase") or "")
+            if phase == "visit":
+                text = "自动循环 · 好友农场偷菜/施肥"
+            elif phase in ("enter", "leave"):
+                text = "自动循环 · 切换农场"
+            else:
+                text = "自动循环 · 个人农场"
+            text += "：已处理 %d 次" % steps
+            try:
+                mature = int(state.get("ownMature") or 0)
+                empty = int(state.get("emptyPlots") or 0)
+            except (TypeError, ValueError):
+                mature = 0
+                empty = 0
+            if mature:
+                text += " · 成熟 %d 块" % mature
+            if empty:
+                text += " · 空地 %d 块" % empty
+        else:
+            text = ("收菜" if mode == "own" else "偷菜/施肥") + "：已处理 %d 次" % steps
         if action:
             text += " · " + action
         counters = state.get("counters") or {}
