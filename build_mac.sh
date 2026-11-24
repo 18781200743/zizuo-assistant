@@ -10,9 +10,24 @@ if [ ! -d ".venv-mac" ]; then
 fi
 # shellcheck disable=SC1091
 source .venv-mac/bin/activate
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 
-python -m pip install --upgrade pip
 pip install -r requirements_mac.txt
+
+# Chrome for Testing 压缩包缓存：第一次下载，后面直接复用
+CFT_ZIP="${CFT_ZIP:-$HOME/.cache/zizuo/chrome-mac-x64.zip}"
+mkdir -p "$(dirname "$CFT_ZIP")"
+CFT_PID=""
+if [ ! -s "$CFT_ZIP" ]; then
+  CFT_JSON="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)"
+  CFT_VER="$(printf '%s' "$CFT_JSON" | python -c "import sys,json;print(json.load(sys.stdin)['channels']['Stable']['version'])")"
+  echo "Chrome for Testing: $CFT_VER（后台下载，和 PyInstaller 并行）"
+  (
+    curl -fsSL -o "$CFT_ZIP" \
+      "https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/mac-x64/chrome-mac-x64.zip"
+  ) &
+  CFT_PID=$!
+fi
 
 rm -rf build dist
 
@@ -29,15 +44,21 @@ pyinstaller --noconfirm --clean --windowed \
   --add-data "app/assets:app/assets" \
   main.py
 
+if [ -n "$CFT_PID" ]; then
+  wait "$CFT_PID" || true
+fi
+if [ ! -s "$CFT_ZIP" ]; then
+  CFT_JSON="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)"
+  CFT_VER="$(printf '%s' "$CFT_JSON" | python -c "import sys,json;print(json.load(sys.stdin)['channels']['Stable']['version'])")"
+  echo "Chrome for Testing: $CFT_VER（重新下载）"
+  curl -fsSL -o "$CFT_ZIP" \
+    "https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/mac-x64/chrome-mac-x64.zip"
+fi
+
 # 把 Chrome for Testing 打进 .app（用户不用自己装浏览器，装完就能开）
-CFT_JSON="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)"
-CFT_VER="$(printf '%s' "$CFT_JSON" | python -c "import sys,json;print(json.load(sys.stdin)['channels']['Stable']['version'])")"
-echo "Chrome for Testing: $CFT_VER"
-curl -fsSL -o /tmp/chrome-for-testing-mac.zip \
-  "https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/mac-x64/chrome-mac-x64.zip"
 mkdir -p "dist/Zizuo助手.app/Contents/Resources"
 rm -rf "dist/Zizuo助手.app/Contents/Resources/chrome-mac-x64"
-ditto -x -k /tmp/chrome-for-testing-mac.zip "dist/Zizuo助手.app/Contents/Resources/"
+ditto -x -k "$CFT_ZIP" "dist/Zizuo助手.app/Contents/Resources/"
 
 # ad-hoc 签名：先签内嵌的 Chrome，再签整个 .app（顺序反了会导致校验失败）
 codesign --force --deep --sign - "dist/Zizuo助手.app/Contents/Resources/chrome-mac-x64/Google Chrome for Testing.app" 2>/dev/null || true

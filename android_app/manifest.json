@@ -3,8 +3,8 @@
     "id" : "H519A18D3",
     "name" : "百炼助手",
     "version" : {
-        "name" : "1.1.0",
-        "code" : "2"
+        "name" : "1.2.0",
+        "code" : "3"
     },
     "description" : "百炼英雄助手（安卓版，验证码登录）",
     "launch_path" : "index.html",

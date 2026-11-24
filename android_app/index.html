@@ -629,6 +629,7 @@
       <div class="grid feature-grid">
         <button class="btn feature-btn" id="playDaily">日常任务</button>
         <button class="btn feature-btn" id="playPlank">跳一跳</button>
+        <button class="btn feature-btn" id="playFarm">农场</button>
         <button class="btn feature-btn" id="playTalisman">护符升级</button>
         <button class="btn feature-btn" id="playGuild">公会情报</button>
         <button class="btn feature-btn" id="playMaze">公会迷宫</button>
@@ -644,6 +645,18 @@
           <button class="btn" id="plankRun">开始自动跳</button>
         </div>
         <div class="note">先进入游戏「秘境探宝」，再点开始；会自动选力度连续跳。</div>
+      </div>
+
+      <div class="feature-panel" id="farmPanel">
+        <div class="info" id="farmStatus">推荐「自动循环」：自己的菜熟了就回去收+种，没熟就去偷菜施肥</div>
+        <div class="row">
+          <button class="btn sm" id="farmAuto">自动循环</button>
+          <button class="btn sm" id="farmOwn">只收菜</button>
+          <button class="btn sm" id="farmVisit">只偷菜+施肥</button>
+          <button class="btn sm danger" id="farmStop">停止</button>
+        </div>
+        <div class="note">自动循环会自己切换个人农场/好友农场；每日次数用完只等自己的菜。</div>
+        <div class="info" id="farmLog"></div>
       </div>
 
       <div class="feature-panel" id="talismanPanel">
@@ -664,6 +677,8 @@
           </select>
           <button class="btn sm" id="gQuery">查询</button>
           <button class="btn sm" id="gCopy">复制</button>
+          <button class="btn sm" id="gTeams">读取三队</button>
+          <button class="btn sm" id="gExport">全部导出</button>
         </div>
         <div class="info" id="gStatus">点「查询」读取据点成员与战力（每方 1~13 号据点）</div>
         <div id="gList"></div>

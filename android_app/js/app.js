@@ -24,6 +24,7 @@
   var reviveFlashTimer = null;
   var guildTimer = null;
   var guildRows = [];
+  var guildTeamsCache = {};
   var mazeTimer = null;
   var mazeLastStamp = "";
   var mazeLast = null;
@@ -1174,6 +1175,10 @@
         out.value = JSON.stringify(a.guildIntelStart(Number(p.camp) || 0));
       } else if (action === "guildState") {
         out.value = JSON.stringify(a.guildIntelState());
+      } else if (action === "guildTeamsStart") {
+        out.value = JSON.stringify(a.guildTeamsStart(Number(p.camp) || 0, Number(p.spot) || 0));
+      } else if (action === "guildTeamsState") {
+        out.value = JSON.stringify(a.guildTeamsState());
       } else if (action === "mazeQuery") {
         out.value = JSON.stringify(a.mazeQuery());
       } else if (action === "pickState") {
@@ -1288,6 +1293,13 @@
     return { total: total, unset: unset, hasReal: real > 0 };
   }
 
+  function guildTeamText(teams) {
+    if (!teams || !teams.length) return "未读取";
+    return teams.map(function (team) {
+      return "队" + (team.slot || "?") + " " + fmtPower(team.power || 0);
+    }).join(" / ");
+  }
+
   function renderGuild(rows) {
     guildRows = (rows || []).slice().sort(function (a, b) {
       return (Number(a.camp) || 0) - (Number(b.camp) || 0)
@@ -1308,8 +1320,11 @@
       } else if (!members.length) {
         summary = "（无人驻守）";
       } else {
+        var cache = guildTeamsCache[(Number(row.camp) || 0) + ":" + (Number(row.id) || 0)] || null;
         summary = members.slice(0, 4).map(function (m) {
-          return escapeHtml(m.name || m.id || "?") + "(" + memberPowerText(m.power) + ")";
+          var teams = cache && cache[m.id];
+          var teamText = teams ? "，三队 " + guildTeamText(teams) : "";
+          return escapeHtml(m.name || m.id || "?") + "(" + memberPowerText(m.power) + teamText + ")";
         }).join("、");
         if (members.length > 4) summary += " 等 " + members.length + " 人";
       }
@@ -1331,6 +1346,7 @@
 
   function guildQuery() {
     var camp = Number(($("gCamp") || {}).value) || 0;
+    guildTeamsCache = {};
     $("gStatus").textContent = "查询中…";
     gameRpcJson("guildStart", { camp: camp }, function (res, error) {
       if (error || !res || !res.ok) {
@@ -1358,6 +1374,166 @@
     });
   }
 
+  function guildReadTeams(done) {
+    var rows = (guildRows || []).filter(function (row) {
+      return (row.members || []).length && !row.error;
+    });
+    if (!rows.length) {
+      $("gStatus").textContent = "没有可读取的据点";
+      if (done) done(0);
+      return;
+    }
+    var index = 0;
+    var errors = 0;
+
+    function next() {
+      if (index >= rows.length) {
+        renderGuild(guildRows);
+        $("gStatus").textContent = "分队战力已读取";
+        if (done) done(errors);
+        return;
+      }
+      var row = rows[index];
+      var camp = Number(row.camp) || 0;
+      var spot = Number(row.id) || 0;
+      var key = camp + ":" + spot;
+      if (guildTeamsCache[key]) {
+        index += 1;
+        next();
+        return;
+      }
+      $("gStatus").textContent = "读取分队 " + (index + 1) + "/" + rows.length
+        + "（" + (camp === 1 ? "我方" : "敌方") + " " + spot + "号）…";
+      gameRpcJson("guildTeamsStart", { camp: camp, spot: spot }, function (res, error) {
+        if (error || !res || !res.ok) {
+          errors += 1;
+          index += 1;
+          next();
+          return;
+        }
+        function poll() {
+          gameRpcJson("guildTeamsState", {}, function (st, err) {
+            if (err || !st) {
+              errors += 1;
+              index += 1;
+              next();
+              return;
+            }
+            if (st.running) {
+              setTimeout(poll, 400);
+              return;
+            }
+            guildTeamsCache[key] = st.teams || {};
+            renderGuild(guildRows);
+            index += 1;
+            next();
+          });
+        }
+        poll();
+      });
+    }
+
+    next();
+  }
+
+  function guildCsvCell(value) {
+    var text = String(value === null || value === undefined ? "" : value);
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+
+  function saveTextFile(name, text, cb) {
+    if (window.plus && plus.io) {
+      try {
+        plus.io.resolveLocalFileSystemURL("_downloads/", function (root) {
+          root.getFile(name, { create: true }, function (entry) {
+            entry.createWriter(function (writer) {
+              writer.onwrite = function () {
+                cb("已保存到下载目录：" + entry.fullPath);
+              };
+              writer.onerror = function () {
+                copyText(text);
+                cb("保存失败，已复制到剪贴板");
+              };
+              writer.write(text);
+            }, function () {
+              copyText(text);
+              cb("保存失败，已复制到剪贴板");
+            });
+          }, function () {
+            copyText(text);
+            cb("保存失败，已复制到剪贴板");
+          });
+        }, function () {
+          copyText(text);
+          cb("保存失败，已复制到剪贴板");
+        });
+      } catch (e) {
+        copyText(text);
+        cb("保存失败，已复制到剪贴板");
+      }
+    } else {
+      copyText(text);
+      cb("已复制到剪贴板");
+    }
+  }
+
+  function guildExport() {
+    if (!guildRows.length) {
+      $("gStatus").textContent = "请先查询据点";
+      return;
+    }
+    guildReadTeams(function () {
+      var lines = [[
+        "阵营", "据点", "序号", "成员", "总战力",
+        "队1战力", "队2战力", "队3战力", "等级", "区服", "ID"
+      ]];
+      guildRows.forEach(function (row) {
+        var camp = Number(row.camp) || 0;
+        var label = camp === 1 ? "我方" : "敌方";
+        var spot = Number(row.id) || 0;
+        var cache = guildTeamsCache[camp + ":" + spot] || {};
+        (row.members || []).forEach(function (member, index) {
+          var teams = cache[member.id] || [];
+          var bySlot = {};
+          teams.forEach(function (team) {
+            bySlot[Number(team.slot) || 0] = Number(team.power) || 0;
+          });
+          lines.push([
+            label, spot, index + 1, member.name || "?",
+            Number(member.power) || 0,
+            bySlot[1] === undefined ? "" : bySlot[1],
+            bySlot[2] === undefined ? "" : bySlot[2],
+            bySlot[3] === undefined ? "" : bySlot[3],
+            member.level || 0, member.server || "", member.id || ""
+          ]);
+        });
+      });
+      lines.push([]);
+      lines.push(["汇总"]);
+      lines.push(["阵营", "人数", "真实总战力", "未配置人数"]);
+      [1, 2].forEach(function (camp) {
+        var members = [];
+        guildRows.forEach(function (row) {
+          if ((Number(row.camp) || 0) === camp) {
+            members = members.concat(row.members || []);
+          }
+        });
+        var g = groupPower(members);
+        lines.push([camp === 1 ? "我方" : "敌方", members.length, g.total, g.unset]);
+      });
+      var text = "\ufeff" + lines.map(function (line) {
+        return line.map(guildCsvCell).join(",");
+      }).join("\r\n");
+      var stamp = new Date();
+      function pad(n) { return n < 10 ? "0" + n : "" + n; }
+      var name = "公会战情报_" + stamp.getFullYear() + pad(stamp.getMonth() + 1)
+        + pad(stamp.getDate()) + "_" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + ".csv";
+      saveTextFile(name, text, function (message) {
+        $("gStatus").textContent = message;
+      });
+    });
+  }
+
   function guildCopy() {
     if (!guildRows.length) {
       $("gStatus").textContent = "还没有查询结果";
@@ -1376,8 +1552,11 @@
         lines.push("  查询失败：" + row.error);
         return;
       }
+      var cache = guildTeamsCache[(Number(row.camp) || 0) + ":" + (Number(row.id) || 0)] || {};
       members.forEach(function (m) {
-        lines.push("  " + (m.name || "?") + "  战力 " + memberPowerText(m.power)
+        var teams = cache[m.id];
+        lines.push("  " + (m.name || "?") + "  总战力 " + memberPowerText(m.power)
+          + "  三队 " + guildTeamText(teams)
           + "  等级 " + (m.level || 0) + "  区服 " + (m.server || "-")
           + "  ID " + (m.id || "-"));
       });
@@ -1468,6 +1647,7 @@
     var features = [
       ["daily", "dailyPanel", "playDaily"],
       ["plank", "plankPanel", "playPlank"],
+      ["farm", "farmPanel", "playFarm"],
       ["talisman", "talismanPanel", "playTalisman"],
       ["guild", "guildPanel", "playGuild"],
       ["maze", "mazePanel", "playMaze"]
@@ -1561,6 +1741,116 @@
     if (btn) btn.textContent = "停止";
     plankSetStatus("自动跳中…");
     plankPoll();
+  }
+
+  var farmRunning = false;
+  var farmTimer = null;
+  var farmLast = "";
+
+  function farmSetStatus(text) {
+    var el = $("farmStatus");
+    if (el) el.textContent = String(text || "");
+  }
+
+  function farmLog(text) {
+    var el = $("farmLog");
+    if (!el || !text) return;
+    var line = String(text);
+    el.textContent = (el.textContent ? el.textContent + "\n" : "") + line;
+  }
+
+  function farmStateFromGame() {
+    try {
+      var raw = unquote(evalGame(
+        "(function(){try{var a=window.__zzAssist;" +
+        "return a&&a.farmAutoState?JSON.stringify(a.farmAutoState()):'{}';}" +
+        "catch(e){return '{}'}})()"
+      ));
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function farmReset() {
+    farmRunning = false;
+    if (farmTimer) {
+      clearTimeout(farmTimer);
+      farmTimer = null;
+    }
+  }
+
+  function farmPoll() {
+    if (!farmRunning) return;
+    var st = farmStateFromGame();
+    if (st.error) {
+      farmSetStatus("失败：" + st.error);
+      farmLog("停止：" + st.error);
+      farmReset();
+      return;
+    }
+    if (!st.running) {
+      farmSetStatus("已结束：" + (st.last || "完成"));
+      farmLog("结束：" + (st.last || "完成"));
+      farmReset();
+      return;
+    }
+    var mode = String(st.mode || "");
+    var text = mode === "auto" ? "自动循环" : (mode === "own" ? "收菜" : "偷菜/施肥");
+    if (mode === "auto") {
+      var phase = String(st.phase || "");
+      text += phase === "visit" ? " · 好友农场"
+        : ((phase === "enter" || phase === "leave") ? " · 切换农场" : " · 个人农场");
+    }
+    text += "：已处理 " + (Number(st.steps) || 0) + " 次";
+    if (st.ownMature) text += " · 成熟 " + st.ownMature + " 块";
+    if (st.emptyPlots) text += " · 空地 " + st.emptyPlots + " 块";
+    var counters = st.counters || {};
+    if (mode !== "own" && counters.known) {
+      text += " · 偷菜剩 " + (counters.steal || 0) + " · 施肥剩 " + (counters.fertilize || 0);
+    }
+    if (st.last) text += " · " + st.last;
+    farmSetStatus(text);
+    if (st.last && st.last !== farmLast) {
+      farmLast = st.last;
+      farmLog(st.last);
+    }
+    farmTimer = setTimeout(farmPoll, 700);
+  }
+
+  function farmStart(mode) {
+    if (farmRunning) farmStop();
+    var raw = "";
+    try {
+      raw = unquote(evalGame(
+        "(function(){try{var a=window.__zzAssist;" +
+        "if(!a||!a.farmAutoStart)return JSON.stringify({ok:false,message:'运行时还没注入'});" +
+        "return JSON.stringify(a.farmAutoStart({mode:'" + mode + "'}));}" +
+        "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+      ));
+    } catch (e) { /* ignore */ }
+    var result = {};
+    try { result = raw ? JSON.parse(raw) : {}; } catch (e) { result = {}; }
+    if (!result.ok) {
+      farmSetStatus(result.message || "启动失败");
+      farmLog(result.message || "启动失败");
+      return;
+    }
+    farmRunning = true;
+    farmLast = "";
+    farmSetStatus("运行中…");
+    farmLog("开始：" + (mode === "auto" ? "自动循环" : (mode === "own" ? "收自己的菜" : "偷菜/施肥")));
+    farmPoll();
+  }
+
+  function farmStop() {
+    try {
+      evalGame("(window.__zzAssist&&window.__zzAssist.farmAutoStop" +
+        "&&window.__zzAssist.farmAutoStop(),'ok')");
+    } catch (e) { /* ignore */ }
+    farmReset();
+    farmSetStatus("已停止");
+    farmLog("已停止农场自动");
   }
 
   function setClickTp(on, retried) {
@@ -1710,6 +2000,20 @@
     if (gQueryBtn) gQueryBtn.onclick = guildQuery;
     var gCopyBtn = $("gCopy");
     if (gCopyBtn) gCopyBtn.onclick = guildCopy;
+    var gTeamsBtn = $("gTeams");
+    if (gTeamsBtn) gTeamsBtn.onclick = function () { guildReadTeams(); };
+    var gExportBtn = $("gExport");
+    if (gExportBtn) gExportBtn.onclick = guildExport;
+    var playFarmBtn = $("playFarm");
+    if (playFarmBtn) playFarmBtn.onclick = function () { showFeature("farm"); };
+    var farmAutoBtn = $("farmAuto");
+    if (farmAutoBtn) farmAutoBtn.onclick = function () { farmStart("auto"); };
+    var farmOwnBtn = $("farmOwn");
+    if (farmOwnBtn) farmOwnBtn.onclick = function () { farmStart("own"); };
+    var farmVisitBtn = $("farmVisit");
+    if (farmVisitBtn) farmVisitBtn.onclick = function () { farmStart("visit"); };
+    var farmStopBtn = $("farmStop");
+    if (farmStopBtn) farmStopBtn.onclick = farmStop;
     var mQueryBtn = $("mQuery");
     if (mQueryBtn) mQueryBtn.onclick = function () { queryMaze(true); };
     var mCopyBtn = $("mCopy");
