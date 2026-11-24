@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import queue
 import threading
 import time
@@ -2212,6 +2213,7 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
+            ("plank", "跳一跳"),
             ("talisman", "护符升级"),
             ("guild", "公会情报"),
             ("maze", "公会迷宫"),
@@ -2238,6 +2240,44 @@ class AppUI:
         daily = ttk.LabelFrame(content, text="日常任务", padding=10)
         ttk.Label(daily, text="日常任务：下一步实现。").pack(anchor=tk.W)
         self._play_panels["daily"] = daily
+
+        # ---- 跳一跳（秘境探宝） ----
+        plank = ttk.LabelFrame(content, text="跳一跳（秘境探宝自动跳）", padding=8)
+        self.plank_status = tk.StringVar(value="进入秘境探宝后点「开始自动跳」")
+        ttk.Label(
+            plank, textvariable=self.plank_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        ttk.Label(
+            plank,
+            text="先进入游戏「秘境探宝」，再点开始；会自动选力度连续跳。",
+            foreground="#7a5b00",
+            wraplength=440,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        plank_btns = ttk.Frame(plank)
+        plank_btns.pack(fill=tk.X, pady=(0, 6))
+        self.plank_run_btn = ttk.Button(
+            plank_btns, text="开始自动跳", width=12, style="Accent.TButton",
+            command=self.toggle_plank,
+        )
+        self.plank_run_btn.pack(side=tk.LEFT)
+        plank_log_frame = ttk.Frame(plank)
+        plank_log_frame.pack(fill=tk.BOTH, expand=True)
+        self.plank_log_text = tk.Text(
+            plank_log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Microsoft YaHei UI", 9), background="#f8fafc",
+        )
+        plank_sb = ttk.Scrollbar(
+            plank_log_frame, orient=tk.VERTICAL, command=self.plank_log_text.yview
+        )
+        self.plank_log_text.configure(yscrollcommand=plank_sb.set)
+        self.plank_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        plank_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._plank_running = False
+        self._plank_last = ""
+        self._append_plank_log("跳一跳：进入秘境探宝后点「开始自动跳」。")
+        self._play_panels["plank"] = plank
 
         # ---- 护符升级 ----
         talisman = ttk.LabelFrame(content, text="护符升级", padding=10)
@@ -2277,7 +2317,7 @@ class AppUI:
                     bg="#eef2ff", fg="#1e3a8a",
                     activebackground="#dbeafe", activeforeground="#1e3a8a",
                 )
-        if key in ("guild", "maze") and not self.assist.running:
+        if key in ("guild", "maze", "plank") and not self.assist.running:
             try:
                 self.start_assist()
             except Exception:  # noqa: BLE001
@@ -2288,6 +2328,155 @@ class AppUI:
                 self.root.after(800, self._maze_auto_poll)
         else:
             self._maze_auto = False
+
+    # ------------------------------------------------------------ 跳一跳
+
+    def _append_plank_log(self, text: str) -> None:
+        widget = getattr(self, "plank_log_text", None)
+        if widget is None:
+            return
+        try:
+            state = str(widget.cget("state"))
+            if state == tk.DISABLED:
+                widget.configure(state=tk.NORMAL)
+            widget.insert(tk.END, str(text) + "\n")
+            widget.see(tk.END)
+            if state == tk.DISABLED:
+                widget.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def _plank_reset_button(self) -> None:
+        try:
+            self.plank_run_btn.configure(text="开始自动跳")
+        except tk.TclError:
+            pass
+
+    def _plank_eval(self, expression: str) -> Any:
+        bridge = getattr(self.assist, "bridge", None)
+        if bridge is None:
+            raise RuntimeError("还没连上游戏窗口")
+        return bridge.eval_js(expression)
+
+    def _stop_plank(self, quiet: bool = False) -> None:
+        try:
+            self._plank_eval(
+                "(window.__zzAssist&&window.__zzAssist.autoJumpStop"
+                "&&window.__zzAssist.autoJumpStop(),'ok')"
+            )
+        except Exception as exc:  # noqa: BLE001
+            if not quiet:
+                self._append_plank_log("停止失败：%s" % exc)
+        self._plank_running = False
+        self._plank_reset_button()
+        try:
+            self.plank_status.set("已停止" if not quiet else "已关闭")
+        except tk.TclError:
+            pass
+        if not quiet:
+            self._append_plank_log("已停止自动跳")
+
+    def toggle_plank(self) -> None:
+        if getattr(self, "_plank_running", False):
+            self._stop_plank()
+            return
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.autoJumpStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.autoJumpStart({}));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.plank_status.set("启动失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            message = ""
+            if isinstance(data, dict):
+                message = str(data.get("message") or "")
+            try:
+                self.plank_status.set(message or "启动失败")
+            except tk.TclError:
+                pass
+            self._append_plank_log(message or "启动失败")
+            return
+        self._plank_running = True
+        self._plank_last = ""
+        try:
+            self.plank_run_btn.configure(text="停止")
+            self.plank_status.set("自动跳中…")
+        except tk.TclError:
+            pass
+        self._append_plank_log("开始自动跳（秘境探宝）")
+        self.root.after(300, self._plank_poll)
+
+    def _plank_poll(self) -> None:
+        if not getattr(self, "_plank_running", False):
+            return
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "return a&&a.autoJumpState?JSON.stringify(a.autoJumpState()):'{}';}"
+                "catch(e){return '{}'}})()"
+            )
+            state = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            if not isinstance(state, dict):
+                state = {}
+        except Exception as exc:  # noqa: BLE001
+            self._plank_running = False
+            self._plank_reset_button()
+            try:
+                self.plank_status.set("读取状态失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        last = str(state.get("last") or "")
+        if last and last != self._plank_last:
+            self._plank_last = last
+            self._append_plank_log(last)
+        error = str(state.get("error") or "")
+        if error:
+            self._plank_running = False
+            self._plank_reset_button()
+            try:
+                self.plank_status.set("失败：" + error)
+            except tk.TclError:
+                pass
+            self._append_plank_log("失败：" + error)
+            return
+        if not state.get("running"):
+            self._plank_running = False
+            self._plank_reset_button()
+            try:
+                self.plank_status.set("已结束：" + (last or "完成"))
+            except tk.TclError:
+                pass
+            self._append_plank_log("自动跳结束：" + (last or "完成"))
+            return
+        try:
+            jumps = int(state.get("jumps") or 0)
+        except (TypeError, ValueError):
+            jumps = 0
+        text = "自动跳中：已跳 %d 次" % jumps
+        if last:
+            text += " · " + last
+        try:
+            self.plank_status.set(text)
+        except tk.TclError:
+            pass
+        try:
+            self.root.after(500, self._plank_poll)
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------ 槽位
 
@@ -4665,6 +4854,8 @@ class AppUI:
             if self._cmd_recorder.recording:
                 self._cmd_recorder.stop()
             self.instruction_runner.stop()
+            if getattr(self, "_plank_running", False):
+                self._stop_plank(quiet=True)
             if not getattr(self, "_cmd_preset_loaded", False):
                 self._save_current_slot_into_memory()
             self._persist_slots()

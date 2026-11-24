@@ -1467,6 +1467,7 @@
   function showFeature(key) {
     var features = [
       ["daily", "dailyPanel", "playDaily"],
+      ["plank", "plankPanel", "playPlank"],
       ["talisman", "talismanPanel", "playTalisman"],
       ["guild", "guildPanel", "playGuild"],
       ["maze", "mazePanel", "playMaze"]
@@ -1481,6 +1482,85 @@
     if (guildTimer) { clearInterval(guildTimer); guildTimer = null; }
     if (mazeTimer) { clearInterval(mazeTimer); mazeTimer = null; }
     if (key === "maze") startMazeAuto();
+  }
+
+  var plankRunning = false;
+  var plankTimer = null;
+
+  function plankSetStatus(text) {
+    var el = $("plankStatus");
+    if (el) el.textContent = String(text || "");
+  }
+
+  function plankStateFromGame() {
+    try {
+      var raw = unquote(evalGame(
+        "(function(){try{var a=window.__zzAssist;" +
+        "return a&&a.autoJumpState?JSON.stringify(a.autoJumpState()):'{}';}" +
+        "catch(e){return '{}'}})()"
+      ));
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function plankReset() {
+    plankRunning = false;
+    if (plankTimer) { clearTimeout(plankTimer); plankTimer = null; }
+    var btn = $("plankRun");
+    if (btn) btn.textContent = "开始自动跳";
+  }
+
+  function plankPoll() {
+    if (!plankRunning) return;
+    var st = plankStateFromGame();
+    if (st.error) {
+      plankSetStatus("失败：" + st.error);
+      plankReset();
+      return;
+    }
+    if (!st.running) {
+      plankSetStatus("已结束：" + (st.last || "完成"));
+      plankReset();
+      return;
+    }
+    var jumps = Number(st.jumps || 0);
+    plankSetStatus("自动跳中：已跳 " + jumps + " 次" + (st.last ? " · " + st.last : ""));
+    plankTimer = setTimeout(plankPoll, 500);
+  }
+
+  function togglePlank() {
+    if (plankRunning) {
+      try {
+        evalGame("(window.__zzAssist&&window.__zzAssist.autoJumpStop" +
+          "&&window.__zzAssist.autoJumpStop(),'ok')");
+      } catch (e) { /* ignore */ }
+      plankSetStatus("已停止");
+      plankReset();
+      return;
+    }
+    var result = {};
+    try {
+      var raw = unquote(evalGame(
+        "(function(){try{var a=window.__zzAssist;" +
+        "if(!a||!a.autoJumpStart)return JSON.stringify({ok:false,message:'运行时还没注入'});" +
+        "return JSON.stringify(a.autoJumpStart({}));}" +
+        "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+      ));
+      result = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      result = { ok: false, message: String((e && e.message) || e) };
+    }
+    if (!result.ok) {
+      plankSetStatus(result.message || "启动失败");
+      return;
+    }
+    plankRunning = true;
+    var btn = $("plankRun");
+    if (btn) btn.textContent = "停止";
+    plankSetStatus("自动跳中…");
+    plankPoll();
   }
 
   function setClickTp(on, retried) {
@@ -1616,6 +1696,10 @@
     if (autoChestBtn) autoChestBtn.onclick = toggleAutoChest;
     var playDailyBtn = $("playDaily");
     if (playDailyBtn) playDailyBtn.onclick = function () { showFeature("daily"); };
+    var playPlankBtn = $("playPlank");
+    if (playPlankBtn) playPlankBtn.onclick = function () { showFeature("plank"); };
+    var plankRunBtn = $("plankRun");
+    if (plankRunBtn) plankRunBtn.onclick = togglePlank;
     var playTalismanBtn = $("playTalisman");
     if (playTalismanBtn) playTalismanBtn.onclick = function () { showFeature("talisman"); };
     var playGuildBtn = $("playGuild");
@@ -1659,6 +1743,12 @@
     var stopBtn = $("btnStopAll");
     if (stopBtn) stopBtn.onclick = function () {
       stopAutoChest();
+      try {
+        evalGame("(window.__zzAssist&&window.__zzAssist.autoJumpStop" +
+          "&&window.__zzAssist.autoJumpStop(),'ok')");
+      } catch (e) { /* ignore */ }
+      plankReset();
+      plankSetStatus("已停止");
       evalGame("(window.__zzAssist&&window.__zzAssist.stopAll&&window.__zzAssist.stopAll(),'ok')");
       setStatus("已全部关闭");
       render();
