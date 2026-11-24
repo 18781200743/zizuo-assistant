@@ -1818,7 +1818,32 @@
     farmTimer = setTimeout(farmPoll, 700);
   }
 
-  function farmStart(mode) {
+  function farmRuntimeReady() {
+    try {
+      var value = unquote(evalGame(
+        "!!(window.__zzAssist&&window.__zzAssist.farmAutoStart)"
+      ));
+      return value === "true" || value === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function farmStart(mode, retry) {
+    retry = Number(retry) || 0;
+    if (!farmRuntimeReady()) {
+      if (!injected) {
+        try { inject(); } catch (e) { /* ignore */ }
+      }
+      if (retry < 8) {
+        farmSetStatus("正在连接游戏运行时…");
+        setTimeout(function () { farmStart(mode, retry + 1); }, 700);
+        return;
+      }
+      farmSetStatus("游戏运行时还没注入：请关闭游戏窗口重开，等游戏加载完再点");
+      farmLog("运行时还没注入");
+      return;
+    }
     if (farmRunning) farmStop();
     var raw = "";
     try {
