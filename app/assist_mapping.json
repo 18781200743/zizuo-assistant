@@ -499,7 +499,13 @@
      "total": "PNAE",
      "expire": "CMVA",
      "claims": "JWTZ",
-     "time": "DKZF"
+     "time": "DKZF",
+     "claimInfo": "CZGN",
+     "claimList": "JWTZ",
+     "claimAmount": "PHKL",
+     "claimSelf": "ACHI",
+     "claimPlayer": "GZZR",
+     "selfId": "GZZR"
     }
    },
    "chat": {

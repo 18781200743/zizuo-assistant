@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 151
+RUNTIME_VERSION = 152
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 151
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 151;
+  const VERSION = 152;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -134,6 +134,9 @@ RUNTIME_JS = r"""
       lastCode: 0, lastFailId: '', failReason: '', hookId: '',
       // day：今天（用于跨天清零）；green：今日领到的绿钻；greenSeen：上一次读到的绿钻余额
       day: '', green: 0, greenSeen: null, greenUntil: 0,
+      // exactGreen：从领取返回的 JWTZ 里按自己的 PHKL 精确累加；exactCount>0 时优先显示
+      exactGreen: 0, exactCount: 0, credit: Object.create(null),
+      lastAmount: 0, amountError: '',
     },
     wish: {
       enabled: false, reason: '尚未开启', claimed: 0,
@@ -426,10 +429,12 @@ RUNTIME_JS = r"""
     state.red.date = day;
     state.red.today = sameDay ? Math.max(0, Number(saved.count) || 0) : 0;
     state.red.green = sameDay ? Math.max(0, Number(saved.green) || 0) : 0;
+    state.red.exactGreen = sameDay ? Math.max(0, Number(saved.exactGreen) || 0) : 0;
+    state.red.exactCount = sameDay ? Math.max(0, Number(saved.exactCount) || 0) : 0;
     state.red.greenSeen = greenBalance();
     saveRedDay();
     if (state.red.enabled) {
-      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
     }
   }
 
@@ -440,14 +445,12 @@ RUNTIME_JS = r"""
       const day = String(data.date || '');
       if (day && day !== today()) return 0;
       const count = Math.max(0, Number(data.count) || 0);
-      const green = Math.max(0, Number(data.green) || 0);
       rollRedDay();
       let changed = 0;
       if (count > state.red.today) { state.red.today = count; changed = 1; }
-      if (green > state.red.green) { state.red.green = green; changed = 1; }
       if (changed) saveRedDay();
       if (state.red.enabled) {
-        state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+        state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
       }
       return changed;
     } catch (_) { return 0; }
@@ -457,6 +460,7 @@ RUNTIME_JS = r"""
     try {
       localStorage.setItem(RED_STORE_KEY, JSON.stringify({
         date: state.red.day, count: state.red.today, green: state.red.green,
+        exactGreen: state.red.exactGreen, exactCount: state.red.exactCount,
       }));
     } catch (_) { /* 隐私模式写不进去就只记内存 */ }
   }
@@ -465,7 +469,81 @@ RUNTIME_JS = r"""
     if (state.red.day !== today()) loadRedDay();
   }
 
-  /** 用绿钻余额的增量算「领取到多少绿钻」：并发领取也不会重复算。 */
+  /** 显示用：有精确金额就用精确金额，没有才退回余额估算。 */
+  function redGreenValue() {
+    return state.red.exactCount > 0 ? state.red.exactGreen : state.red.green;
+  }
+
+  /** 当前登录角色 ID，用来从红包领取记录里找自己。 */
+  function redSelfRoleId() {
+    try {
+      for (const pair of window.System.entries()) {
+        const exp = pair && pair[1];
+        if (!exp) continue;
+        let keys;
+        try { keys = Object.getOwnPropertyNames(exp); } catch (_) { continue; }
+        for (let i = 0; i < keys.length; i += 1) {
+          let value;
+          try { value = exp[keys[i]]; } catch (_) { continue; }
+          if (!value || typeof value !== 'object') continue;
+          const model = value.HBJS || value;
+          if (model && model.GZZR) return String(model.GZZR);
+        }
+      }
+    } catch (_) { /* ignore */ }
+    return '';
+  }
+
+  /** 精确记一个红包：同一个包只记一次。 */
+  function creditRedAmount(id, amount) {
+    if (!id) return 0;
+    const credit = state.red.credit || (state.red.credit = Object.create(null));
+    if (credit[id]) return 0;
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < 0) return 0;
+    credit[id] = 1;
+    rollRedDay();
+    state.red.exactGreen = Math.max(0, Number(state.red.exactGreen || 0) + value);
+    state.red.exactCount = Math.max(0, Number(state.red.exactCount || 0) + 1);
+    state.red.lastAmount = value;
+    saveRedDay();
+    if (state.red.enabled) {
+      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
+    }
+    return value;
+  }
+
+  /** 从领取返回的 CZGN.JWTZ 里找自己的 PHKL，累加精确金额。 */
+  function creditFromClaimResponse(request, resp) {
+    try {
+      const fields = (state.ctx && state.ctx.redCfg && state.ctx.redCfg.fields) || {};
+      const info = resp && resp[fields.claimInfo || 'CZGN'];
+      const rows = info && info[fields.claimList || 'JWTZ'];
+      if (!Array.isArray(rows) || !rows.length) return 0;
+      const selfId = redSelfRoleId();
+      const amountKey = fields.claimAmount || 'PHKL';
+      const selfKey = fields.claimSelf || 'ACHI';
+      const playerKey = fields.claimPlayer || 'GZZR';
+      let amount = null;
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        if (!row) continue;
+        const mine = !!row[selfKey]
+          || (selfId && String(row[playerKey] || '') === selfId);
+        if (!mine) continue;
+        const value = Number(row[amountKey]);
+        if (Number.isFinite(value)) amount = value;
+        break;
+      }
+      if (amount === null) return 0;
+      return creditRedAmount(String(request.FDUU), amount);
+    } catch (cause) {
+      state.red.amountError = '解析红包金额失败：' + msgOf(cause);
+      return 0;
+    }
+  }
+
+  /** 用绿钻余额的增量算「领取到多少绿钻」：只在没有精确数据时兜底。 */
   function syncRedGreen() {
     const balance = greenBalance();
     if (balance === null) return;
@@ -479,7 +557,7 @@ RUNTIME_JS = r"""
     state.red.green = Math.max(0, Number(state.red.green || 0) + delta);
     saveRedDay();
     if (state.red.enabled) {
-      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
     }
   }
 
@@ -523,7 +601,7 @@ RUNTIME_JS = r"""
       // 余额更新可能比 Promise 晚一点，接下来几轮都对一次余额
       state.red.greenUntil = now() + 2500;
       syncRedGreen();
-      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + state.red.green + ' 绿钻';
+      state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
     };
     const settle = code => {
       state.red.pending = Math.max(0, state.red.pending - 1);
@@ -679,6 +757,8 @@ RUNTIME_JS = r"""
                   state.red.lastCode = code;
                   state.red.lastFailId = String(request.FDUU);
                   state.red.failReason = '领取失败：服务器返回 ' + code;
+                } else {
+                  creditFromClaimResponse(request, resp);
                 }
               }, () => {
                 state.red.failReason = '领取请求失败（网络）';
@@ -4790,7 +4870,11 @@ RUNTIME_JS = r"""
         claimed: red.claimed,
         failed: red.failed,
         pending: red.pending,
-        green: red.green,
+        green: redGreenValue(),
+        greenExact: red.exactGreen || 0,
+        greenExactCount: red.exactCount || 0,
+        lastAmount: red.lastAmount || 0,
+        amountError: red.amountError || '',
         hooked: !!red.hookId,
         retry: red.retry ? Object.keys(red.retry).length : 0,
         lastCode: red.lastCode || 0,
@@ -5135,11 +5219,11 @@ RUNTIME_JS = r"""
       }
       state.red.reason = value
         ? '监控中：红包一进聊天立刻领（60ms 轮询兜底）'
-        : '已关闭（今日 ' + state.red.today + ' 个 / ' + state.red.green + ' 绿钻）';
+        : '已关闭（今日 ' + state.red.today + ' 个 / ' + redGreenValue() + ' 绿钻）';
       return {
         ok: true,
         message: value
-          ? '快速抢红包已开启（今日 ' + state.red.today + ' 个 / ' + state.red.green + ' 绿钻）'
+          ? '快速抢红包已开启（今日 ' + state.red.today + ' 个 / ' + redGreenValue() + ' 绿钻）'
           : '快速抢红包已关闭',
       };
     }
