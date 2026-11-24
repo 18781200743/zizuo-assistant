@@ -1179,6 +1179,20 @@
         out.value = JSON.stringify(a.guildTeamsStart(Number(p.camp) || 0, Number(p.spot) || 0));
       } else if (action === "guildTeamsState") {
         out.value = JSON.stringify(a.guildTeamsState());
+      } else if (action === "plankStart") {
+        out.value = JSON.stringify(a.autoJumpStart({}));
+      } else if (action === "plankState") {
+        out.value = JSON.stringify(a.autoJumpState());
+      } else if (action === "plankStop") {
+        if (a.autoJumpStop) a.autoJumpStop();
+        out.value = JSON.stringify({ ok: true });
+      } else if (action === "farmStart") {
+        out.value = JSON.stringify(a.farmAutoStart({ mode: String(p.mode || "visit") }));
+      } else if (action === "farmState") {
+        out.value = JSON.stringify(a.farmAutoState());
+      } else if (action === "farmStop") {
+        if (a.farmAutoStop) a.farmAutoStop();
+        out.value = JSON.stringify({ ok: true });
       } else if (action === "mazeQuery") {
         out.value = JSON.stringify(a.mazeQuery());
       } else if (action === "pickState") {
@@ -1672,104 +1686,62 @@
     if (el) el.textContent = String(text || "");
   }
 
-  function plankStateFromGame() {
-    try {
-      var raw = unquote(evalGame(
-        "(function(){try{var a=window.__zzAssist;" +
-        "return a&&a.autoJumpState?JSON.stringify(a.autoJumpState()):'{}';}" +
-        "catch(e){return '{}'}})()"
-      ));
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      return {};
-    }
-  }
-
   function plankReset() {
     plankRunning = false;
-    if (plankTimer) { clearTimeout(plankTimer); plankTimer = null; }
+    if (plankTimer) {
+      clearTimeout(plankTimer);
+      plankTimer = null;
+    }
     var btn = $("plankRun");
     if (btn) btn.textContent = "开始自动跳";
   }
 
   function plankPoll() {
     if (!plankRunning) return;
-    var st = plankStateFromGame();
-    if (st.error) {
-      plankSetStatus("失败：" + st.error);
-      plankReset();
-      return;
-    }
-    if (!st.running) {
-      plankSetStatus("已结束：" + (st.last || "完成"));
-      plankReset();
-      return;
-    }
-    var jumps = Number(st.jumps || 0);
-    plankSetStatus("自动跳中：已跳 " + jumps + " 次" + (st.last ? " · " + st.last : ""));
-    plankTimer = setTimeout(plankPoll, 500);
+    gameRpcJson("plankState", {}, function (st, err) {
+      if (err || !st) {
+        plankSetStatus("读取状态失败：" + (err || "无返回"));
+        plankTimer = setTimeout(plankPoll, 800);
+        return;
+      }
+      if (st.error) {
+        plankSetStatus("失败：" + st.error);
+        plankReset();
+        return;
+      }
+      if (!st.running) {
+        plankSetStatus("已结束：" + (st.last || "完成"));
+        plankReset();
+        return;
+      }
+      var jumps = Number(st.jumps || 0);
+      plankSetStatus("自动跳中：已跳 " + jumps + " 次" + (st.last ? " · " + st.last : ""));
+      plankTimer = setTimeout(plankPoll, 500);
+    });
   }
 
   function togglePlank() {
     if (plankRunning) {
-      try {
-        evalGame("(window.__zzAssist&&window.__zzAssist.autoJumpStop" +
-          "&&window.__zzAssist.autoJumpStop(),'ok')");
-      } catch (e) { /* ignore */ }
+      gameRpcJson("plankStop", {}, function () { /* ignore */ });
       plankSetStatus("已停止");
       plankReset();
       return;
     }
-    var result = {};
-    try {
-      var raw = unquote(evalGame(
-        "(function(){try{var a=window.__zzAssist;" +
-        "if(!a||!a.autoJumpStart)return JSON.stringify({ok:false,message:'运行时还没注入'});" +
-        "return JSON.stringify(a.autoJumpStart({}));}" +
-        "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
-      ));
-      result = raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      result = { ok: false, message: String((e && e.message) || e) };
-    }
-    if (!result.ok) {
-      plankSetStatus(result.message || "启动失败");
-      return;
-    }
-    plankRunning = true;
-    var btn = $("plankRun");
-    if (btn) btn.textContent = "停止";
-    plankSetStatus("自动跳中…");
-    plankPoll();
-  }
-
-  var farmRunning = false;
-  var farmTimer = null;
-  var farmLast = "";
-
-  function farmSetStatus(text) {
-    var el = $("farmStatus");
-    if (el) el.textContent = String(text || "");
-  }
-
-  function farmLog(text) {
-    var el = $("farmLog");
-    if (!el || !text) return;
-    var line = String(text);
-    el.textContent = (el.textContent ? el.textContent + "\n" : "") + line;
-  }
-
-  function farmStateFromGame() {
-    try {
-      var raw = unquote(evalGame(
-        "(function(){try{var a=window.__zzAssist;" +
-        "return a&&a.farmAutoState?JSON.stringify(a.farmAutoState()):'{}';}" +
-        "catch(e){return '{}'}})()"
-      ));
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      return {};
-    }
+    gameRpcJson("plankStart", {}, function (result, error) {
+      if (error || !result) {
+        plankSetStatus("启动失败：" + (error || "游戏没有返回"));
+        return;
+      }
+      if (!result.ok) {
+        plankSetStatus(result.message || "启动失败");
+        return;
+      }
+      plankRunning = true;
+      var btn = $("plankRun");
+      if (btn) btn.textContent = "停止";
+      plankSetStatus("自动跳中…");
+      plankPoll();
+    });
   }
 
   function farmReset() {
@@ -1782,97 +1754,81 @@
 
   function farmPoll() {
     if (!farmRunning) return;
-    var st = farmStateFromGame();
-    if (st.error) {
-      farmSetStatus("失败：" + st.error);
-      farmLog("停止：" + st.error);
-      farmReset();
-      return;
-    }
-    if (!st.running) {
-      farmSetStatus("已结束：" + (st.last || "完成"));
-      farmLog("结束：" + (st.last || "完成"));
-      farmReset();
-      return;
-    }
-    var mode = String(st.mode || "");
-    var text = mode === "auto" ? "自动循环" : (mode === "own" ? "收菜" : "偷菜/施肥");
-    if (mode === "auto") {
-      var phase = String(st.phase || "");
-      text += phase === "visit" ? " · 好友农场"
-        : ((phase === "enter" || phase === "leave") ? " · 切换农场" : " · 个人农场");
-    }
-    text += "：已处理 " + (Number(st.steps) || 0) + " 次";
-    if (st.ownMature) text += " · 成熟 " + st.ownMature + " 块";
-    if (st.emptyPlots) text += " · 空地 " + st.emptyPlots + " 块";
-    var counters = st.counters || {};
-    if (mode !== "own" && counters.known) {
-      text += " · 偷菜剩 " + (counters.steal || 0) + " · 施肥剩 " + (counters.fertilize || 0);
-    }
-    if (st.last) text += " · " + st.last;
-    farmSetStatus(text);
-    if (st.last && st.last !== farmLast) {
-      farmLast = st.last;
-      farmLog(st.last);
-    }
-    farmTimer = setTimeout(farmPoll, 700);
-  }
-
-  function farmRuntimeReady() {
-    try {
-      var value = unquote(evalGame(
-        "!!(window.__zzAssist&&window.__zzAssist.farmAutoStart)"
-      ));
-      return value === "true" || value === true;
-    } catch (e) {
-      return false;
-    }
+    gameRpcJson("farmState", {}, function (st, err) {
+      if (err || !st) {
+        farmSetStatus("读取状态失败：" + (err || "无返回"));
+        farmTimer = setTimeout(farmPoll, 900);
+        return;
+      }
+      if (st.error) {
+        farmSetStatus("失败：" + st.error);
+        farmLog("停止：" + st.error);
+        farmReset();
+        return;
+      }
+      if (!st.running) {
+        farmSetStatus("已结束：" + (st.last || "完成"));
+        farmLog("结束：" + (st.last || "完成"));
+        farmReset();
+        return;
+      }
+      var mode = String(st.mode || "");
+      var text = mode === "auto" ? "自动循环" : (mode === "own" ? "收菜" : "偷菜/施肥");
+      if (mode === "auto") {
+        var phase = String(st.phase || "");
+        text += phase === "visit" ? " · 好友农场"
+          : ((phase === "enter" || phase === "leave") ? " · 切换农场" : " · 个人农场");
+      }
+      text += "：已处理 " + (Number(st.steps) || 0) + " 次";
+      if (st.ownMature) text += " · 成熟 " + st.ownMature + " 块";
+      if (st.emptyPlots) text += " · 空地 " + st.emptyPlots + " 块";
+      var counters = st.counters || {};
+      if (mode !== "own" && counters.known) {
+        text += " · 偷菜剩 " + (counters.steal || 0) + " · 施肥剩 " + (counters.fertilize || 0);
+      }
+      if (st.last) text += " · " + st.last;
+      farmSetStatus(text);
+      if (st.last && st.last !== farmLast) {
+        farmLast = st.last;
+        farmLog(st.last);
+      }
+      farmTimer = setTimeout(farmPoll, 700);
+    });
   }
 
   function farmStart(mode, retry) {
     retry = Number(retry) || 0;
-    if (!farmRuntimeReady()) {
-      if (!injected) {
-        try { inject(); } catch (e) { /* ignore */ }
-      }
-      if (retry < 8) {
-        farmSetStatus("正在连接游戏运行时…");
-        setTimeout(function () { farmStart(mode, retry + 1); }, 700);
+    if (farmRunning) {
+      farmStop();
+      setTimeout(function () { farmStart(mode, retry); }, 350);
+      return;
+    }
+    gameRpcJson("farmStart", { mode: mode }, function (result, error) {
+      if (error || !result) {
+        if (retry < 8) {
+          farmSetStatus("正在连接游戏运行时…");
+          setTimeout(function () { farmStart(mode, retry + 1); }, 700);
+          return;
+        }
+        farmSetStatus("启动失败：" + (error || "游戏没有返回"));
+        farmLog("启动失败：" + (error || "游戏没有返回"));
         return;
       }
-      farmSetStatus("游戏运行时还没注入：请关闭游戏窗口重开，等游戏加载完再点");
-      farmLog("运行时还没注入");
-      return;
-    }
-    if (farmRunning) farmStop();
-    var raw = "";
-    try {
-      raw = unquote(evalGame(
-        "(function(){try{var a=window.__zzAssist;" +
-        "if(!a||!a.farmAutoStart)return JSON.stringify({ok:false,message:'运行时还没注入'});" +
-        "return JSON.stringify(a.farmAutoStart({mode:'" + mode + "'}));}" +
-        "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
-      ));
-    } catch (e) { /* ignore */ }
-    var result = {};
-    try { result = raw ? JSON.parse(raw) : {}; } catch (e) { result = {}; }
-    if (!result.ok) {
-      farmSetStatus(result.message || "启动失败");
-      farmLog(result.message || "启动失败");
-      return;
-    }
-    farmRunning = true;
-    farmLast = "";
-    farmSetStatus("运行中…");
-    farmLog("开始：" + (mode === "auto" ? "自动循环" : (mode === "own" ? "收自己的菜" : "偷菜/施肥")));
-    farmPoll();
+      if (!result.ok) {
+        farmSetStatus(result.message || "启动失败");
+        farmLog(result.message || "启动失败");
+        return;
+      }
+      farmRunning = true;
+      farmLast = "";
+      farmSetStatus("运行中…");
+      farmLog("开始：" + (mode === "auto" ? "自动循环" : (mode === "own" ? "收自己的菜" : "偷菜/施肥")));
+      farmPoll();
+    });
   }
 
   function farmStop() {
-    try {
-      evalGame("(window.__zzAssist&&window.__zzAssist.farmAutoStop" +
-        "&&window.__zzAssist.farmAutoStop(),'ok')");
-    } catch (e) { /* ignore */ }
+    gameRpcJson("farmStop", {}, function () { /* ignore */ });
     farmReset();
     farmSetStatus("已停止");
     farmLog("已停止农场自动");
