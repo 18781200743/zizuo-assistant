@@ -1083,20 +1083,20 @@
     "ZLTC": "XZXW",
     "ZRRU": "VZZY"
    },
-   "farm": {
-    "holder": "DYCU",
-    "service": "MUHI",
-    "model": "IYJF",
-    "visiting": "OUDX",
-    "farmKey": "BZUO",
-    "harvest": "DNRQ",
-    "water": "DVVD",
-    "buttons": {
-     "steal": "oneKeyStealBtn",
-     "help": "FarmOperationButton",
-     "next": "GoVisitNextoneBtn"
-    }
-   },
+   "farm": {
+    "holder": "DYCU",
+    "service": "MUHI",
+    "model": "IYJF",
+    "visiting": "OUDX",
+    "farmKey": "BZUO",
+    "harvest": "DNRQ",
+    "water": "DVVD",
+    "buttons": {
+     "steal": "oneKeyStealBtn",
+     "help": "FarmOperationButton",
+     "next": "GoVisitNextoneBtn"
+    }
+   },
    "maze": {
     "holder": "GCOA",
     "scene": "STDU",
