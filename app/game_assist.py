@@ -825,6 +825,30 @@ class GameAssist:
         except Exception:  # noqa: BLE001
             return {}
 
+    def guild_teams_start(self, camp: int, stronghold: int) -> dict:
+        """开始读取一个据点里每个成员的三个队战力。"""
+        try:
+            self.bridge.ensure_runtime()
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.guildTeamsStart "
+                "? window.__zzAssist.guildTeamsStart(%d, %d) : null)"
+                % (int(camp), int(stronghold))
+            )
+            return json.loads(raw or "null") or {}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    def guild_teams_state(self) -> dict:
+        """读取成员分队战力的查询进度。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.guildTeamsState "
+                "? window.__zzAssist.guildTeamsState() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def maze_query(self) -> dict:
         """查询公会迷宫当前首领（只读）；不在战斗时返回上次快照。"""
         try:

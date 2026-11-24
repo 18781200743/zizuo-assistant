@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 152
+RUNTIME_VERSION = 154
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 152
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 152;
+  const VERSION = 154;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3686,6 +3686,100 @@ RUNTIME_JS = r"""
     };
   }
 
+  /** 读取一个据点里每个成员的三个队战力（KBJA 成员详情，逐个查）。 */
+  function guildTeamsStart(camp, stronghold) {
+    const cfg = guildConfig();
+    if (!cfg || !cfg.memberDetail) {
+      return { ok: false, error: '当前游戏版本没有成员详情映射' };
+    }
+    const intel = state.guildIntel || {};
+    const rows = intel.rows || [];
+    const campId = Number(camp) || 0;
+    const spotId = Number(stronghold) || 0;
+    const row = rows.find(function (item) {
+      return Number(item.camp) === campId && Number(item.id) === spotId;
+    });
+    if (!row) return { ok: false, error: '请先查询这个据点' };
+    const members = (row.members || []).filter(function (item) { return item && item.id; });
+    if (!members.length) return { ok: false, error: '这个据点没有成员' };
+    const service = guildFindService(cfg);
+    if (!service || typeof service[cfg.memberDetail] !== 'function') {
+      return { ok: false, error: '公会战服务还没加载，请先打开一次公会战界面' };
+    }
+    state.guildTeams = state.guildTeams || { job: null };
+    const running = state.guildTeams.job;
+    if (running && running.running) {
+      if (running.camp === campId && running.id === spotId) {
+        return { ok: true, running: true, total: running.total, done: running.done };
+      }
+      return { ok: false, error: '正在读取其他据点的队伍，请稍等' };
+    }
+
+    const job = {
+      running: true, camp: campId, id: spotId, done: 0, total: members.length,
+      teams: {}, error: '', startedAt: now(),
+    };
+    state.guildTeams.job = job;
+    let index = 0;
+    const step = function () {
+      if (index >= members.length) {
+        job.running = false;
+        return;
+      }
+      const member = members[index];
+      index += 1;
+      let pending;
+      try {
+        pending = service[cfg.memberDetail](campId, spotId, member.id, true);
+      } catch (cause) {
+        job.error = msgOf(cause);
+        advance();
+        return;
+      }
+      Promise.resolve(pending).then(function (detail) {
+        try {
+          const list = detail && detail[cfg.teamList];
+          if (Array.isArray(list)) {
+            const teams = list.map(function (team, i) {
+              const slot = Number(team[cfg.teamSlot]) || (i + 1);
+              const power = Number(team[cfg.teamPower]);
+              return {
+                slot: slot,
+                power: Number.isFinite(power) && power > 0 ? Math.trunc(power) : 0,
+              };
+            }).sort(function (a, b) { return a.slot - b.slot; });
+            job.teams[member.id] = teams;
+          }
+        } catch (_) { /* 单个成员失败不影响其他成员 */ }
+        advance();
+      }, function (cause) {
+        job.error = msgOf(cause);
+        advance();
+      });
+      function advance() {
+        job.done += 1;
+        setTimeout(step, 80);
+      }
+    };
+    setTimeout(step, 30);
+    return { ok: true, total: job.total };
+  }
+
+  function guildTeamsState() {
+    const box = state.guildTeams || {};
+    const job = box.job || null;
+    if (!job) return { running: false, camp: 0, id: 0, done: 0, total: 0, teams: {}, error: '' };
+    return {
+      running: !!job.running,
+      camp: job.camp || 0,
+      id: job.id || 0,
+      done: job.done || 0,
+      total: job.total || 0,
+      teams: job.teams || {},
+      error: job.error || '',
+    };
+  }
+
   /** 在任务面板里找到指定名字的任务行，点它的「前往」。 */
   function clickTaskGo(taskName) {
     try {
@@ -6247,6 +6341,8 @@ RUNTIME_JS = r"""
     farmProbe: farmProbe,
     guildIntelStart,
     guildIntelState,
+    guildTeamsStart,
+    guildTeamsState,
     mazeQuery,
     set,
     diagnose,

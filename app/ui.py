@@ -2204,6 +2204,9 @@ class AppUI:
         self._play_current = None
         self._guild_rows: List[Dict[str, Any]] = []
         self._guild_polling = False
+        self._guild_teams_cache: Dict[tuple, Dict[str, Any]] = {}
+        self._guild_teams_loading = False
+        self._guild_teams_key = None
         self._maze_auto = False
         self._maze_last_stamp = ""
 
@@ -3512,6 +3515,20 @@ class AppUI:
         return "未配置" if cls._guild_power_placeholder(value) else cls._guild_power_text(value)
 
     @classmethod
+    def _guild_team_text(cls, member: Dict[str, Any], teams=None, default: str = "未配置") -> str:
+        if teams is None:
+            teams = member.get("teamPowers") or []
+        if not teams:
+            return default
+        parts = []
+        for index, team in enumerate(teams):
+            if not isinstance(team, dict):
+                continue
+            slot = team.get("slot") or (index + 1)
+            parts.append("队%s %s" % (slot, cls._guild_member_power_text(team.get("power"))))
+        return " / ".join(parts) or "未配置"
+
+    @classmethod
     def _guild_group_power(cls, members: List[Dict[str, Any]]):
         real = [m for m in members if not cls._guild_power_placeholder(m.get("power"))]
         power = sum(int(m.get("power") or 0) for m in real)
@@ -3523,7 +3540,8 @@ class AppUI:
             text=(
                 "说明：战力 100 / 200 / 300 是游戏给未配置队伍下发的占位值"
                 "（每队默认 100），不是真实战力。\n"
-                "工具会显示为「未配置」，并且不计入总战力；配置好队伍后才会显示真实战力。"
+                "工具会显示为「未配置」，并且不计入总战力；配置好队伍后才会显示真实战力。\n"
+                "选中据点后，下方成员明细会自动读取并显示每个人三个队各自的战力（需要几秒）。"
             ),
             foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=700, padx=10, pady=6,
@@ -3571,7 +3589,7 @@ class AppUI:
 
         detail = ttk.LabelFrame(parent, text="成员明细", padding=4)
         detail.pack(fill=tk.X, pady=(6, 0))
-        text = tk.Text(detail, height=5, wrap=tk.WORD, font=("Microsoft YaHei UI", 9))
+        text = tk.Text(detail, height=8, wrap=tk.WORD, font=("Microsoft YaHei UI", 9))
         tsb = ttk.Scrollbar(detail, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=tsb.set, state=tk.DISABLED)
         text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -3627,6 +3645,9 @@ class AppUI:
             key=lambda row: (int(row.get("camp") or 0), int(row.get("id") or 0)),
         )
         self._guild_rows = rows
+        self._guild_teams_cache = {}
+        self._guild_teams_loading = False
+        self._guild_teams_key = None
         try:
             tree.delete(*tree.get_children())
         except tk.TclError:
@@ -3697,8 +3718,17 @@ class AppUI:
         if index < 0 or index >= len(rows):
             return
         row = rows[index]
-        camp = "我方" if int(row.get("camp") or 0) == 1 else "敌方"
+        camp_id = int(row.get("camp") or 0)
+        spot_id = int(row.get("id") or 0)
+        camp = "我方" if camp_id == 1 else "敌方"
         members = row.get("members") or []
+        cache = getattr(self, "_guild_teams_cache", {}).get((camp_id, spot_id))
+        loading = bool(getattr(self, "_guild_teams_loading", False)) and getattr(
+            self, "_guild_teams_key", None
+        ) == (camp_id, spot_id)
+        if members and cache is None and not getattr(self, "_guild_teams_loading", False):
+            self._guild_start_teams(camp_id, spot_id)
+            loading = True
         power, unset, has_real = self._guild_group_power(members)
         power_text = "未配置" if members and not has_real else self._guild_power_text(power)
         lines = [
@@ -3711,21 +3741,74 @@ class AppUI:
         if unset:
             lines.append("其中 %d 人未配置队伍，占位战力（100/200/300）不计入总战力。" % unset)
         for member_index, member in enumerate(members, 1):
+            teams = None
+            if cache is not None:
+                teams = cache.get(str(member.get("id")))
+            if teams is not None:
+                team_default = "未配置"
+            elif loading:
+                team_default = "读取中…"
+            elif cache is None:
+                team_default = "未读取"
+            else:
+                team_default = "未配置"
             lines.append(
-                "%2d. %s  战力 %s  等级 %s  区服 %s  ID %s"
+                "%2d. %s  总战力 %s  三队：%s  等级 %s  区服 %s  ID %s"
                 % (
                     member_index,
                     member.get("name") or "?",
                     self._guild_member_power_text(member.get("power")),
+                    self._guild_team_text(member, teams, team_default),
                     member.get("level") or 0,
                     member.get("server") or "-",
                     member.get("id") or "-",
                 )
             )
+        if members and cache is None and not loading:
+            lines.append("分队战力未读取：点「查询」后重新选中据点。")
         text.configure(state=tk.NORMAL)
         text.delete("1.0", tk.END)
         text.insert("1.0", "\n".join(lines))
         text.configure(state=tk.DISABLED)
+
+    def _guild_start_teams(self, camp: int, stronghold: int) -> None:
+        key = (int(camp), int(stronghold))
+        self._guild_teams_key = key
+        self._guild_teams_loading = True
+        result = self.assist.guild_teams_start(camp, stronghold)
+        if not result.get("ok"):
+            self._guild_teams_loading = False
+            self._guild_teams_cache[key] = {}
+            self._guild_status.set("分队战力：%s" % (result.get("error") or "读取失败"))
+            self.root.after(50, self._guild_show_detail)
+            return
+        self._guild_status.set(
+            "正在读取 %d 号据点分队战力 0/%s…"
+            % (int(stronghold), result.get("total") or 0)
+        )
+        self.root.after(250, self._guild_poll_teams)
+
+    def _guild_poll_teams(self) -> None:
+        state = self.assist.guild_teams_state()
+        if not state:
+            self._guild_teams_loading = False
+            return
+        if state.get("running"):
+            self._guild_status.set(
+                "正在读取 %s 号据点分队战力 %d/%d…"
+                % (state.get("id") or 0, state.get("done") or 0, state.get("total") or 0)
+            )
+            self.root.after(300, self._guild_poll_teams)
+            return
+        key = (int(state.get("camp") or 0), int(state.get("id") or 0))
+        self._guild_teams_cache[key] = state.get("teams") or {}
+        self._guild_teams_loading = False
+        error = str(state.get("error") or "")
+        if error:
+            self._guild_status.set("分队战力读取失败：%s" % error)
+        else:
+            self._guild_status.set("分队战力已读取")
+        self._guild_show_detail()
 
     def _guild_copy(self) -> None:
         rows = getattr(self, "_guild_rows", [])
@@ -3747,12 +3830,17 @@ class AppUI:
             if row.get("error"):
                 lines.append("  查询失败：%s" % row.get("error"))
                 continue
+            cache = getattr(self, "_guild_teams_cache", {}).get(
+                (int(row.get("camp") or 0), int(row.get("id") or 0))
+            ) or {}
             for member in members:
+                teams = cache.get(str(member.get("id")))
                 lines.append(
-                    "  %s  战力 %s  等级 %s  区服 %s  ID %s"
+                    "  %s  总战力 %s  三队：%s  等级 %s  区服 %s  ID %s"
                     % (
                         member.get("name") or "?",
                         self._guild_member_power_text(member.get("power")),
+                        self._guild_team_text(member, teams, "未读取"),
                         member.get("level") or 0,
                         member.get("server") or "-",
                         member.get("id") or "-",
