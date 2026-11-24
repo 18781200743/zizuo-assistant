@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 147
+RUNTIME_VERSION = 148
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 147
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 147;
+  const VERSION = 148;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -63,6 +63,47 @@ RUNTIME_JS = r"""
   const RED_STORE_KEY = 'zz_red_daily';  // 今日红包数/绿钻存在页面里，刷新页面不清零
 
   const MAPPING = window.__zzAssistMapping || { builds: {} };
+
+  // 微信扫码登录：游戏在手机 UA 下不会返回 wxPcLoginLink，手机登录页就把
+  // “其他登录方式 → 微信”隐藏了。这里用游戏 init 接口在 os=pc 时返回的官方
+  // 扫码链接补上；state 用当前 H5 的 appid，游戏换 appid 时也能跟着变。
+  const WECHAT_QR_APPID = 'wx565e856587e12457';
+  const WECHAT_QR_REDIRECT = 'https%3A%2F%2Fsprogram.xnxykj.cn%2Fbox%2Fh5%2Fwxpc_login_redirect';
+  let wechatLoginCheckedAt = 0;
+  function wechatLoginLink() {
+    let appid = '';
+    try {
+      const cfg = window.AladinConfig || {};
+      appid = (cfg.appIdConfig && cfg.appIdConfig.h5) || '';
+    } catch (_) { /* ignore */ }
+    return 'https://open.weixin.qq.com/connect/qrconnect?appid=' + WECHAT_QR_APPID
+      + '&redirect_uri=' + WECHAT_QR_REDIRECT
+      + '&response_type=code&scope=snsapi_login&state='
+      + encodeURIComponent(appid || 'wx77200645d1c7f35f') + '#wechat_redirect';
+  }
+  function ensureWechatLogin() {
+    const at = Date.now();
+    if (at - wechatLoginCheckedAt < 1000) return;
+    wechatLoginCheckedAt = at;
+    try {
+      const frames = document.querySelectorAll('iframe');
+      let phone = null;
+      for (let i = 0; i < frames.length; i++) {
+        if (String(frames[i].src || '').indexOf('phone.html') >= 0) { phone = frames[i]; break; }
+      }
+      if (!phone) return;
+      const doc = phone.contentDocument;
+      if (!doc) return;
+      const section = doc.getElementById('other-login-section');
+      if (!section) return;
+      const link = window.__zzWechatLoginLink || wechatLoginLink();
+      if (!link) return;
+      if (localStorage.getItem('wxPcLoginLink') !== link) {
+        localStorage.setItem('wxPcLoginLink', link);
+      }
+      if (section.style.display !== 'flex') section.style.display = 'flex';
+    } catch (_) { /* 登录页结构变化时忽略 */ }
+  }
 
   const now = () => Date.now();
   const msgOf = cause => (cause && cause.message) || String(cause);
@@ -4637,6 +4678,8 @@ RUNTIME_JS = r"""
     try { tickHeroRevive(); } catch (_) { /* 每秒重试 */ }
     // 回营地复活 + 飞回原位
     try { tickCampFly(); } catch (_) { /* 下一轮继续 */ }
+    // 未登录时给手机登录页补上「微信扫码登录」入口
+    try { ensureWechatLogin(); } catch (_) { /* 登录页结构变化时忽略 */ }
   }
 
   /* ------------------------------------------------------------------ *
