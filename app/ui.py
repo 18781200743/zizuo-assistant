@@ -2214,6 +2214,7 @@ class AppUI:
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
             ("plank", "跳一跳"),
+            ("farm", "农场"),
             ("talisman", "护符升级"),
             ("guild", "公会情报"),
             ("maze", "公会迷宫"),
@@ -2279,6 +2280,52 @@ class AppUI:
         self._append_plank_log("跳一跳：进入秘境探宝后点「开始自动跳」。")
         self._play_panels["plank"] = plank
 
+        # ---- 农场 ----
+        farm = ttk.LabelFrame(content, text="农场（收菜 / 偷菜 / 施肥）", padding=8)
+        self.farm_status = tk.StringVar(value="个人农场点「收自己的菜」；拜访好友点「自动偷菜+施肥」")
+        ttk.Label(
+            farm, textvariable=self.farm_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        ttk.Label(
+            farm,
+            text="偷菜/施肥需要先在农场打开「拜访好友」，进入好友农场或停在拜访列表；"
+                 "自动会点「快速拜访」逐位处理。",
+            foreground="#7a5b00",
+            wraplength=440,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        farm_btns = ttk.Frame(farm)
+        farm_btns.pack(fill=tk.X, pady=(0, 6))
+        self.farm_own_btn = ttk.Button(
+            farm_btns, text="收自己的菜", width=11, style="Accent.TButton",
+            command=lambda: self._farm_start("own"),
+        )
+        self.farm_own_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.farm_visit_btn = ttk.Button(
+            farm_btns, text="自动偷菜+施肥", width=13,
+            command=lambda: self._farm_start("visit"),
+        )
+        self.farm_visit_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.farm_stop_btn = ttk.Button(
+            farm_btns, text="停止", width=7, command=self._farm_stop,
+        )
+        self.farm_stop_btn.pack(side=tk.LEFT)
+        farm_log_frame = ttk.Frame(farm)
+        farm_log_frame.pack(fill=tk.BOTH, expand=True)
+        self.farm_log_text = tk.Text(
+            farm_log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Microsoft YaHei UI", 9), background="#f8fafc",
+        )
+        farm_sb = ttk.Scrollbar(farm_log_frame, orient=tk.VERTICAL, command=self.farm_log_text.yview)
+        self.farm_log_text.configure(yscrollcommand=farm_sb.set)
+        self.farm_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        farm_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._farm_running = False
+        self._farm_last = ""
+        self._append_farm_log("农场：先打开农场界面，再点开始。")
+        self._play_panels["farm"] = farm
+
         # ---- 护符升级 ----
         talisman = ttk.LabelFrame(content, text="护符升级", padding=10)
         ttk.Label(talisman, text="护符升级：下一步实现。").pack(anchor=tk.W)
@@ -2317,7 +2364,7 @@ class AppUI:
                     bg="#eef2ff", fg="#1e3a8a",
                     activebackground="#dbeafe", activeforeground="#1e3a8a",
                 )
-        if key in ("guild", "maze", "plank") and not self.assist.running:
+        if key in ("guild", "maze", "plank", "farm") and not self.assist.running:
             try:
                 self.start_assist()
             except Exception:  # noqa: BLE001
@@ -2475,6 +2522,160 @@ class AppUI:
             pass
         try:
             self.root.after(500, self._plank_poll)
+        except tk.TclError:
+            pass
+
+    # ------------------------------------------------------------ 农场
+
+    def _append_farm_log(self, text: str) -> None:
+        widget = getattr(self, "farm_log_text", None)
+        if widget is None:
+            return
+        try:
+            state = str(widget.cget("state"))
+            if state == tk.DISABLED:
+                widget.configure(state=tk.NORMAL)
+            widget.insert(tk.END, str(text) + "\n")
+            widget.see(tk.END)
+            if state == tk.DISABLED:
+                widget.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def _farm_reset_buttons(self) -> None:
+        try:
+            self.farm_own_btn.configure(state=tk.NORMAL)
+            self.farm_visit_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            pass
+
+    def _farm_eval(self, expression: str) -> Any:
+        bridge = getattr(self.assist, "bridge", None)
+        if bridge is None:
+            raise RuntimeError("还没连上游戏窗口")
+        return bridge.eval_js(expression)
+
+    def _farm_start(self, mode: str) -> None:
+        if getattr(self, "_farm_running", False):
+            self._farm_stop()
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        mode_value = "own" if mode == "own" else "visit"
+        try:
+            raw = self._farm_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.farmAutoStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.farmAutoStart({mode:'" + mode_value + "'}));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.farm_status.set("启动失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            message = str(data.get("message") or "") if isinstance(data, dict) else ""
+            try:
+                self.farm_status.set(message or "启动失败")
+            except tk.TclError:
+                pass
+            self._append_farm_log(message or "启动失败")
+            return
+        self._farm_running = True
+        self._farm_last = ""
+        try:
+            self.farm_own_btn.configure(state=tk.DISABLED)
+            self.farm_visit_btn.configure(state=tk.DISABLED)
+            self.farm_status.set("运行中…")
+        except tk.TclError:
+            pass
+        self._append_farm_log(
+            "开始收自己的菜" if mode_value == "own" else "开始偷菜/施肥（会快速拜访下一位好友）"
+        )
+        self.root.after(300, self._farm_poll)
+
+    def _farm_stop(self) -> None:
+        try:
+            self._farm_eval(
+                "(window.__zzAssist&&window.__zzAssist.farmAutoStop"
+                "&&window.__zzAssist.farmAutoStop(),'ok')"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        self._farm_running = False
+        self._farm_reset_buttons()
+        try:
+            self.farm_status.set("已停止")
+        except tk.TclError:
+            pass
+        self._append_farm_log("已停止农场自动")
+
+    def _farm_poll(self) -> None:
+        if not getattr(self, "_farm_running", False):
+            return
+        try:
+            raw = self._farm_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "return a&&a.farmAutoState?JSON.stringify(a.farmAutoState()):'{}';}"
+                "catch(e){return '{}'}})()"
+            )
+            state = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            if not isinstance(state, dict):
+                state = {}
+        except Exception as exc:  # noqa: BLE001
+            self._farm_running = False
+            self._farm_reset_buttons()
+            try:
+                self.farm_status.set("读取状态失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        error = str(state.get("error") or "")
+        if error:
+            self._farm_running = False
+            self._farm_reset_buttons()
+            try:
+                self.farm_status.set("停止：" + error)
+            except tk.TclError:
+                pass
+            self._append_farm_log("停止：" + error)
+            return
+        if not state.get("running"):
+            self._farm_running = False
+            self._farm_reset_buttons()
+            last = str(state.get("last") or "完成")
+            try:
+                self.farm_status.set("已结束：" + last)
+            except tk.TclError:
+                pass
+            self._append_farm_log("农场自动结束：" + last)
+            return
+        last = str(state.get("last") or "")
+        if last and last != self._farm_last:
+            self._farm_last = last
+            self._append_farm_log(last)
+        try:
+            steps = int(state.get("steps") or 0)
+        except (TypeError, ValueError):
+            steps = 0
+        action = str(state.get("action") or "")
+        mode = str(state.get("mode") or "")
+        text = ("收菜" if mode == "own" else "偷菜/施肥") + "：已处理 %d 次" % steps
+        if action:
+            text += " · " + action
+        if last:
+            text += " · " + last
+        try:
+            self.farm_status.set(text)
+        except tk.TclError:
+            pass
+        try:
+            self.root.after(700, self._farm_poll)
         except tk.TclError:
             pass
 
@@ -4856,6 +5057,15 @@ class AppUI:
             self.instruction_runner.stop()
             if getattr(self, "_plank_running", False):
                 self._stop_plank(quiet=True)
+            if getattr(self, "_farm_running", False):
+                try:
+                    self._farm_eval(
+                        "(window.__zzAssist&&window.__zzAssist.farmAutoStop"
+                        "&&window.__zzAssist.farmAutoStop(),'ok')"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                self._farm_running = False
             if not getattr(self, "_cmd_preset_loaded", False):
                 self._save_current_slot_into_memory()
             self._persist_slots()
