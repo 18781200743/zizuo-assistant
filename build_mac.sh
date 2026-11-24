@@ -21,7 +21,7 @@ CFT_PID=""
 if [ ! -s "$CFT_ZIP" ]; then
   CFT_JSON="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)"
   CFT_VER="$(printf '%s' "$CFT_JSON" | python -c "import sys,json;print(json.load(sys.stdin)['channels']['Stable']['version'])")"
-  echo "Chrome for Testing: $CFT_VER（后台下载，和 PyInstaller 并行）"
+  echo "Chrome for Testing: ${CFT_VER}（后台下载，和 PyInstaller 并行）"
   (
     curl -fsSL -o "$CFT_ZIP" \
       "https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/mac-x64/chrome-mac-x64.zip"
@@ -50,7 +50,7 @@ fi
 if [ ! -s "$CFT_ZIP" ]; then
   CFT_JSON="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)"
   CFT_VER="$(printf '%s' "$CFT_JSON" | python -c "import sys,json;print(json.load(sys.stdin)['channels']['Stable']['version'])")"
-  echo "Chrome for Testing: $CFT_VER（重新下载）"
+  echo "Chrome for Testing: ${CFT_VER}（重新下载）"
   curl -fsSL -o "$CFT_ZIP" \
     "https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/mac-x64/chrome-mac-x64.zip"
 fi
