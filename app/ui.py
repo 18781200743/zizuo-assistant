@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import os
 import json
 import queue
@@ -9,7 +10,7 @@ import threading
 import time
 import webbrowser
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Dict, List
 
 try:  # Windows 全局热键；macOS 上没有这个库，界面按钮照样能用
@@ -2207,6 +2208,12 @@ class AppUI:
         self._guild_teams_cache: Dict[tuple, Dict[str, Any]] = {}
         self._guild_teams_loading = False
         self._guild_teams_key = None
+        self._guild_exporting = False
+        self._guild_export_pending = False
+        self._guild_export_rows: List[Dict[str, Any]] = []
+        self._guild_export_index = 0
+        self._guild_export_errors: List[str] = []
+        self._guild_export_retry = 0
         self._maze_auto = False
         self._maze_last_stamp = ""
 
@@ -3557,10 +3564,18 @@ class AppUI:
             bar, textvariable=self._guild_camp_var, values=["全部", "我方", "敌方"],
             width=6, state="readonly",
         ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Button(bar, text="查询", width=8, command=self._guild_query).pack(side=tk.LEFT)
-        ttk.Button(bar, text="复制结果", width=9, command=self._guild_copy).pack(
-            side=tk.LEFT, padx=(6, 0)
+        self._guild_query_btn = ttk.Button(
+            bar, text="查询", width=8, command=self._guild_query
         )
+        self._guild_query_btn.pack(side=tk.LEFT)
+        self._guild_copy_btn = ttk.Button(
+            bar, text="复制结果", width=9, command=self._guild_copy
+        )
+        self._guild_copy_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._guild_export_btn = ttk.Button(
+            bar, text="全部导出", width=9, command=self._guild_export_all
+        )
+        self._guild_export_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         self._guild_status = tk.StringVar(value="点「查询」读取据点成员与战力（每方 1~13 号据点）")
         ttk.Label(
@@ -3599,7 +3614,7 @@ class AppUI:
         self._guild_text = text
         tree.bind("<<TreeviewSelect>>", self._guild_show_detail)
 
-    def _guild_query(self) -> None:
+    def _guild_query(self, export: bool = False) -> None:
         tree = getattr(self, "_guild_tree", None)
         if tree is None or not tree.winfo_exists():
             return
@@ -3608,10 +3623,15 @@ class AppUI:
                 self.start_assist()
             except Exception:  # noqa: BLE001
                 pass
+        if not export:
+            self._guild_export_pending = False
         camp = {"我方": 1, "敌方": 2}.get(self._guild_camp_var.get(), 0)
         result = self.assist.guild_intel_start(camp)
         if not result.get("ok"):
             self._guild_status.set("查询失败：%s" % (result.get("error") or "未知原因"))
+            if export:
+                self._guild_set_export_busy(False)
+                self._guild_export_pending = False
             return
         self._guild_status.set("查询中 0/%s…" % (result.get("total") or 26))
         if not getattr(self, "_guild_polling", False):
@@ -3635,6 +3655,9 @@ class AppUI:
             return
         self._guild_polling = False
         self._guild_render(state.get("rows") or [])
+        if getattr(self, "_guild_export_pending", False):
+            self._guild_export_pending = False
+            self.root.after(80, self._guild_start_export_teams)
 
     def _guild_render(self, rows: List[Dict[str, Any]]) -> None:
         tree = getattr(self, "_guild_tree", None)
@@ -3726,7 +3749,12 @@ class AppUI:
         loading = bool(getattr(self, "_guild_teams_loading", False)) and getattr(
             self, "_guild_teams_key", None
         ) == (camp_id, spot_id)
-        if members and cache is None and not getattr(self, "_guild_teams_loading", False):
+        if (
+            members
+            and cache is None
+            and not getattr(self, "_guild_teams_loading", False)
+            and not getattr(self, "_guild_exporting", False)
+        ):
             self._guild_start_teams(camp_id, spot_id)
             loading = True
         power, unset, has_real = self._guild_group_power(members)
@@ -3809,6 +3837,205 @@ class AppUI:
         else:
             self._guild_status.set("分队战力已读取")
         self._guild_show_detail()
+
+    def _guild_set_export_busy(self, busy: bool) -> None:
+        self._guild_exporting = bool(busy)
+        state = tk.DISABLED if busy else tk.NORMAL
+        for name in ("_guild_query_btn", "_guild_copy_btn", "_guild_export_btn"):
+            button = getattr(self, name, None)
+            if button is None:
+                continue
+            try:
+                button.configure(state=state)
+            except tk.TclError:
+                pass
+
+    def _guild_export_all(self) -> None:
+        """一键查询全部据点 + 每个成员的三个队战力，然后导出 CSV。"""
+        if getattr(self, "_guild_exporting", False):
+            return
+        self._guild_set_export_busy(True)
+        self._guild_export_pending = True
+        self._guild_export_rows = []
+        self._guild_export_index = 0
+        self._guild_export_errors = []
+        self._guild_export_retry = 0
+        try:
+            self._guild_camp_var.set("全部")
+        except tk.TclError:
+            pass
+        self._guild_status.set("准备导出：先查询全部据点…")
+        self._guild_query(export=True)
+
+    def _guild_start_export_teams(self) -> None:
+        rows = [
+            row for row in getattr(self, "_guild_rows", [])
+            if (row.get("members") or []) and not row.get("error")
+        ]
+        self._guild_export_rows = rows
+        self._guild_export_index = 0
+        self._guild_export_retry = 0
+        if not rows:
+            self._guild_finish_export()
+            return
+        self._guild_next_export_team()
+
+    def _guild_next_export_team(self) -> None:
+        rows = getattr(self, "_guild_export_rows", [])
+        index = getattr(self, "_guild_export_index", 0)
+        if index >= len(rows):
+            self._guild_finish_export()
+            return
+        row = rows[index]
+        camp = int(row.get("camp") or 0)
+        spot = int(row.get("id") or 0)
+        key = (camp, spot)
+        cache = getattr(self, "_guild_teams_cache", {})
+        if key in cache:
+            self._guild_export_index = index + 1
+            self._guild_export_retry = 0
+            self.root.after(15, self._guild_next_export_team)
+            return
+        result = self.assist.guild_teams_start(camp, spot)
+        if not result.get("ok"):
+            error = str(result.get("error") or "读取失败")
+            if "正在读取其他据点" in error and getattr(self, "_guild_export_retry", 0) < 40:
+                self._guild_export_retry += 1
+                self._guild_status.set("等待上一个据点读取完成…")
+                self.root.after(300, self._guild_next_export_team)
+                return
+            self._guild_export_errors.append("%s%d号：%s" % ("我方" if camp == 1 else "敌方", spot, error))
+            self._guild_export_index = index + 1
+            self._guild_export_retry = 0
+            self.root.after(30, self._guild_next_export_team)
+            return
+        self._guild_export_retry = 0
+        self._guild_status.set(
+            "正在读取分队 %d/%d 个据点（%s %d号）…"
+            % (index + 1, len(rows), "我方" if camp == 1 else "敌方", spot)
+        )
+        self.root.after(250, self._guild_poll_export_team)
+
+    def _guild_poll_export_team(self) -> None:
+        state = self.assist.guild_teams_state()
+        if not state:
+            self._guild_export_index += 1
+            self.root.after(50, self._guild_next_export_team)
+            return
+        if state.get("running"):
+            self._guild_status.set(
+                "正在读取分队 %d/%d 个据点，当前 %d/%d 人…"
+                % (
+                    getattr(self, "_guild_export_index", 0) + 1,
+                    len(getattr(self, "_guild_export_rows", [])),
+                    state.get("done") or 0,
+                    state.get("total") or 0,
+                )
+            )
+            self.root.after(300, self._guild_poll_export_team)
+            return
+        camp = int(state.get("camp") or 0)
+        spot = int(state.get("id") or 0)
+        if camp and spot:
+            self._guild_teams_cache[(camp, spot)] = state.get("teams") or {}
+        error = str(state.get("error") or "")
+        if error:
+            self._guild_export_errors.append(
+                "%s%d号：%s" % ("我方" if camp == 1 else "敌方", spot, error)
+            )
+        self._guild_export_index += 1
+        self.root.after(30, self._guild_next_export_team)
+
+    def _guild_finish_export(self) -> None:
+        self._guild_set_export_busy(False)
+        try:
+            self._guild_show_detail()
+        except tk.TclError:
+            pass
+        if not getattr(self, "_guild_rows", []):
+            self._guild_status.set("没有可导出的数据")
+            return
+        default_name = "公会战情报_%s.csv" % time.strftime("%Y%m%d_%H%M")
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="导出公会战情报",
+            defaultextension=".csv",
+            initialfile=default_name,
+            filetypes=[("CSV 文件", "*.csv"), ("所有文件", "*.*")],
+        )
+        if not path:
+            self._guild_status.set("已取消导出（数据已缓存，可直接选中据点查看）")
+            return
+        try:
+            members = self._guild_write_csv(path)
+        except OSError as exc:
+            self._guild_status.set("导出失败：%s" % exc)
+            messagebox.showerror("导出失败", str(exc), parent=self.root)
+            return
+        errors = len(getattr(self, "_guild_export_errors", []))
+        text = "已导出 %d 个据点 / %d 人" % (
+            len(getattr(self, "_guild_export_rows", [])), members
+        )
+        if errors:
+            text += "；%d 个据点读取失败" % errors
+        self._guild_status.set(text + "：" + path)
+
+    def _guild_write_csv(self, path: str) -> int:
+        total_members = 0
+        with open(path, "w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([
+                "阵营", "据点", "序号", "成员", "总战力",
+                "队1战力", "队2战力", "队3战力", "等级", "区服", "ID",
+            ])
+            for row in getattr(self, "_guild_rows", []):
+                camp = int(row.get("camp") or 0)
+                label = "我方" if camp == 1 else "敌方"
+                spot = int(row.get("id") or 0)
+                cache = getattr(self, "_guild_teams_cache", {}).get((camp, spot)) or {}
+                for index, member in enumerate(row.get("members") or [], 1):
+                    teams = cache.get(str(member.get("id"))) or []
+                    by_slot: Dict[int, Any] = {}
+                    for team in teams:
+                        if not isinstance(team, dict):
+                            continue
+                        try:
+                            slot = int(team.get("slot") or 0)
+                            by_slot[slot] = int(team.get("power") or 0)
+                        except (TypeError, ValueError):
+                            continue
+                    writer.writerow([
+                        label,
+                        spot,
+                        index,
+                        member.get("name") or "?",
+                        int(member.get("power") or 0),
+                        by_slot.get(1, ""),
+                        by_slot.get(2, ""),
+                        by_slot.get(3, ""),
+                        member.get("level") or 0,
+                        member.get("server") or "",
+                        member.get("id") or "",
+                    ])
+                    total_members += 1
+            writer.writerow([])
+            writer.writerow(["汇总"])
+            writer.writerow(["阵营", "人数", "真实总战力", "未配置人数"])
+            for camp in (1, 2):
+                members = [
+                    member
+                    for row in getattr(self, "_guild_rows", [])
+                    if int(row.get("camp") or 0) == camp
+                    for member in (row.get("members") or [])
+                ]
+                power, unset, _ = self._guild_group_power(members)
+                writer.writerow([
+                    "我方" if camp == 1 else "敌方",
+                    len(members),
+                    power,
+                    unset,
+                ])
+        return total_members
 
     def _guild_copy(self) -> None:
         rows = getattr(self, "_guild_rows", [])

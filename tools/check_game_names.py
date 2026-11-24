@@ -38,6 +38,7 @@ LOCAL_NAMES = {
     "CMD_KEY", "GAME_URL", "POLL_MS", "BOTH", "RGBA", "FLAT", "VERTICAL", "PIL",
     "LANCZOS", "NORMAL", "DISABLED", "DARK_TXT", "BG_TOP", "DARK_SUB", "HOME_W",
     "HOME_H", "INSERT", "CARD_BG", "TXT", "SUB", "APP", "UI", "OK", "ERR", "JSON",
+    "CSV",
     "HTTP", "HTTPS", "URL", "URI", "CPU", "GPU", "API", "SDK", "CDP", "DOM", "CSS",
     "HTML", "JS", "ID", "IDS", "IP", "TCP", "BOSS", "PVP", "PVE", "NPC", "GM",
     "FPS", "MS", "MAX", "MIN", "NONE", "NULL", "TRUE", "FALSE", "ADD", "DEL",
