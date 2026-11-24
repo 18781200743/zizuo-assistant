@@ -1467,7 +1467,6 @@
   function showFeature(key) {
     var features = [
       ["daily", "dailyPanel", "playDaily"],
-      ["arena", "arenaPanel", "playArena"],
       ["talisman", "talismanPanel", "playTalisman"],
       ["guild", "guildPanel", "playGuild"],
       ["maze", "mazePanel", "playMaze"]
@@ -1617,8 +1616,6 @@
     if (autoChestBtn) autoChestBtn.onclick = toggleAutoChest;
     var playDailyBtn = $("playDaily");
     if (playDailyBtn) playDailyBtn.onclick = function () { showFeature("daily"); };
-    var playArenaBtn = $("playArena");
-    if (playArenaBtn) playArenaBtn.onclick = function () { showFeature("arena"); };
     var playTalismanBtn = $("playTalisman");
     if (playTalismanBtn) playTalismanBtn.onclick = function () { showFeature("talisman"); };
     var playGuildBtn = $("playGuild");

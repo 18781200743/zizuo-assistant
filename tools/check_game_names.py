@@ -25,7 +25,6 @@ SCAN = [
     "app/assist_script.py",
     "app/game_assist.py",
     "app/chest_4758a.py",
-    "app/arena.py",
     "app/ui.py",
     "tools/gen_android_runner.py",
     "android_app/js/app.js",

@@ -40,7 +40,6 @@ from .instruction_library import (
     script_title,
 )
 from .instruction_runner import InstructionRunner
-from .arena import ArenaRunner
 from .chest_4758a import run_chest_4758a
 from .commands_store import SLOT_COUNT, load_slots, save_slots, set_slot, slot_label
 from .command_recorder import CommandRecorder
@@ -276,14 +275,6 @@ class AppUI:
             on_slot=self._on_instruction_slot,
         )
         self._cmd_events: "queue.Queue[tuple]" = queue.Queue()
-        self.arena_runner = ArenaRunner(
-            lambda: getattr(self.assist, "bridge", None),
-            log=self._arena_log,
-            on_finished=self._on_arena_finished,
-            on_state=self._on_arena_state,
-        )
-        self._arena_events: "queue.Queue[tuple]" = queue.Queue()
-        self._arena_last_action = ""
         # 开发模式：源码运行显示开发功能；打包成 exe 默认隐藏（--dev / ZIZUO_DEV=1 可强制打开）
         self.dev_mode = dev_mode()
         self.card_vars: Dict[str, tk.BooleanVar] = {}
@@ -294,7 +285,6 @@ class AppUI:
         self._build()
         try:
             self.root.after(150, self._pump_cmd_events)
-            self.root.after(200, self._pump_arena_events)
             self.root.after(300, self._pump_auto_chest_log)
         except tk.TclError:
             pass
@@ -2222,7 +2212,6 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
-            ("arena", "竞技场"),
             ("talisman", "护符升级"),
             ("guild", "公会情报"),
             ("maze", "公会迷宫"),
@@ -2254,75 +2243,6 @@ class AppUI:
         talisman = ttk.LabelFrame(content, text="护符升级", padding=10)
         ttk.Label(talisman, text="护符升级：下一步实现。").pack(anchor=tk.W)
         self._play_panels["talisman"] = talisman
-
-        # ---- 荣耀竞技场 ----
-        arena = ttk.LabelFrame(content, text="荣耀竞技场（免费直接结算，可花门票/绿钻继续）", padding=8)
-        self.arena_status = tk.StringVar(value="点「查询状态」查看次数/阵容/对手")
-        ttk.Label(
-            arena, textvariable=self.arena_status, foreground="#1a4d8f",
-            wraplength=440, justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(0, 6))
-
-        count_row = ttk.Frame(arena)
-        count_row.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(count_row, text="挑战次数（0=免费次数全跑）").pack(side=tk.LEFT)
-        self.arena_count_var = tk.StringVar(value="0")
-        self.arena_count_box = ttk.Spinbox(
-            count_row, from_=0, to=99, width=5, textvariable=self.arena_count_var
-        )
-        self.arena_count_box.pack(side=tk.LEFT, padx=6)
-
-        self.arena_fast_var = tk.BooleanVar(value=True)
-        self.arena_fast_check = ttk.Checkbutton(
-            arena,
-            text="极速模式（免费次数直接结算，不进战斗）",
-            variable=self.arena_fast_var,
-            command=self._update_arena_button,
-        )
-        self.arena_fast_check.pack(anchor=tk.W, pady=(0, 2))
-        self.arena_paid_var = tk.BooleanVar(value=True)
-        self.arena_paid_check = ttk.Checkbutton(
-            arena,
-            text="免费次数用完允许付费（门票优先，其次绿钻，正常战斗）",
-            variable=self.arena_paid_var,
-        )
-        self.arena_paid_check.pack(anchor=tk.W, pady=(0, 2))
-        self.arena_battle_var = tk.BooleanVar(value=False)
-        self.arena_battle_check = ttk.Checkbutton(
-            arena,
-            text="免费的极速结算失败时允许打正常战斗（默认关闭）",
-            variable=self.arena_battle_var,
-        )
-        self.arena_battle_check.pack(anchor=tk.W, pady=(0, 2))
-        ttk.Label(
-            arena,
-            text="免费次数走直接结算、不进战斗；免费用完后按门票/绿钻正常战斗。",
-            foreground="#7a5b00",
-            wraplength=440,
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(0, 4))
-
-        btns = ttk.Frame(arena)
-        btns.pack(fill=tk.X, pady=(0, 6))
-        self.arena_probe_btn = ttk.Button(btns, text="查询状态", width=10, command=self.arena_probe)
-        self.arena_probe_btn.pack(side=tk.LEFT, padx=(0, 4))
-        self.arena_run_btn = ttk.Button(
-            btns, text="开始极速竞技", width=14, style="Accent.TButton", command=self.toggle_arena
-        )
-        self.arena_run_btn.pack(side=tk.LEFT)
-
-        log_frame = ttk.Frame(arena)
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        self.arena_log_text = tk.Text(
-            log_frame, height=8, wrap=tk.WORD, state=tk.DISABLED,
-            font=("Microsoft YaHei UI", 9), background="#f8fafc",
-        )
-        sb = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.arena_log_text.yview)
-        self.arena_log_text.configure(yscrollcommand=sb.set)
-        self.arena_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sb.pack(side=tk.RIGHT, fill=tk.Y)
-        self._append_arena_log("荣耀竞技场：免费次数直接结算不进战斗；免费用完后按门票/绿钻正常战斗。")
-        self._play_panels["arena"] = arena
 
         # ---- 公会情报（内嵌）----
         guild = ttk.LabelFrame(content, text="公会情报", padding=8)
@@ -2368,193 +2288,6 @@ class AppUI:
                 self.root.after(800, self._maze_auto_poll)
         else:
             self._maze_auto = False
-
-    def _update_arena_button(self) -> None:
-        if getattr(self, "arena_runner", None) is not None and self.arena_runner.running:
-            return
-        try:
-            self.arena_run_btn.configure(
-                text="开始极速竞技" if self.arena_fast_var.get() else "开始竞技"
-            )
-        except tk.TclError:
-            pass
-
-    def _append_arena_log(self, text: str) -> None:
-        widget = getattr(self, "arena_log_text", None)
-        if widget is None:
-            return
-        try:
-            state = str(widget.cget("state"))
-            if state == tk.DISABLED:
-                widget.configure(state=tk.NORMAL)
-            widget.insert(tk.END, str(text) + "\n")
-            widget.see(tk.END)
-            if state == tk.DISABLED:
-                widget.configure(state=tk.DISABLED)
-        except tk.TclError:
-            pass
-
-    def _arena_log(self, text: str) -> None:
-        self._arena_events.put(("log", str(text)))
-
-    def _on_arena_finished(self, ok: bool, message: str) -> None:
-        self._arena_events.put(("done", ok, message))
-
-    def _on_arena_state(self, state: Dict[str, Any]) -> None:
-        self._arena_events.put(("state", dict(state or {})))
-
-    def _pump_arena_events(self) -> None:
-        while True:
-            try:
-                event = self._arena_events.get_nowait()
-            except queue.Empty:
-                break
-            if not event:
-                continue
-            kind = event[0]
-            try:
-                if kind == "log":
-                    self._append_arena_log(str(event[1]))
-                elif kind == "state":
-                    st = event[1] if isinstance(event[1], dict) else {}
-                    if st.get("running"):
-                        total = int(st.get("totalFree") or 0)
-                        done = int(st.get("challenges") or 0)
-                        free = int(st.get("free") or 0)
-                        action = str(st.get("action") or "")
-                        text = "运行中：已挑战 %d" % done
-                        if total:
-                            text += "/%d" % total
-                        text += " 次，剩余免费 %d" % free
-                        if action:
-                            text += " · " + action
-                        self.arena_status.set(text)
-                elif kind == "done":
-                    _, ok, message = event
-                    self._append_arena_log(("✔ " if ok else "■ ") + str(message or ""))
-                    self.arena_status.set(("完成：" if ok else "停止：") + str(message or ""))
-                    try:
-                        self._update_arena_button()
-                        self.arena_probe_btn.configure(state=tk.NORMAL)
-                        self.arena_count_box.configure(state=tk.NORMAL)
-                        self.arena_fast_check.configure(state=tk.NORMAL)
-                        self.arena_paid_check.configure(state=tk.NORMAL)
-                        self.arena_battle_check.configure(state=tk.NORMAL)
-                    except tk.TclError:
-                        pass
-            except tk.TclError:
-                pass
-        try:
-            self.root.after(200, self._pump_arena_events)
-        except tk.TclError:
-            pass
-
-    def arena_probe(self) -> None:
-        if self.arena_runner.running:
-            self.arena_status.set("竞技场正在运行，先停止再查询")
-            return
-        try:
-            data = self.arena_runner.probe(load_mapping())
-        except Exception as exc:  # noqa: BLE001
-            self.arena_status.set("查询失败：%s" % exc)
-            return
-        if data.get("error"):
-            self.arena_status.set("查询失败：%s" % data.get("error"))
-            return
-        state = "主城" if data.get("main") else "非主城"
-        if data.get("transitioning"):
-            state += " · 过场中"
-        if data.get("resultOpen"):
-            state += " · 结算页未关"
-        rank = data.get("rank") or ""
-        ticket_text = ""
-        if data.get("tickets") is not None:
-            ticket_text = " · 门票 %s（每次 %s）" % (
-                data.get("tickets"),
-                data.get("ticketCost") or 0,
-            )
-        auto_text = ""
-        if data.get("autoTotal") is not None:
-            auto_text = " · 自动次数 %s/%s" % (
-                data.get("autoRemaining") or 0,
-                data.get("autoTotal") or 0,
-            )
-        self.arena_status.set(
-            "免费 %s 次 · 阵容 %s 人 · 对手 %s 个（%s-%s分）%s%s%s · %s"
-            % (
-                data.get("free", 0),
-                data.get("lineup", 0),
-                data.get("opponents", 0),
-                data.get("minPoints", 0),
-                data.get("maxPoints", 0),
-                (" · " + rank) if rank else "",
-                ticket_text,
-                auto_text,
-                state,
-            )
-        )
-
-    def toggle_arena(self) -> None:
-        if self.arena_runner.running:
-            self.arena_runner.stop()
-            self.arena_status.set("正在停止…（当前这场结束后停止）")
-            return
-        if not self.assist.running:
-            try:
-                self.start_assist()
-            except Exception:  # noqa: BLE001
-                pass
-        mapping = load_mapping()
-        try:
-            build = self.assist.current_build()
-        except Exception:  # noqa: BLE001
-            build = ""
-        if build:
-            if build not in (mapping.get("builds") or {}):
-                messagebox.showinfo("荣耀竞技场", "游戏版本 %s 未适配竞技场" % build)
-                return
-            mapping["current"] = build
-        try:
-            count = int(float(str(self.arena_count_var.get()).strip() or "0"))
-        except (TypeError, ValueError):
-            messagebox.showerror("荣耀竞技场", "挑战次数必须是数字")
-            return
-        count = max(0, min(99, count))
-        fast = bool(self.arena_fast_var.get())
-        allow_paid = bool(self.arena_paid_var.get())
-        allow_battle = bool(self.arena_battle_var.get())
-        try:
-            self.arena_runner.start(
-                mapping,
-                count=count,
-                fast=fast,
-                allow_paid=allow_paid,
-                allow_battle=allow_battle,
-            )
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("荣耀竞技场", str(exc))
-            return
-        self._append_arena_log(
-            "—— 开始荣耀竞技场（%s%s%s）——"
-            % (
-                "极速" if fast else "正常战斗",
-                "，允许付费" if allow_paid else "",
-                "，免费极速失败可进战斗" if allow_battle else "，免费极速失败即停止",
-            )
-        )
-        self.arena_status.set(
-            "运行中：免费直接结算%s"
-            % ("，免费用完继续付费战斗" if allow_paid else "")
-        )
-        try:
-            self.arena_run_btn.configure(text="停止")
-            self.arena_probe_btn.configure(state=tk.DISABLED)
-            self.arena_count_box.configure(state=tk.DISABLED)
-            self.arena_fast_check.configure(state=tk.DISABLED)
-            self.arena_paid_check.configure(state=tk.DISABLED)
-            self.arena_battle_check.configure(state=tk.DISABLED)
-        except tk.TclError:
-            pass
 
     # ------------------------------------------------------------ 槽位
 
@@ -4932,7 +4665,6 @@ class AppUI:
             if self._cmd_recorder.recording:
                 self._cmd_recorder.stop()
             self.instruction_runner.stop()
-            self.arena_runner.stop()
             if not getattr(self, "_cmd_preset_loaded", False):
                 self._save_current_slot_into_memory()
             self._persist_slots()
