@@ -31,7 +31,13 @@ from .gacha_store import (
     refresh_card_catalog,
     ui_dir,
 )
-from .game_window import GAME_WINDOW_TITLE, SIZE_PRESETS, open_game_window
+from .game_window import (
+    GAME_WINDOW_TITLE,
+    SIZE_PRESETS,
+    open_game_window,
+    terminate_game_window,
+)
+from .cdp_click import find_page_ws
 from .game_assist import GameAssist, load_mapping
 from .instruction_library import (
     CATEGORY_ALL,
@@ -4919,17 +4925,21 @@ class AppUI:
         self.window_var.set(GAME_WINDOW_TITLE)
         self.config["target_window_title"] = GAME_WINDOW_TITLE
 
+        backend = str(self.config.get("game_window_backend") or "auto").strip().lower()
+        if backend not in ("auto", "webview2", "edge", "chrome", "browser"):
+            backend = "auto"
+        launch_backend = "webview2" if backend == "auto" else backend
+
         if self._game_proc is not None and self._game_proc.poll() is None:
             self.append_log("已有游戏窗口进程，正在重新打开…")
-            try:
-                self._game_proc.terminate()
-            except Exception:  # noqa: BLE001
-                pass
+            terminate_game_window(self._game_proc)
 
         try:
             self._game_proc = open_game_window(
                 url=url, width=width, height=height,
                 browser=str(self.config.get("browser_path") or "").strip() or None,
+                backend=launch_backend,
+                port=int(getattr(self.assist.bridge, "port", 9229)),
             )
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("打开失败", f"无法打开游戏窗口：{exc}")
@@ -4947,6 +4957,63 @@ class AppUI:
             "平时可拖拽缩放；抽卡/存档运行时会恢复并锁定尺寸；"
             "已开启调试端口用于稳定点击"
         )
+        if launch_backend == "webview2":
+            self.root.after(1200, lambda: self._watch_game_port(self._game_proc, 0, "webview2"))
+        else:
+            self.root.after(1200, lambda: self._watch_game_port(self._game_proc, 0, launch_backend))
+
+    def _watch_game_port(self, proc, tries: int = 0, backend: str = "webview2") -> None:
+        """Win10 兼容：WebView2 没开 9229 时，自动切到 Edge/Chrome 窗口。"""
+        if proc is None or proc is not getattr(self, "_game_proc", None):
+            return
+        if proc.poll() is not None:
+            if backend == "webview2" and tries <= 3:
+                self._open_edge_fallback(proc)
+            return
+        try:
+            ready = bool(find_page_ws(int(getattr(self.assist.bridge, "port", 9229))))
+        except Exception:  # noqa: BLE001
+            ready = False
+        if ready:
+            if tries > 0:
+                self.append_log("游戏窗口调试端口已就绪")
+            return
+        if tries < 15:
+            self.root.after(1000, lambda: self._watch_game_port(proc, tries + 1, backend))
+            return
+        if backend != "webview2":
+            self.append_log("兼容模式仍未连上调试端口：请检查防火墙，或关闭游戏窗重开")
+            return
+        self._open_edge_fallback(proc)
+
+    def _open_edge_fallback(self, proc) -> None:
+        """WebView2 不可用时，用 Edge/Chrome 窗口打开同一游戏。"""
+        self.append_log("WebView2 没有开启调试端口（Win10 常见问题），自动切换 Edge 兼容模式…")
+        try:
+            width, height = self._read_game_size()
+        except ValueError:
+            width, height = 390, 844
+        url = str(self.config.get("game_url") or DEFAULT_GAME_URL)
+        terminate_game_window(proc)
+        try:
+            self._game_proc = open_game_window(
+                url=url, width=width, height=height,
+                browser=str(self.config.get("browser_path") or "").strip() or None,
+                backend="edge",
+                port=int(getattr(self.assist.bridge, "port", 9229)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(
+                "Win10 兼容模式失败",
+                "%s\n\n请安装 Microsoft Edge 或 Google Chrome 后再试。" % exc,
+            )
+            return
+        self.append_log("已切换到 Edge 兼容模式，请在新窗口登录游戏")
+        try:
+            self.assist.start()
+        except Exception:  # noqa: BLE001
+            pass
+        self.root.after(1200, lambda: self._watch_game_port(self._game_proc, 0, "edge"))
 
     def open_game_browser(self) -> None:
         url = str(self.config.get("game_url") or DEFAULT_GAME_URL).strip() or DEFAULT_GAME_URL

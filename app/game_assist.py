@@ -179,7 +179,7 @@ class AssistBridge:
             return False
         ws_url = find_page_ws(self.port)
         if not ws_url:
-            self.last_error = "未连上游戏窗口（9229 调试端口没响应）：点「重新连接」，或用「打开游戏窗口」重开一次"
+            self.last_error = "未连上游戏窗口（9229 调试端口没响应）：点「重新连接」，或用「打开游戏窗口」重开一次；Win10 会自动尝试 Edge 兼容模式"
             return False
         try:
             ws = websocket.create_connection(ws_url, timeout=CALL_TIMEOUT)

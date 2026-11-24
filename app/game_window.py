@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -142,6 +145,174 @@ WECHAT_LOGIN_JS = r"""
 
 
 
+WINDOWS_CHROMIUM_PATHS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+]
+
+
+def windows_chromium_candidates() -> List[str]:
+    """Edge / Chrome 的常见安装路径（含当前用户安装）。"""
+    out = list(WINDOWS_CHROMIUM_PATHS)
+    local = os.environ.get("LOCALAPPDATA") or ""
+    if local:
+        out.extend([
+            str(Path(local) / "Microsoft" / "Edge" / "Application" / "msedge.exe"),
+            str(Path(local) / "Google" / "Chrome" / "Application" / "chrome.exe"),
+        ])
+    return out
+
+
+def windows_chromium_path() -> Optional[str]:
+    for item in windows_chromium_candidates():
+        try:
+            if Path(item).exists():
+                return item
+        except OSError:
+            continue
+    return None
+
+
+def _cleanup_profile_processes(image_name: str, profile: str) -> None:
+    """清掉上次崩溃遗留、仍占用同一用户目录的浏览器进程（Win10 常见）。"""
+    if sys.platform != "win32" or not profile:
+        return
+    marker = profile.lower()
+    try:
+        raw = subprocess.check_output(
+            ["wmic", "process", "where", "name='%s'" % image_name,
+             "get", "ProcessId,CommandLine", "/format:csv"],
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+        text = raw.decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001
+        return
+    for line in text.splitlines():
+        if marker not in line.lower():
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        pid = parts[-1] if parts else ""
+        if not pid.isdigit():
+            continue
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", pid, "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=6,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _keep_window_title(pid: int, title: str) -> None:
+    """Edge/Chrome 的 --app 窗口标题默认是网页标题，持续改回固定标题。"""
+    if sys.platform != "win32":
+        return
+
+    def worker() -> None:
+        try:
+            import win32gui
+            import win32process
+        except Exception:  # noqa: BLE001
+            return
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            matched = []
+
+            def callback(hwnd, _):
+                try:
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return
+                    cls = win32gui.GetClassName(hwnd)
+                    if "Chrome_WidgetWin" not in cls:
+                        return
+                    _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if int(win_pid) != int(pid):
+                        return
+                    if win32gui.GetWindowText(hwnd):
+                        matched.append(hwnd)
+                except Exception:  # noqa: BLE001
+                    return
+
+            try:
+                win32gui.EnumWindows(callback, None)
+                for hwnd in matched:
+                    win32gui.SetWindowText(hwnd, title)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _launch_windows_chromium(
+    url: str,
+    width: int,
+    height: int,
+    user_agent: str,
+    browser: Optional[str] = None,
+    port: int = 9229,
+) -> subprocess.Popen:
+    """Win10 兼容模式：用 Edge/Chrome 的独立 app 窗口 + 9229 调试端口。"""
+    exe = (browser or "").strip() or windows_chromium_path()
+    if not exe or not Path(exe).exists():
+        tried = "\n".join("- " + item for item in windows_chromium_candidates()[:6])
+        raise RuntimeError(
+            "没有找到 Microsoft Edge 或 Google Chrome。\n"
+            "请先安装 Edge / Chrome，再点「打开游戏窗口」。\n"
+            "如果已经装了，可以在 config.json 里把 browser_path 填成浏览器的 exe 路径。\n"
+            "已检查：\n" + tried
+        )
+    from .config_store import project_root
+
+    name = "edge-profile" if "msedge" in Path(exe).name.lower() else "chrome-profile"
+    profile = project_root() / "saves" / name
+    profile.mkdir(parents=True, exist_ok=True)
+    _cleanup_profile_processes(Path(exe).name, str(profile))
+    cmd = [
+        exe,
+        f"--remote-debugging-port={int(port)}",
+        "--remote-allow-origins=*",
+        f"--user-data-dir={profile}",
+        f"--app={url}",
+        f"--window-size={int(width)},{int(height)}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion",
+        f"--user-agent={user_agent}",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _keep_window_title(proc.pid, GAME_WINDOW_TITLE)
+    return proc
+
+
+def terminate_game_window(proc: Optional[subprocess.Popen]) -> None:
+    """结束游戏窗口及其子进程（WebView2/Edge 子进程）。"""
+    if proc is None:
+        return
+    if proc.poll() is not None:
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+    except Exception:  # noqa: BLE001
+        try:
+            proc.terminate()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def webview_storage_dir() -> Path:
     """持久化 WebView2 用户数据（Cookie/登录态），类似参考脚本的 config/web。"""
     from .config_store import project_root
@@ -151,9 +322,21 @@ def webview_storage_dir() -> Path:
     return path
 
 
-def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
+def _run_window(
+    url: str,
+    width: int,
+    height: int,
+    user_agent: str,
+    backend: str = "webview2",
+    port: int = 9229,
+) -> None:
     if IS_MAC:
         _launch_mac_chromium(url, width, height, user_agent)
+        return
+
+    backend = (backend or "webview2").strip().lower()
+    if backend in ("edge", "chrome", "browser"):
+        _launch_windows_chromium(url, width, height, user_agent)
         return
 
     import os
@@ -167,7 +350,7 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
     #   --disable-features=CalculateNativeWinOcclusion 不让 Windows 把窗口判成不可见
     # 注意：Chrome 只认最后一个 --disable-features，所以两个特性写在同一个参数里。
     browser_args = (
-        "--remote-debugging-port=9229 --remote-allow-origins=*"
+        f"--remote-debugging-port={int(port)} --remote-allow-origins=*"
         " --disable-background-timer-throttling"
         " --disable-backgrounding-occluded-windows"
         " --disable-renderer-backgrounding"
@@ -194,6 +377,7 @@ def _run_window(url: str, width: int, height: int, user_agent: str) -> None:
     width = max(280, int(width))
     height = max(400, int(height))
     storage = str(webview_storage_dir())
+    _cleanup_profile_processes("msedgewebview2.exe", storage)
 
     window = webview.create_window(
         f"{GAME_WINDOW_TITLE} [{width}x{height}]",
@@ -304,13 +488,20 @@ def open_game_window(
     height: int = 844,
     user_agent: Optional[str] = None,
     browser: Optional[str] = None,
+    backend: str = "webview2",
+    port: int = 9229,
 ) -> subprocess.Popen:
     """用独立进程打开游戏窗，不阻塞主界面。"""
+    ua = user_agent or MOBILE_UA
+    backend = (backend or "webview2").strip().lower()
+    if backend not in ("auto", "webview2", "edge", "chrome", "browser"):
+        backend = "webview2"
     if IS_MAC:
-        return _launch_mac_chromium(url, width, height, user_agent or MOBILE_UA, browser)
+        return _launch_mac_chromium(url, width, height, ua, browser)
+    if backend in ("edge", "chrome", "browser"):
+        return _launch_windows_chromium(url, width, height, ua, browser, port)
     from .config_store import project_root
 
-    ua = user_agent or MOBILE_UA
     root = project_root()
     if getattr(sys, "frozen", False):
         # PyInstaller：复用同一 exe
@@ -325,6 +516,10 @@ def open_game_window(
             str(int(height)),
             "--ua",
             ua,
+            "--backend",
+            backend,
+            "--port",
+            str(int(port)),
         ]
     else:
         cmd = [
@@ -339,6 +534,10 @@ def open_game_window(
             str(int(height)),
             "--ua",
             ua,
+            "--backend",
+            backend,
+            "--port",
+            str(int(port)),
         ]
     return subprocess.Popen(cmd, cwd=str(root))
 
@@ -349,8 +548,10 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=390)
     parser.add_argument("--height", type=int, default=844)
     parser.add_argument("--ua", default=MOBILE_UA)
+    parser.add_argument("--backend", default="webview2")
+    parser.add_argument("--port", type=int, default=9229)
     args = parser.parse_args()
-    _run_window(args.url, args.width, args.height, args.ua)
+    _run_window(args.url, args.width, args.height, args.ua, args.backend, args.port)
 
 
 if __name__ == "__main__":

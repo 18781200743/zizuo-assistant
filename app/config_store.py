@@ -54,6 +54,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "game_url": "https://mprogram.boomegg.cn/box/game/wx77200645d1c7f35f/h5?appid=wx77200645d1c7f35f&game_platform=h5",
     "game_width": 390,
     "game_height": 844,
+    # 游戏窗后端：auto=先 WebView2，9229 起不来自动切 Edge；edge/chrome=直接用浏览器窗口
+    "game_window_backend": "auto",
     # 打开游戏的方式：ask=每次问 / builtin=内置游戏窗口 / browser=系统浏览器
     "game_open_mode": "ask",
     "selected_slot": 1,
