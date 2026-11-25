@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import os
 import json
 import queue
@@ -76,6 +77,8 @@ GACHA_QUALITY = {
     82005: 5, 83003: 5, 83027: 5, 83030: 5, 83031: 5,
     84003: 5, 84005: 5, 84009: 5, 84011: 5, 84014: 5, 84019: 5,
 }
+
+BG_LOCK_SHA256 = hashlib.sha256("qdcm123".encode("utf-8")).hexdigest()
 
 DEFAULT_FIXED_HEROES = [
     (84007, "敖丙"),
@@ -1017,6 +1020,9 @@ class AppUI:
     HOME_W, HOME_H = 1152.0, 2048.0
 
     def _home_bg_custom_path(self):
+        # 人物背景需要本次启动内解锁过才显示；默认背景不受影响
+        if not getattr(self, "_bg_unlocked", False):
+            return ""
         try:
             ui = self.config.get("ui") or {}
             path = str(ui.get("bg_image") or "").strip()
@@ -1064,6 +1070,8 @@ class AppUI:
         return photo
 
     def _pick_home_bg(self) -> None:
+        if not self._ask_bg_password():
+            return
         path = filedialog.askopenfilename(
             parent=self.root,
             title="选择主页背景图片",
@@ -1105,6 +1113,19 @@ class AppUI:
         self._draw_home()
         self.append_log("主页背景已更换：%s" % target)
 
+    def _ask_bg_password(self) -> bool:
+        """人物背景需要密码才能使用；默认背景不需要。"""
+        text = simpledialog.askstring(
+            "人物背景已加密", "请输入密码：", show="*", parent=self.root,
+        )
+        if text is None:
+            return False
+        if hashlib.sha256(str(text).strip().encode("utf-8")).hexdigest() == BG_LOCK_SHA256:
+            self._bg_unlocked = True
+            return True
+        messagebox.showerror("人物背景已加密", "密码不对")
+        return False
+
     def _home_bg_options(self):
         folder = os.path.join(project_root(), "saves", "backgrounds")
         items = [""]
@@ -1127,6 +1148,8 @@ class AppUI:
         except ValueError:
             index = -1
         target = options[(index + 1) % len(options)]
+        if target and not self._ask_bg_password():
+            return
         try:
             ui = self.config.get("ui")
             if not isinstance(ui, dict):
