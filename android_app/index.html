@@ -490,7 +490,6 @@
     <div class="grid cats">
       <button class="btn cat" id="catMap">地图 / 红包</button>
       <button class="btn cat warn" id="catRevive">复活 / 闪现</button>
-      <button class="btn cat danger" id="catCombat">战斗参数</button>
       <button class="btn cat" id="catGacha">抽卡</button>
       <div class="cat-pair">
         <button class="btn cat" id="catCmd">运行命令</button>
@@ -537,20 +536,6 @@
       </div>
       <div class="info" id="blinkInfo">点「刷新怪物」，选中一只再点「闪现」</div>
       <div class="monster-list" id="monsterList"></div>
-    </div>
-
-    <div class="sec" id="secCombat">
-      <div class="sec-title">战斗参数（会被服务端校验，默认关）</div>
-      <div class="row"><span>英雄倍伤</span><input class="num" id="dmgVal" type="number" value="2" step="0.5"><span>倍</span><button class="btn danger sm" id="fDmg">开启</button></div>
-      <div class="row"><span>英雄免伤</span><input class="num" id="shieldVal" type="number" value="100" step="5"><span>%</span><button class="btn danger sm" id="fShield">开启</button></div>
-      <div class="row"><span>技能冷却</span><input class="num" id="cdVal" type="number" value="3" step="0.5"><span>秒</span><button class="btn danger sm" id="fCd">开启</button></div>
-      <div class="row"><span>视野</span>
-        <select class="num sel" id="visionVal">
-          <option value="0">不让怪发现</option>
-          <option value="-1">关闭</option>
-        </select>
-        <button class="btn danger sm" id="fVision">应用</button>
-      </div>
     </div>
 
     <div class="sec" id="secGacha">

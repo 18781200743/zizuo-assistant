@@ -1602,7 +1602,6 @@ class AppUI:
         items = [
             ("地图 / 红包", "map", "teal"),
             ("复活 / 闪现", "revive", "orange"),
-            ("战斗参数", "combat", "red"),
             ("抽卡", "gacha", "teal"),
             ("运行命令", "commands", "teal"),
             ("功能玩法", "play", "red"),
@@ -1960,7 +1959,6 @@ class AppUI:
             "red": free,
             "revive": revive,
             "blink": blink,
-            "combat": combat,
         }
 
     def _show_tool(self, key: str) -> None:

@@ -2458,7 +2458,6 @@
     var cats = [
       ["catMap", "secMap"],
       ["catRevive", "secRevive"],
-      ["catCombat", "secCombat"],
       ["catGacha", "secGacha"],
       ["catCmd", "secCmd"],
       ["catPlay", "secPlay"]
