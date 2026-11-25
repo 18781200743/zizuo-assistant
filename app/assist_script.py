@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 155
+RUNTIME_VERSION = 156
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 155
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 155;
+  const VERSION = 156;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5710,6 +5710,7 @@ RUNTIME_JS = r"""
     noVisitTries: 0, noActionTries: 0, noActionStreak: 0, dryRun: false,
     farmKey: '', didSteal: false, didHelp: false,
     visited: Object.create(null), pendingKey: '', nextMisses: 0,
+    stealCount: 0, helpCount: 0, nextCount: 0,
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
@@ -5916,6 +5917,9 @@ RUNTIME_JS = r"""
       didHelp: farmAuto.didHelp,
       noActionStreak: farmAuto.noActionStreak,
       counters: farmAuto.counters,
+      stealCount: farmAuto.stealCount || 0,
+      helpCount: farmAuto.helpCount || 0,
+      nextCount: farmAuto.nextCount || 0,
       ownMature: farmAuto.ownMature,
       emptyPlots: farmAuto.emptyPlots,
       nextOwnAt: farmAuto.nextOwnAt,
@@ -6150,6 +6154,7 @@ RUNTIME_JS = r"""
       farmAuto.last = buttons.stealText || '一键偷菜';
       farmClick('oneKeyStealBtn');
       farmAuto.didSteal = true;
+      farmAuto.stealCount += 1;
       farmAuto.noActionStreak = 0;
       farmAuto.steps += 1;
       farmAuto.busyUntil = Date.now() + 2000;
@@ -6161,6 +6166,7 @@ RUNTIME_JS = r"""
       farmAuto.last = buttons.helpText || '一键施肥';
       farmClick('FarmOperationButton');
       farmAuto.didHelp = true;
+      farmAuto.helpCount += 1;
       farmAuto.noActionStreak = 0;
       farmAuto.steps += 1;
       farmAuto.busyUntil = Date.now() + 2000;
@@ -6197,6 +6203,7 @@ RUNTIME_JS = r"""
       farmAuto.last = '快速拜访下一位好友…';
       farmClick('GoVisitNextoneBtn');
       farmAuto.pendingKey = key;
+      farmAuto.nextCount += 1;
       farmAuto.steps += 1;
       farmAuto.noActionTries = 0;
       farmAuto.busyUntil = Date.now() + 2500;
@@ -6324,6 +6331,9 @@ RUNTIME_JS = r"""
     farmAuto.visited = Object.create(null);
     farmAuto.pendingKey = '';
     farmAuto.nextMisses = 0;
+    farmAuto.stealCount = 0;
+    farmAuto.helpCount = 0;
+    farmAuto.nextCount = 0;
     farmAuto.phase = visiting ? 'visit' : '';
     farmAuto.ownMature = 0;
     farmAuto.emptyPlots = 0;

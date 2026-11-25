@@ -2334,6 +2334,10 @@ class AppUI:
             farm_btns, text="停止", width=7, command=self._farm_stop,
         )
         self.farm_stop_btn.pack(side=tk.LEFT)
+        self.farm_stats = tk.StringVar(value="本次：偷菜 0 · 施肥 0 · 拜访 0")
+        ttk.Label(
+            farm, textvariable=self.farm_stats, foreground="#4b5563",
+        ).pack(anchor=tk.W, pady=(0, 2))
         self._farm_running = False
         self._farm_last = ""
         self._play_panels["farm"] = farm
@@ -2602,6 +2606,10 @@ class AppUI:
         self._farm_running = True
         self._farm_last = ""
         try:
+            self.farm_stats.set("本次：偷菜 0 · 施肥 0 · 拜访 0")
+        except tk.TclError:
+            pass
+        try:
             self.farm_auto_btn.configure(state=tk.DISABLED)
             self.farm_own_btn.configure(state=tk.DISABLED)
             self.farm_visit_btn.configure(state=tk.DISABLED)
@@ -2629,6 +2637,25 @@ class AppUI:
         except tk.TclError:
             pass
 
+    def _farm_show_stats(self, state: Dict[str, Any]) -> None:
+        try:
+            if not isinstance(state, dict):
+                return
+            steal = int(state.get("stealCount") or 0)
+            help_count = int(state.get("helpCount") or 0)
+            visits = int(state.get("nextCount") or 0)
+            text = "本次：偷菜 %d · 施肥 %d · 拜访 %d" % (steal, help_count, visits)
+            counters = state.get("counters") or {}
+            mode = str(state.get("mode") or "")
+            if mode != "own" and isinstance(counters, dict) and counters.get("known"):
+                text += " · 剩 偷%d/肥%d" % (
+                    int(counters.get("steal") or 0),
+                    int(counters.get("fertilize") or 0),
+                )
+            self.farm_stats.set(text)
+        except (tk.TclError, TypeError, ValueError):
+            pass
+
     def _farm_poll(self) -> None:
         if not getattr(self, "_farm_running", False):
             return
@@ -2641,6 +2668,7 @@ class AppUI:
             state = json.loads(raw) if isinstance(raw, str) else (raw or {})
             if not isinstance(state, dict):
                 state = {}
+            self._farm_show_stats(state)
         except Exception:  # noqa: BLE001
             self._farm_running = False
             self._farm_reset_buttons()
