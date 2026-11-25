@@ -2218,6 +2218,7 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
+            ("tap", "点交互提示"),
             ("arena", "荣耀竞技场"),
             ("rogue", "杀戮尖塔"),
             ("plank", "跳一跳"),
@@ -2291,6 +2292,36 @@ class AppUI:
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         self._play_panels["daily"] = daily
+
+        # ---- 点交互提示（屏幕中心上方） ----
+        tap = ttk.LabelFrame(content, text="点交互提示（英雄头顶）", padding=8)
+        tk.Label(
+            tap,
+            text="闪现/飞到柱子旁后点「点一次」或开「连点」。\n"
+                 "原理：镜头以英雄为中心，点在屏幕中心上方，不修改战斗数据。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
+        tap_row = ttk.Frame(tap)
+        tap_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(tap_row, text="偏移").pack(side=tk.LEFT)
+        self.tap_offset_var = tk.StringVar(value="90")
+        ttk.Spinbox(tap_row, from_=20, to=400, width=5, textvariable=self.tap_offset_var).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(tap_row, text="间隔").pack(side=tk.LEFT)
+        self.tap_interval_var = tk.StringVar(value="1.5")
+        ttk.Spinbox(tap_row, from_=0.5, to=10, increment=0.5, width=5, textvariable=self.tap_interval_var).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(tap_row, text="秒").pack(side=tk.LEFT)
+        tap_btns = ttk.Frame(tap)
+        tap_btns.pack(fill=tk.X, pady=(0, 6))
+        self.tap_once_btn = ttk.Button(tap_btns, text="点一次", width=10, command=self._tap_once)
+        self.tap_once_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.tap_auto_btn = ttk.Button(tap_btns, text="连点", width=10, style="Accent.TButton", command=self._toggle_tap_auto)
+        self.tap_auto_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.tap_status = tk.StringVar(value="未开始")
+        ttk.Label(tap, textvariable=self.tap_status, foreground="#1a4d8f", wraplength=440, justify=tk.LEFT).pack(anchor=tk.W)
+        self._play_panels["tap"] = tap
+        self._tap_running = False
 
         # ---- 荣耀竞技场 ----
         arena = ttk.LabelFrame(content, text="荣耀竞技场", padding=8)
@@ -2888,6 +2919,80 @@ class AppUI:
                 self.mute_status.set(str((data or {}).get("error") or "还原失败"))
         except tk.TclError:
             pass
+
+    def _tap_point(self):
+        try:
+            raw = self._plank_eval(
+                "(function(){try{return JSON.stringify({w:window.innerWidth,h:window.innerHeight});}"
+                "catch(e){return 'null'}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception:  # noqa: BLE001
+            data = {}
+        try:
+            offset = float(self.tap_offset_var.get() or 90)
+        except (TypeError, ValueError):
+            offset = 90.0
+        try:
+            w = float(data.get("w") or 0)
+            h = float(data.get("h") or 0)
+        except (TypeError, ValueError):
+            w = h = 0.0
+        if w <= 0 or h <= 0:
+            return None
+        return w / 2.0, h / 2.0 - offset
+
+    def _tap_once(self) -> None:
+        point = self._tap_point()
+        if not point:
+            try:
+                self.tap_status.set("点不了：游戏窗口尺寸读不到")
+            except tk.TclError:
+                pass
+            return
+        x, y = point
+        try:
+            call = getattr(self.assist.bridge, "_call", None)
+            if call is None:
+                raise RuntimeError("还没连上游戏窗口")
+            call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0})
+            time.sleep(0.03)
+            call("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1})
+            time.sleep(0.03)
+            call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1})
+            self.tap_status.set("已点击 (%.0f, %.0f)" % (x, y))
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.tap_status.set("点击失败：%s" % exc)
+            except tk.TclError:
+                pass
+
+    def _toggle_tap_auto(self) -> None:
+        if getattr(self, "_tap_running", False):
+            self._tap_running = False
+            try:
+                self.tap_auto_btn.configure(text="连点")
+                self.tap_status.set("已停止连点")
+            except tk.TclError:
+                pass
+            return
+        self._tap_running = True
+        try:
+            self.tap_auto_btn.configure(text="停止")
+        except tk.TclError:
+            pass
+        self._tap_tick()
+
+    def _tap_tick(self) -> None:
+        if not getattr(self, "_tap_running", False):
+            return
+        self._tap_once()
+        try:
+            interval = float(self.tap_interval_var.get() or 1.5)
+        except (TypeError, ValueError):
+            interval = 1.5
+        interval = max(0.5, min(10.0, interval))
+        self.root.after(int(interval * 1000), self._tap_tick)
 
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)
