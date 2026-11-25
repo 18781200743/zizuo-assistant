@@ -2298,21 +2298,22 @@ class AppUI:
 
         # ---- 农场 ----
         farm = ttk.LabelFrame(content, text="农场（自动循环 / 收菜 / 偷菜 / 施肥）", padding=8)
+        tk.Label(
+            farm,
+            text="使用说明：\n"
+                 "1. 先打开游戏里的农场（个人农场或「拜访好友」列表）。\n"
+                 "2. 自动循环：自己的菜熟了就回去收+补种；没熟去好友农场偷菜/施肥；次数用完只等自己的菜。\n"
+                 "3. 个人农场按成熟时间检查，最多 5 分钟一次；好友农场每 2~2.5 秒一步，拜访完一轮自动停。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
         self.farm_status = tk.StringVar(
             value="推荐「自动循环」：自己的菜熟了就回去收+种，没熟就去偷菜施肥"
         )
         ttk.Label(
             farm, textvariable=self.farm_status, foreground="#1a4d8f",
             wraplength=440, justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(0, 6))
-        ttk.Label(
-            farm,
-            text="开始前请先打开游戏里的农场（能看到菜地或「拜访好友」列表）。\n"
-                 "自动循环会自己切换：个人农场收菜/种菜 → 好友农场偷菜/施肥 → 回来等成熟；"
-                 "每日次数用完就只等自己的菜。",
-            foreground="#7a5b00",
-            wraplength=440,
-            justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=(0, 6))
         farm_btns = ttk.Frame(farm)
         farm_btns.pack(fill=tk.X, pady=(0, 6))
