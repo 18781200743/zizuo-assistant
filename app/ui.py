@@ -2661,6 +2661,15 @@ class AppUI:
             empty = int(state.get("emptyPlots") or 0)
             if empty:
                 text += " · 空地 %d 块" % empty
+            if mode != "visit":
+                mature = int(state.get("ownMature") or 0)
+                if mature > 0:
+                    text += " · 成熟 %d 块" % mature
+                next_at = int(state.get("nextOwnAt") or 0)
+                left = next_at - int(time.time()) if next_at else -1
+                if left > 0:
+                    text += " · 下次成熟 %02d:%02d:%02d" % (
+                        left // 3600, (left % 3600) // 60, left % 60)
             if state.get("seedMissing"):
                 text += " · 无种子"
             self.farm_stats.set(text)

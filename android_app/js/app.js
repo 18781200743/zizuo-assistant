@@ -1780,11 +1780,22 @@
           : ((phase === "enter" || phase === "leave") ? " · 切换农场" : " · 个人农场");
       }
       text += "：已处理 " + (Number(st.steps) || 0) + " 次";
-      if (st.ownMature) text += " · 成熟 " + st.ownMature + " 块";
       if (st.emptyPlots) text += " · 空地 " + st.emptyPlots + " 块";
       var counters = st.counters || {};
       if (mode !== "own" && counters.known) {
         text += " · 偷菜剩 " + (counters.steal || 0) + " · 施肥剩 " + (counters.fertilize || 0);
+      }
+      if (mode !== "visit") {
+        if (st.ownMature) text += " · 成熟 " + st.ownMature + " 块";
+        var nextAt = Number(st.nextOwnAt) || 0;
+        var left = nextAt ? nextAt - Math.floor(Date.now() / 1000) : -1;
+        if (left > 0) {
+          var lh = Math.floor(left / 3600);
+          var lm = Math.floor((left % 3600) / 60);
+          var ls = left % 60;
+          text += " · 下次成熟 " + (lh ? lh + ":" : "") +
+            (lm < 10 ? "0" + lm : lm) + ":" + (ls < 10 ? "0" + ls : ls);
+        }
       }
       if (st.last) text += " · " + st.last;
       farmSetStatus(text);

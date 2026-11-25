@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 163
+RUNTIME_VERSION = 164
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 163
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 163;
+  const VERSION = 164;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5985,7 +5985,7 @@ RUNTIME_JS = r"""
         try {
           if (svc.OLYX && svc.OLYX(crop.HTGF)) return;
         } catch (_) { /* ignore */ }
-        const at = Number(crop.IYHA.RMEQ || 0);
+        const at = Number(crop.IYHA.LAUV || crop.IYHA.RMEQ || 0);
         if (at > nowSec && (!soonest || at < soonest)) soonest = at;
       });
     } catch (_) { /* ignore */ }
@@ -6069,13 +6069,32 @@ RUNTIME_JS = r"""
     return deadline;
   }
 
+  function farmFmtLeft(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const r = total % 60;
+    return (h > 0 ? h + ':' : '') + (m < 10 ? '0' + m : m) + ':' + (r < 10 ? '0' + r : r);
+  }
+
   function farmWaitOwn() {
     const now = Date.now();
     let waitMs = 5 * 60 * 1000;
     farmAuto.last = '等待自己的作物成熟';
     if (farmAuto.nextOwnAt) {
       const seconds = Math.max(0, farmAuto.nextOwnAt - Math.floor(now / 1000));
-      waitMs = Math.max(10000, Math.min(5 * 60 * 1000, (seconds + 5) * 1000));
+      farmAuto.last = seconds > 0
+        ? '等待自己的菜成熟（还有 ' + farmFmtLeft(seconds) + '）'
+        : '自己的菜应该熟了，检查中';
+      if (seconds <= 1) {
+        waitMs = 3000;
+      } else if (seconds <= 60) {
+        // 快到点了：精确在成熟时刻醒来，收完立刻补种
+        waitMs = Math.max(2000, (seconds + 1) * 1000);
+      } else {
+        // 平时每 5 分钟复查一次，但提前 30 秒醒
+        waitMs = Math.max(10000, Math.min(5 * 60 * 1000, (seconds - 30) * 1000));
+      }
     }
     if (farmAuto.visitCooldown && farmAuto.visitCooldown > now) {
       waitMs = Math.min(waitMs, Math.max(5000, farmAuto.visitCooldown - now));
