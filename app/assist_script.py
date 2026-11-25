@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 162
+RUNTIME_VERSION = 163
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 162
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 162;
+  const VERSION = 163;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5711,16 +5711,16 @@ RUNTIME_JS = r"""
     farmKey: '', didSteal: false, didHelp: false,
     visited: Object.create(null), pendingKey: '', nextMisses: 0,
     stealCount: 0, helpCount: 0, nextCount: 0, openedFarm: false,
-    seedMissing: false, seedMissingAt: 0,
+    seedMissing: false, seedMissingAt: 0, leaveTries: 0, leaveStart: 0,
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
     lastPlantAt: 0, visitDeadline: 0, visitCooldown: 0, leaveUntil: 0,
   };
 
-  function farmFindService() {
+  function farmFindService(force) {
     const nowAt = Date.now();
-    if (farmAuto.service && farmAuto.service.HBJS
+    if (!force && farmAuto.service && farmAuto.service.HBJS
       && typeof farmAuto.service.DNRQ === 'function'
       && nowAt - farmAuto.serviceAt < 10000) {
       return farmAuto.service;
@@ -5915,9 +5915,26 @@ RUNTIME_JS = r"""
       || counters.water > 0 || counters.pest > 0;
   }
 
+  function farmVisitUiOpen() {
+    return !!(farmFindNode('FarmVisitMenuView') || farmFindNode('BackHomeMenuIconView'));
+  }
+
+  function farmAtHome(svc) {
+    try {
+      if (!svc) return false;
+      if (svc.OUDX && svc.OUDX()) return false;
+      const model = svc.HBJS || svc.IYJF;
+      if (model && model.BZUO) return false;
+      if (farmVisitUiOpen()) return false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function farmProbe() {
     const svc = farmFindService();
-    const atHome = !!(svc && (!svc.OUDX || !svc.OUDX()));
+    const atHome = farmAtHome(svc);
     const status = atHome ? farmOwnStatus(svc) : { mature: 0, empty: 0, crops: 0 };
     return {
       ok: !!svc,
@@ -6072,19 +6089,16 @@ RUNTIME_JS = r"""
     farmAuto.phase = 'leave';
     farmAuto.action = '回个人农场';
     farmAuto.last = reason || '回个人农场看看自己的菜';
-    farmAuto.leaveUntil = Date.now() + 12000;
-    if (!farmAuto.dryRun) {
-      try {
-        const svc = farmFindService();
-        if (svc && typeof svc.RUUS === 'function') farmCall(function () { return svc.RUUS(); });
-      } catch (_) { /* ignore */ }
-    }
-    farmAuto.busyUntil = Date.now() + 2500;
-    farmAuto.timer = setTimeout(farmTick, 2500);
+    farmAuto.leaveStart = Date.now();
+    farmAuto.leaveUntil = 0;
+    farmAuto.leaveTries = 0;
+    farmAuto.busyUntil = Date.now() + 300;
+    farmAuto.timer = setTimeout(farmTick, 300);
   }
 
   function farmTickOwn(svc, allowAuto) {
     if (svc.OUDX && svc.OUDX()) return farmFail('当前在好友农场，请先回到个人农场');
+    if (!farmAtHome(svc)) return farmGoHome('先返回个人农场');
     const status = farmOwnStatus(svc);
     farmAuto.ownMature = status.mature;
     farmAuto.emptyPlots = status.empty;
@@ -6309,28 +6323,56 @@ RUNTIME_JS = r"""
 
     if (farmAuto.mode === 'own') return farmTickOwn(svc, false);
 
-    if (farmAuto.mode === 'auto' && farmAuto.phase === 'leave') {
-      const visiting = !!(svc.OUDX && svc.OUDX());
-      if (!visiting) {
-        farmAuto.phase = 'home';
+    if (farmAuto.phase === 'leave') {
+      const now = Date.now();
+      if (farmAtHome(farmFindService(true) || svc)) {
+        farmAuto.phase = '';
+        farmAuto.leaveStart = 0;
+        farmAuto.leaveTries = 0;
         farmAuto.nextOwnAt = farmNextMatureAt(svc);
-        farmAuto.busyUntil = Date.now() + 1500;
-        farmAuto.timer = setTimeout(farmTick, 1500);
+        farmAuto.last = '已回到个人农场';
+        farmAuto.busyUntil = now + 1200;
+        farmAuto.timer = setTimeout(farmTick, 1200);
         return;
       }
-      if (Date.now() > farmAuto.leaveUntil) {
-        farmClick('backHomeBtn') || farmClick('SelfEntryBtn') || farmClick('SelfTab');
-        farmAuto.leaveUntil = Date.now() + 8000;
+      if (!farmAuto.leaveStart) farmAuto.leaveStart = now;
+      if (now - farmAuto.leaveStart > 90000) {
+        return farmFail('回不到个人农场：请手动点游戏里的「回城」，或关闭游戏窗口重开');
       }
-      farmAuto.last = '正在返回个人农场…';
-      farmAuto.busyUntil = Date.now() + 2000;
-      farmAuto.timer = setTimeout(farmTick, 2000);
+      const lsvc = farmFindService(true) || svc;
+      const visiting = !!(lsvc.OUDX && lsvc.OUDX());
+      if (!farmAuto.dryRun && now > farmAuto.leaveUntil) {
+        if (visiting) {
+          farmAuto.action = '回个人农场';
+          farmCall(function () { return lsvc.RUUS(); });
+          farmAuto.leaveUntil = now + 5000;
+        } else if (farmVisitUiOpen()) {
+          // 游戏已清掉拜访状态，但好友农场界面还开着：先重新进一位好友，再正常回城
+          farmAuto.leaveTries = (farmAuto.leaveTries || 0) + 1;
+          farmAuto.action = '恢复返回个人农场';
+          if (farmAuto.leaveTries > 8) {
+            return farmFail('好友农场界面卡住了：请手动点游戏里的「回城」，或关闭游戏窗口重开');
+          }
+          farmClick('GoVisitNextoneBtn');
+          farmAuto.leaveUntil = now + 5000;
+        } else {
+          farmAuto.phase = '';
+          farmAuto.leaveStart = 0;
+          farmAuto.busyUntil = now + 500;
+          farmAuto.timer = setTimeout(farmTick, 500);
+          return;
+        }
+      }
+      farmAuto.last = visiting ? '正在返回个人农场…' : '正在恢复并返回个人农场…';
+      farmAuto.busyUntil = now + 1000;
+      farmAuto.timer = setTimeout(farmTick, 1000);
       return;
     }
 
     if (!anyQuota) {
       if (farmAuto.mode === 'visit') return farmStop('今日偷菜/施肥/照料次数已用完');
       if (svc.OUDX && svc.OUDX()) return farmGoHome('今日次数已用完，回个人农场');
+      if (!farmAtHome(svc)) return farmGoHome('先回个人农场');
       return farmTickAutoHome(svc, false);
     }
 
@@ -6340,6 +6382,7 @@ RUNTIME_JS = r"""
         return farmTickVisit(svc, counters, true);
       }
       if (farmAuto.phase === 'enter') return farmTickAutoEnter(svc);
+      if (!farmAtHome(svc)) return farmGoHome('先回个人农场，再继续自动循环');
       return farmTickAutoHome(svc, true);
     }
 
@@ -6414,6 +6457,8 @@ RUNTIME_JS = r"""
     farmAuto.helpCount = 0;
     farmAuto.nextCount = 0;
     farmAuto.openedFarm = false;
+    farmAuto.leaveStart = 0;
+    farmAuto.leaveTries = 0;
     farmAuto.seedMissing = false;
     farmAuto.seedMissingAt = 0;
     farmAuto.phase = visiting ? 'visit' : '';
@@ -6428,7 +6473,33 @@ RUNTIME_JS = r"""
     return { ok: true, message: farmAuto.last };
   }
 
+  function farmLeaveOnce(preferNext) {
+    try {
+      const svc = farmFindService(true);
+      if (!svc) return false;
+      if (svc.OUDX && svc.OUDX() && typeof svc.RUUS === 'function') {
+        farmCall(function () { return svc.RUUS(); });
+        return true;
+      }
+      if (preferNext && farmVisitUiOpen()) {
+        // 拜访状态已被游戏清掉但好友农场界面还在：先重新进一位好友，回城按钮才会生效
+        farmClick('GoVisitNextoneBtn');
+        return true;
+      }
+    } catch (_) { /* ignore */ }
+    return false;
+  }
+
   function farmAutoStop() {
+    farmLeaveOnce(true);
+    [5000, 10000, 15000, 20000, 25000].forEach(function (delay) {
+      setTimeout(function () {
+        if (!farmVisitUiOpen()) return;
+        const svc = farmFindService();
+        if (svc && svc.OUDX && svc.OUDX()) farmLeaveOnce(false);
+        else farmLeaveOnce(true);
+      }, delay);
+    });
     farmStop('已停止');
     return { ok: true };
   }
