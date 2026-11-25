@@ -2324,6 +2324,10 @@ class AppUI:
             mute_row, text="恢复刷怪", width=12, command=self._restore_monsters,
         )
         self.mute_on_btn.pack(side=tk.LEFT)
+        self.combat_restore_btn = ttk.Button(
+            mute_row, text="还原战斗数据", width=13, command=self._restore_combat_data,
+        )
+        self.combat_restore_btn.pack(side=tk.LEFT, padx=(6, 0))
         self.mute_status = tk.StringVar(value="未清空")
         ttk.Label(
             mute, textvariable=self.mute_status, foreground="#1a4d8f",
@@ -2900,6 +2904,31 @@ class AppUI:
                 self.mute_status.set(str(data.get("message") or "已恢复刷怪"))
             else:
                 self.mute_status.set(str((data or {}).get("error") or "恢复失败"))
+        except tk.TclError:
+            pass
+
+    def _restore_combat_data(self) -> None:
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.restoreCombatData)return JSON.stringify({ok:false,error:'运行时还没注入'});"
+                "return JSON.stringify(a.restoreCombatData());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.mute_status.set("还原失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        try:
+            if isinstance(data, dict) and data.get("ok"):
+                self.mute_status.set(
+                    "已还原：怪物配置 %s 条，场上怪 %s 只；请点游戏里的「刷新」"
+                    % (data.get("rows"), data.get("units"))
+                )
+            else:
+                self.mute_status.set(str((data or {}).get("error") or "还原失败"))
         except tk.TclError:
             pass
 

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 199
+RUNTIME_VERSION = 200
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 199
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 199;
+  const VERSION = 200;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3691,6 +3691,45 @@ RUNTIME_JS = r"""
     } catch (cause) {
       return { ok: false, error: msgOf(cause) };
     }
+  }
+
+  // ---------------- 战斗数据还原（服务端校验后自救） ----------------
+  function restoreCombatData() {
+    let rows = 0;
+    let units = 0;
+    try {
+      // 1) 怪物配置视野恢复成 350
+      const mgr = muteConfigManager();
+      if (mgr && typeof mgr.JGCA === 'function') {
+        const list = mgr.JGCA('MonsterAttribute') || [];
+        for (const row of list) {
+          if (row && row.PKMY === 0) { row.PKMY = 350; rows += 1; }
+        }
+      }
+    } catch (_) { /* ignore */ }
+    try {
+      // 2) 场上活怪视野恢复成 350
+      const core = window.GCOA && window.GCOA.VZZY;
+      if (core) {
+        const unitsList = core.LSLA().ICUU();
+        unitsList.VSJG(function (_i, unit) {
+          const pos = unit.JUZL;
+          if (!pos || Number(pos.SNAW) !== 3) return false;
+          const attr = unit.YGSG;
+          if (attr && attr.QOGE === 0) { attr.QOGE = 350; units += 1; }
+          return false;
+        });
+      }
+    } catch (_) { /* ignore */ }
+    try { restoreAllMonsters(); } catch (_) { /* ignore */ }
+    try {
+      for (const name of ['vision', 'damage', 'cooldown']) {
+        if (state.combat[name].enabled) stopCombat(name);
+        state.combat[name].enabled = false;
+        state.combat[name].reason = '已关闭';
+      }
+    } catch (_) { /* ignore */ }
+    return { ok: true, rows: rows, units: units };
   }
 
   // ---------------- 无怪开图：临时清空世界刷怪表 ----------------
@@ -8191,6 +8230,7 @@ RUNTIME_JS = r"""
     muteAllMonsters,
     restoreAllMonsters,
     muteState,
+    restoreCombatData,
     dailyTaskBoard,
     arenaStart,
     arenaStop,
