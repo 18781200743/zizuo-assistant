@@ -5143,7 +5143,7 @@ class AppUI:
         for button in (self.assist_mob_btn, self.assist_boss_btn,
                        self.assist_red_btn, self.assist_wish_btn,
                        self.assist_damage_btn, self.assist_shield_btn,
-                       self.assist_cooldown_btn, self.assist_vision_btn,
+                       self.assist_cooldown_btn,
                        self.assist_revive_btn, self.assist_revive_now_btn,
                        self.assist_clear_stuck_btn):
             button.configure(state=tk.DISABLED if gap else tk.NORMAL)
@@ -5153,7 +5153,6 @@ class AppUI:
         self.assist_damage_btn.configure(text="关闭" if damage.get("enabled") else "开启")
         self.assist_shield_btn.configure(text="关闭" if (combat.get("shield") or {}).get("enabled") else "开启")
         self.assist_cooldown_btn.configure(text="关闭" if cooldown.get("enabled") else "开启")
-        self.assist_vision_btn.configure(text="恢复" if vision.get("enabled") else "应用")
         self.assist_red_btn.configure(text="关闭" if red.get("enabled") else "开启")
         self.assist_wish_btn.configure(text="关闭" if wish.get("enabled") else "开启")
 
@@ -5161,7 +5160,6 @@ class AppUI:
         self.assist_damage_status.set(str(damage.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_shield_status.set(str((combat.get("shield") or {}).get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_cooldown_status.set(str(cooldown.get("reason") or ("需要版本映射" if gap else "尚未开启")))
-        self.assist_vision_status.set(str(vision.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_boss_status.set(str(boss.get("reason") or "待接入"))
         self.assist_red_status.set(str(red.get("reason") or ("需要版本映射" if gap else "尚未开启")))
         self.assist_wish_status.set(str(wish.get("reason") or "待接入"))
