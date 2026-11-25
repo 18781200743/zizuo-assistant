@@ -1238,6 +1238,17 @@
     "apply": "HHXQ",
     "afterBuy": "CDMY",
     "afterReward": "NDZZ"
+   },
+   "fund": {
+    "registry": "GVPY",
+    "registryGetter": "AWXW",
+    "queryService": "TZMS",
+    "query": "IMWP",
+    "claim": "LEQV",
+    "model": "RTEZ",
+    "activityId": "DBUI",
+    "rewardList": "YCPD",
+    "rewardState": "FMAE"
    }
   }
  }

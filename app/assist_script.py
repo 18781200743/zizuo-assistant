@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 190
+RUNTIME_VERSION = 191
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 190
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 190;
+  const VERSION = 191;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3511,15 +3511,13 @@ RUNTIME_JS = r"""
         dailyCloseAll(4);
         if (dailyClickName('FundCenterMenuIconView')) {
           if (!(await pause(2200))) return;
-          const got = dailyClickTexts(['一键领取', '领取'], 40);
-          dailyClaim.counts.fund = got;
-          dailyLog('超值基金：领取 ' + got + ' 次');
-          if (!(await pause(700))) return;
-          dailyConfirm();
-          dailyCloseAll(4);
-        } else {
-          dailyLog('超值基金：没找到入口');
         }
+        await fundClaimAll();
+        dailyClaim.counts.fund = Number(fundAuto.claimed || 0);
+        dailyLog(fundAuto.last || ('超值基金：' + dailyClaim.counts.fund + ' 个')
+          + (fundAuto.error ? '（' + fundAuto.error + '）' : ''));
+        dailyConfirm();
+        dailyCloseAll(4);
         if (!(await pause(400))) return;
       }
 
@@ -3596,6 +3594,76 @@ RUNTIME_JS = r"""
     } finally {
       dailyClaim.running = false;
       dailyClaim.step = '';
+    }
+  }
+
+  // ---------------- 超值基金（按参考脚本接口） ----------------
+  const FUND_TYPES = [4002, 4004, 4005, 4006, 4007, 4008, 3932, 3935, 4015, 4016, 4018, 4135];
+  const fundAuto = { last: '', error: '', claimed: 0, log: [] };
+
+  function fundLog(text) {
+    const line = String(text || '');
+    fundAuto.last = line;
+    fundAuto.log.push(line);
+    if (fundAuto.log.length > 30) fundAuto.log.shift();
+  }
+
+  function fundRegistry() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.GVPY) {
+        try {
+          const fn = ex.GVPY.AWXW;
+          return fn && typeof fn === 'object' ? fn : ex.GVPY;
+        } catch (_) {
+          return ex.GVPY;
+        }
+      }
+    }
+    return null;
+  }
+
+  async function fundClaimAll() {
+    fundAuto.error = '';
+    fundAuto.claimed = 0;
+    fundAuto.log = [];
+    fundLog('开始领取超值基金');
+    try {
+      const reg = fundRegistry();
+      if (!reg) {
+        fundAuto.error = '基金模块还没加载';
+        fundLog(fundAuto.error);
+        return;
+      }
+      for (let i = 0; i < FUND_TYPES.length; i += 1) {
+        const type = FUND_TYPES[i];
+        let svc = null;
+        try { svc = reg.TZMS(type); } catch (_) { svc = null; }
+        if (!svc) continue;
+        const model = svc.RTEZ;
+        if (!model || !model.DBUI) continue;
+        try { await svc.IMWP(); } catch (_) { /* ignore */ }
+        let ready = false;
+        try {
+          ready = (model.YCPD || []).some(function (item) {
+            try { return item.FMAE() === 2; } catch (_) { return false; }
+          });
+        } catch (_) { ready = false; }
+        if (!ready) continue;
+        try {
+          await svc.LEQV();
+          fundAuto.claimed += 1;
+          fundLog('基金 ' + type + ' 领取成功');
+        } catch (cause) {
+          fundLog('基金 ' + type + ' 领取失败：' + msgOf(cause));
+        }
+        await dailySleep(800);
+      }
+      fundLog(fundAuto.claimed ? ('超值基金：领取 ' + fundAuto.claimed + ' 个') : '超值基金：暂无奖励');
+    } catch (cause) {
+      fundAuto.error = msgOf(cause);
+      fundLog('出错：' + msgOf(cause));
     }
   }
 
