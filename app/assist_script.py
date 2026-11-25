@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 164
+RUNTIME_VERSION = 167
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 164
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 164;
+  const VERSION = 167;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5712,6 +5712,7 @@ RUNTIME_JS = r"""
     visited: Object.create(null), pendingKey: '', nextMisses: 0,
     stealCount: 0, helpCount: 0, nextCount: 0, openedFarm: false,
     seedMissing: false, seedMissingAt: 0, leaveTries: 0, leaveStart: 0,
+    friendName: '', keyAt: 0, keyAtKey: '',
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
@@ -5811,6 +5812,59 @@ RUNTIME_JS = r"""
     } catch (_) {
       return null;
     }
+  }
+
+  function farmFriendEntries() {
+    const list = [];
+    try {
+      const scene = cc.director.getScene();
+      if (!scene) return list;
+      const items = [];
+      (function walk(n) {
+        if (!n) return;
+        if (String(n.name || '') === 'FarmVisitItemView' && n.activeInHierarchy) items.push(n);
+        (n.children || []).forEach(walk);
+      })(scene);
+      items.forEach(function (item) {
+        let steal = false;
+        let help = false;
+        let button = null;
+        let name = '';
+        (function walk(n) {
+          const nodeName = String(n.name || '');
+          if (!button && nodeName === 'CommonBlueButton' && n.activeInHierarchy) button = n;
+          (n.components || []).forEach(function (c) {
+            try {
+              if (c instanceof cc.Label && c.string) {
+                const text = String(c.string);
+                if (nodeName === 'UserName') name = text;
+                if (n.activeInHierarchy) {
+                  if (text.indexOf('可偷') >= 0) steal = true;
+                  if (text.indexOf('可帮') >= 0) help = true;
+                }
+              }
+            } catch (_) { /* ignore */ }
+          });
+          (n.children || []).forEach(walk);
+        })(item);
+        if (steal || help) list.push({ name: name, steal: steal, help: help, button: button });
+      });
+    } catch (_) { /* ignore */ }
+    return list;
+  }
+
+  function farmClickMarkedFriend() {
+    const entries = farmFriendEntries();
+    if (!entries.length) return false;
+    let pick = null;
+    for (let i = 0; i < entries.length; i += 1) {
+      if (entries[i].steal) { pick = entries[i]; break; }
+    }
+    if (!pick) pick = entries[0];
+    if (!pick.button) return false;
+    const ok = farmClickNode(pick.button);
+    if (ok) farmAuto.friendName = pick.name || '';
+    return ok;
   }
 
   function farmClickFirstFriend() {
@@ -6198,9 +6252,10 @@ RUNTIME_JS = r"""
 
   function farmTickAutoEnter(svc) {
     farmAuto.action = '进入好友农场';
-    if (farmClickFirstFriend()) {
+    if (farmClickMarkedFriend()) {
       farmAuto.noVisitTries = 0;
-      farmAuto.last = '正在进入好友农场…';
+      farmAuto.last = '拜访有偷菜/帮忙标识的好友'
+        + (farmAuto.friendName ? '：' + farmAuto.friendName : '') + '…';
       farmAuto.busyUntil = Date.now() + 3000;
       farmAuto.timer = setTimeout(farmTick, 3000);
       return;
@@ -6213,19 +6268,22 @@ RUNTIME_JS = r"""
       farmAuto.timer = setTimeout(farmTick, 2500);
       return;
     }
-    farmAuto.noVisitTries += 1;
-    if (farmAuto.noVisitTries >= 6) {
-      return farmFail('没有找到「拜访好友」入口：请先在游戏里打开农场 → 拜访好友，再点自动循环');
+    if (farmAuto.noVisitTries < 2) {
+      farmAuto.noVisitTries += 1;
+      const tab = farmFindNode('VisitTab');
+      if (tab) farmClickNode(tab);
+      farmAuto.last = '打开「拜访好友」列表…';
+      farmAuto.busyUntil = Date.now() + 2000;
+      farmAuto.timer = setTimeout(farmTick, 2000);
+      return;
     }
-    const tab = farmFindNode('VisitTab');
-    if (tab) {
-      farmClickNode(tab);
-      farmAuto.last = '打开「拜访好友」…';
-    } else {
-      farmAuto.last = '等待拜访入口…';
-    }
-    farmAuto.busyUntil = Date.now() + 2000;
-    farmAuto.timer = setTimeout(farmTick, 2000);
+    // 列表里没有任何「可偷取/可帮忙」标识：不去空农场，等一会儿再看
+    farmAuto.noVisitTries = 0;
+    farmAuto.phase = '';
+    farmAuto.visitCooldown = Date.now() + 3 * 60 * 1000;
+    farmAuto.last = '好友暂时没有可偷/可帮忙的，3 分钟后再看';
+    farmWaitOwn();
+    farmAuto.last = '好友暂时没有可偷/可帮忙的，等会儿再看';
   }
 
   function farmTickVisit(svc, counters, allowAuto) {
@@ -6243,6 +6301,10 @@ RUNTIME_JS = r"""
         return farmStop('已经拜访完一轮好友');
       }
       farmAuto.visited[key] = 1;
+    }
+    if (key && key !== farmAuto.keyAtKey) {
+      farmAuto.keyAtKey = key;
+      farmAuto.keyAt = Date.now();
     }
     const stealQuota = !counters.known || counters.steal > 0;
     const helpQuota = !counters.known || counters.fertilize > 0
@@ -6275,6 +6337,33 @@ RUNTIME_JS = r"""
     }
     if (allowAuto && Date.now() >= farmAuto.visitDeadline) {
       return farmGoHome('回个人农场看看自己的菜');
+    }
+    // 刚进好友农场先等按钮加载，别急着跳过
+    const settled = Date.now() - (farmAuto.keyAt || 0) > 3000;
+    if (!settled && !farmAuto.didSteal && !farmAuto.didHelp) {
+      farmAuto.last = '看看这位好友有没有可偷/可帮忙的…';
+      farmAuto.busyUntil = Date.now() + 1200;
+      farmAuto.timer = setTimeout(farmTick, 1200);
+      return;
+    }
+    // 这位好友没有「偷菜/帮忙」按钮：不点空按钮，直接跳下一位
+    if (!buttons.steal && !buttons.help && buttons.next && settled) {
+      farmAuto.noActionStreak += 1;
+      if (allowAuto) {
+        // 这位好友没有标识：回个人农场重新看列表，只去有标识的好友
+        return farmGoHome('这位好友没有可偷/可帮忙的，回去找有标识的');
+      }
+      if (farmAuto.noActionStreak >= 3) {
+        return farmStop('连续 3 位好友没有可偷/可照料作物，可能今日次数或道具已用完');
+      }
+      farmAuto.action = '跳过空农场';
+      farmAuto.last = '这位好友没有可偷/可帮忙的，看下一位';
+      farmClick('GoVisitNextoneBtn');
+      farmAuto.pendingKey = key;
+      farmAuto.nextCount += 1;
+      farmAuto.busyUntil = Date.now() + 1200;
+      farmAuto.timer = setTimeout(farmTick, 1200);
+      return;
     }
     if (buttons.next) {
       if (farmAuto.didSteal || farmAuto.didHelp) {
@@ -6406,6 +6495,15 @@ RUNTIME_JS = r"""
     }
 
     if (!svc.OUDX || !svc.OUDX()) {
+      if (farmClickMarkedFriend()) {
+        farmAuto.noVisitTries = 0;
+        farmAuto.action = '拜访好友';
+        farmAuto.last = '拜访有偷菜/帮忙标识的好友'
+          + (farmAuto.friendName ? '：' + farmAuto.friendName : '') + '…';
+        farmAuto.busyUntil = Date.now() + 3000;
+        farmAuto.timer = setTimeout(farmTick, 3000);
+        return;
+      }
       if (!farmAuto.openedFarm && typeof svc.LXAY === 'function') {
         farmAuto.openedFarm = true;
         farmAuto.action = '打开农场界面';
@@ -6416,15 +6514,18 @@ RUNTIME_JS = r"""
         return;
       }
       farmAuto.noVisitTries += 1;
+      if (farmAuto.noVisitTries >= 2) {
+        farmAuto.noVisitTries = 0;
+        farmAuto.action = '等待可偷/可帮忙的好友';
+        farmAuto.last = '好友暂时没有可偷/可帮忙的，2 分钟后再看';
+        farmAuto.busyUntil = Date.now() + 2 * 60 * 1000;
+        farmAuto.timer = setTimeout(farmTick, 2 * 60 * 1000);
+        return;
+      }
       farmAuto.action = '进入好友农场';
-      farmAuto.last = '正在打开好友农场…';
-      if (!farmClickFirstFriend()) {
-        const tab = farmFindNode('VisitTab');
-        if (tab) farmClickNode(tab);
-      }
-      if (farmAuto.noVisitTries >= 5) {
-        return farmFail('没有找到可拜访的好友，请先打开「农场 → 拜访好友」并进入好友农场');
-      }
+      farmAuto.last = '正在打开「拜访好友」列表…';
+      const tab = farmFindNode('VisitTab');
+      if (tab) farmClickNode(tab);
       farmAuto.busyUntil = Date.now() + 2000;
       farmAuto.timer = setTimeout(farmTick, 2000);
       return;
