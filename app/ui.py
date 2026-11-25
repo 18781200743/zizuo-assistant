@@ -2821,75 +2821,6 @@ class AppUI:
                 pass
         self.root.after(900, self._rogue_poll)
 
-    def _mute_monsters(self) -> None:
-        try:
-            raw = self._plank_eval(
-                "(function(){try{var a=window.__zzAssist;"
-                "if(!a||!a.muteAllMonsters)return JSON.stringify({ok:false,error:'运行时还没注入'});"
-                "return JSON.stringify(a.muteAllMonsters());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
-            )
-            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except Exception as exc:  # noqa: BLE001
-            try:
-                self.mute_status.set("清空失败：%s" % exc)
-            except tk.TclError:
-                pass
-            return
-        try:
-            if isinstance(data, dict) and data.get("ok"):
-                self.mute_status.set(str(data.get("message") or "已清空刷怪"))
-            else:
-                self.mute_status.set(str((data or {}).get("error") or "清空失败"))
-        except tk.TclError:
-            pass
-
-    def _restore_monsters(self) -> None:
-        try:
-            raw = self._plank_eval(
-                "(function(){try{var a=window.__zzAssist;"
-                "if(!a||!a.restoreAllMonsters)return JSON.stringify({ok:false,error:'运行时还没注入'});"
-                "return JSON.stringify(a.restoreAllMonsters());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
-            )
-            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except Exception as exc:  # noqa: BLE001
-            try:
-                self.mute_status.set("恢复失败：%s" % exc)
-            except tk.TclError:
-                pass
-            return
-        try:
-            if isinstance(data, dict) and data.get("ok"):
-                self.mute_status.set(str(data.get("message") or "已恢复刷怪"))
-            else:
-                self.mute_status.set(str((data or {}).get("error") or "恢复失败"))
-        except tk.TclError:
-            pass
-
-    def _restore_combat_data(self) -> None:
-        try:
-            raw = self._plank_eval(
-                "(function(){try{var a=window.__zzAssist;"
-                "if(!a||!a.restoreCombatData)return JSON.stringify({ok:false,error:'运行时还没注入'});"
-                "return JSON.stringify(a.restoreCombatData());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
-            )
-            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except Exception as exc:  # noqa: BLE001
-            try:
-                self.mute_status.set("还原失败：%s" % exc)
-            except tk.TclError:
-                pass
-            return
-        try:
-            if isinstance(data, dict) and data.get("ok"):
-                self.mute_status.set(
-                    "已还原：怪物配置 %s 条，场上怪 %s 只；请点游戏里的「刷新」"
-                    % (data.get("rows"), data.get("units"))
-                )
-            else:
-                self.mute_status.set(str((data or {}).get("error") or "还原失败"))
-        except tk.TclError:
-            pass
-
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)
         if bridge is None:
@@ -4784,13 +4715,6 @@ class AppUI:
                 return
             send = 0 if enabled else value
             btn, status, label = (self.assist_shield_btn, self.assist_shield_status, "英雄免伤")
-        elif name == "vision":
-            mode = _vision_mode(self.assist_vision_var.get())
-            if mode < 0 and not enabled:
-                self.append_log("视野已经是关闭状态")
-                return
-            send = mode
-            btn, status, label = (self.assist_vision_btn, self.assist_vision_status, "视野修改")
         else:
             try:
                 value = float(self.assist_cooldown_var.get().strip())
