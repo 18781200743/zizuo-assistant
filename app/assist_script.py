@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 186
+RUNTIME_VERSION = 188
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 186
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 186;
+  const VERSION = 188;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3460,7 +3460,7 @@ RUNTIME_JS = r"""
         dailyClaim.step = '黑市免费';
         await marketClaimFree();
         dailyClaim.counts.market = Number(marketAuto.bought || 0);
-        dailyLog('黑市免费：' + dailyClaim.counts.market + ' 份'
+        dailyLog('黑市：' + (marketAuto.last || ('免费 ' + dailyClaim.counts.market + ' 份'))
           + (marketAuto.error ? '（' + marketAuto.error + '）' : ''));
         if (!(await pause(500))) return;
       }
@@ -3632,8 +3632,8 @@ RUNTIME_JS = r"""
         }
       }
       if (!svc) {
-        marketAuto.error = '游戏里没有黑市服务（黑市界面可能没开）';
-        marketLog(marketAuto.error);
+        marketLog('没有黑市接口，改用界面只点免费商品');
+        await marketUiClaimFree();
         return;
       }
       const tabs = marketCategories();
@@ -3686,6 +3686,75 @@ RUNTIME_JS = r"""
         await dailySleep(300);
       }
       marketLog('黑市免费领取完成，共 ' + marketAuto.bought + ' 份');
+      dailyCloseAll(3);
+    } catch (cause) {
+      marketAuto.error = msgOf(cause);
+      marketLog('出错：' + msgOf(cause));
+    } finally {
+      marketAuto.running = false;
+    }
+  }
+
+  /** 黑市没有服务接口时的兜底：只在界面上点「免费」商品，钻石标价一律跳过。 */
+  async function marketUiClaimFree() {
+    marketAuto.running = true;
+    marketAuto.error = '';
+    marketAuto.bought = 0;
+    marketAuto.log = [];
+    marketLog('开始黑市（界面）免费领取');
+    try {
+      let root = dailyActiveNode('BlackMarketView');
+      if (!root) {
+        if (!dailyClickName('BlackMarketMenuIconView')) {
+          marketAuto.error = '没找到黑市入口';
+          marketLog(marketAuto.error);
+          return;
+        }
+        await dailySleep(2400);
+        root = dailyActiveNode('BlackMarketView');
+      }
+      if (!root) {
+        marketAuto.error = '黑市界面没打开';
+        marketLog(marketAuto.error);
+        return;
+      }
+      const tried = Object.create(null);
+      for (let round = 0; round < 40; round += 1) {
+        const cards = [];
+        (function walk(node) {
+          if (String(node.name || '') === 'bg2' && node.activeInHierarchy) cards.push(node);
+          (node.children || []).forEach(walk);
+        })(root);
+        let picked = null;
+        for (let i = 0; i < cards.length; i += 1) {
+          const card = cards[i];
+          const texts = dailyNodeText(card, 4);
+          const price = (arenaChild(card, 'priceLabel') ? dailyNodeText(arenaChild(card, 'priceLabel'), 2) : '').trim();
+          const limit = (arenaChild(card, 'limitDesc') ? dailyNodeText(arenaChild(card, 'limitDesc'), 2) : '').trim();
+          const name = (arenaChild(card, 'name') ? dailyNodeText(arenaChild(card, 'name'), 2) : '').trim();
+          // 只看明确免费的：价格必须为空/0/免费；数字标价（绿钻 30/60…）全部跳过
+          const free = !price || price === '0' || price.indexOf('免费') >= 0;
+          if (!free) continue;
+          if (texts.indexOf('已售罄') >= 0) continue;
+          const m = limit.match(/(\d+)\s*\/\s*(\d+)/);
+          let remaining = 1;
+          if (m) remaining = Number(m[1]);
+          if (!(remaining > 0)) continue;
+          const key = name + '|' + limit;
+          if (tried[key]) continue;
+          picked = { card: card, name: name, limit: limit, key: key };
+          break;
+        }
+        if (!picked) break;
+        tried[picked.key] = true;
+        marketLog('领取：' + (picked.name || '免费商品'));
+        if (!dailyClickNode(picked.card)) break;
+        await dailySleep(1200);
+        dailyConfirm();
+        await dailySleep(900);
+        marketAuto.bought += 1;
+      }
+      marketLog('黑市（界面）完成，共 ' + marketAuto.bought + ' 份');
       dailyCloseAll(3);
     } catch (cause) {
       marketAuto.error = msgOf(cause);
