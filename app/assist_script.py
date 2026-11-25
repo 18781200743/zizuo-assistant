@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 182
+RUNTIME_VERSION = 183
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 182
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 182;
+  const VERSION = 183;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3615,6 +3615,7 @@ RUNTIME_JS = r"""
       rank: rank || arenaAuto.rank,
       log: arenaAuto.log.slice(-10),
       viewed: !!root,
+      resultAt: arenaResultPoint(),
     };
   }
 
@@ -3691,6 +3692,43 @@ RUNTIME_JS = r"""
       })(scene);
     } catch (_) { /* ignore */ }
     return clicked;
+  }
+
+  function arenaResultPoint() {
+    if (!dailyActiveNode('Modal_ArenaBattleResultView')) return null;
+    try {
+      let W = 700;
+      let H = 1501.6;
+      try {
+        if (window.cc.view && typeof window.cc.view.getVisibleSize === 'function') {
+          const vs = window.cc.view.getVisibleSize();
+          if (vs && vs.width > 0 && vs.height > 0) { W = vs.width; H = vs.height; }
+        }
+      } catch (_) { /* 默认设计分辨率 */ }
+      let point = null;
+      (function walk(node) {
+        if (point) return;
+        (node.components || node._components || []).forEach(function (comp) {
+          if (point) return;
+          let text = '';
+          try {
+            if (comp instanceof window.cc.Label && comp.string) text = String(comp.string).trim();
+          } catch (_) { text = ''; }
+          if (!/确定|继续挑战|点击即可返回/.test(text)) return;
+          const wp = node.getWorldPosition ? node.getWorldPosition() : null;
+          if (!wp) return;
+          point = {
+            x: Math.round(wp.x / W * window.innerWidth * 10) / 10,
+            y: Math.round((H - wp.y) / H * window.innerHeight * 10) / 10,
+            text: text,
+          };
+        });
+        (node.children || []).forEach(walk);
+      })(window.cc.director.getScene());
+      return point;
+    } catch (_) {
+      return null;
+    }
   }
 
   async function arenaFight(item) {

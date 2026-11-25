@@ -2658,6 +2658,24 @@ class AppUI:
         except Exception:  # noqa: BLE001
             st = None
         if isinstance(st, dict):
+            point = st.get("resultAt") or {}
+            try:
+                px = float(point.get("x"))
+                py = float(point.get("y"))
+            except (TypeError, ValueError):
+                px = py = 0.0
+            if px > 0 and py > 0 and (time.monotonic() - getattr(self, "_arena_click_at", 0.0)) > 1.5:
+                self._arena_click_at = time.monotonic()
+                try:
+                    call = getattr(self.assist.bridge, "_call", None)
+                    if call is not None:
+                        call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": px, "y": py, "button": "none", "buttons": 0})
+                        time.sleep(0.03)
+                        call("Input.dispatchMouseEvent", {"type": "mousePressed", "x": px, "y": py, "button": "left", "buttons": 1, "clickCount": 1})
+                        time.sleep(0.03)
+                        call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": px, "y": py, "button": "left", "buttons": 0, "clickCount": 1})
+                except Exception:  # noqa: BLE001
+                    pass
             text = "竞技场：%s · 已打 %d 场" % (st.get("step") or "", int(st.get("done") or 0))
             if st.get("rank"):
                 text += " · " + str(st.get("rank"))
