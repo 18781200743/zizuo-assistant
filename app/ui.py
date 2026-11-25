@@ -2229,6 +2229,7 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
+            ("mute", "无怪开图"),
             ("arena", "荣耀竞技场"),
             ("rogue", "杀戮尖塔"),
             ("plank", "跳一跳"),
@@ -2302,6 +2303,33 @@ class AppUI:
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         self._play_panels["daily"] = daily
+
+        # ---- 无怪开图 ----
+        mute = ttk.LabelFrame(content, text="无怪开图", padding=8)
+        tk.Label(
+            mute,
+            text="进图前点「清空刷怪」，进图后不会刷出野怪；开完图点「恢复刷怪」。\n"
+                 "只在本次游戏窗口有效，重进游戏会自动恢复。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
+        mute_row = ttk.Frame(mute)
+        mute_row.pack(fill=tk.X, pady=(0, 6))
+        self.mute_off_btn = ttk.Button(
+            mute_row, text="清空刷怪", width=12, style="Accent.TButton", command=self._mute_monsters,
+        )
+        self.mute_off_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.mute_on_btn = ttk.Button(
+            mute_row, text="恢复刷怪", width=12, command=self._restore_monsters,
+        )
+        self.mute_on_btn.pack(side=tk.LEFT)
+        self.mute_status = tk.StringVar(value="未清空")
+        ttk.Label(
+            mute, textvariable=self.mute_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        self._play_panels["mute"] = mute
 
         # ---- 荣耀竞技场 ----
         arena = ttk.LabelFrame(content, text="荣耀竞技场", padding=8)
@@ -2830,6 +2858,50 @@ class AppUI:
             except tk.TclError:
                 pass
         self.root.after(900, self._rogue_poll)
+
+    def _mute_monsters(self) -> None:
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.muteAllMonsters)return JSON.stringify({ok:false,error:'运行时还没注入'});"
+                "return JSON.stringify(a.muteAllMonsters());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.mute_status.set("清空失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        try:
+            if isinstance(data, dict) and data.get("ok"):
+                self.mute_status.set(str(data.get("message") or "已清空刷怪"))
+            else:
+                self.mute_status.set(str((data or {}).get("error") or "清空失败"))
+        except tk.TclError:
+            pass
+
+    def _restore_monsters(self) -> None:
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.restoreAllMonsters)return JSON.stringify({ok:false,error:'运行时还没注入'});"
+                "return JSON.stringify(a.restoreAllMonsters());}catch(e){return JSON.stringify({ok:false,error:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.mute_status.set("恢复失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        try:
+            if isinstance(data, dict) and data.get("ok"):
+                self.mute_status.set(str(data.get("message") or "已恢复刷怪"))
+            else:
+                self.mute_status.set(str((data or {}).get("error") or "恢复失败"))
+        except tk.TclError:
+            pass
 
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)

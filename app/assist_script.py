@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 198
+RUNTIME_VERSION = 199
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 198
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 198;
+  const VERSION = 199;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3691,6 +3691,72 @@ RUNTIME_JS = r"""
     } catch (cause) {
       return { ok: false, error: msgOf(cause) };
     }
+  }
+
+  // ---------------- 无怪开图：临时清空世界刷怪表 ----------------
+  const muteAuto = { removed: null, last: '', error: '' };
+
+  function muteConfigManager() {
+    for (const pair of window.System.entries()) {
+      const ex = pair && pair[1];
+      if (!ex || typeof ex !== 'object') continue;
+      let value = null;
+      try { value = ex.DYCU && ex.DYCU.NFCJ; } catch (_) { value = null; }
+      if (value && typeof value.JGCA === 'function') return value;
+    }
+    return null;
+  }
+
+  function muteAllMonsters() {
+    try {
+      const mgr = muteConfigManager();
+      if (!mgr) return { ok: false, error: '配置模块还没加载' };
+      const rows = mgr.JGCA('WorldMonsterUnit');
+      if (!Array.isArray(rows)) return { ok: false, error: '刷怪表读取失败' };
+      if (muteAuto.removed && muteAuto.removed.length) {
+        return { ok: true, message: '刷怪已经是清空状态（' + muteAuto.removed.length + ' 条）' };
+      }
+      muteAuto.removed = rows.splice(0, rows.length);
+      muteAuto.last = '已清空刷怪表，共 ' + muteAuto.removed.length + ' 条';
+      return { ok: true, message: muteAuto.last };
+    } catch (cause) {
+      muteAuto.error = msgOf(cause);
+      return { ok: false, error: muteAuto.error };
+    }
+  }
+
+  function restoreAllMonsters() {
+    try {
+      const mgr = muteConfigManager();
+      if (!mgr) return { ok: false, error: '配置模块还没加载' };
+      const rows = mgr.JGCA('WorldMonsterUnit');
+      if (!Array.isArray(rows)) return { ok: false, error: '刷怪表读取失败' };
+      const removed = muteAuto.removed || [];
+      if (!removed.length) return { ok: true, message: '没有需要恢复的刷怪' };
+      rows.push.apply(rows, removed);
+      muteAuto.removed = null;
+      muteAuto.last = '已恢复刷怪表';
+      return { ok: true, message: muteAuto.last };
+    } catch (cause) {
+      muteAuto.error = msgOf(cause);
+      return { ok: false, error: muteAuto.error };
+    }
+  }
+
+  function muteState() {
+    let count = 0;
+    try {
+      const mgr = muteConfigManager();
+      const rows = mgr ? mgr.JGCA('WorldMonsterUnit') : null;
+      count = Array.isArray(rows) ? rows.length : 0;
+    } catch (_) { count = 0; }
+    return {
+      muted: !!(muteAuto.removed && muteAuto.removed.length),
+      removedCount: muteAuto.removed ? muteAuto.removed.length : 0,
+      currentRows: count,
+      last: muteAuto.last,
+      error: muteAuto.error,
+    };
   }
 
   // ---------------- 超值基金（按参考脚本接口） ----------------
@@ -8122,6 +8188,9 @@ RUNTIME_JS = r"""
     dailyClaimsStart,
     dailyClaimsStop,
     dailyClaimsState,
+    muteAllMonsters,
+    restoreAllMonsters,
+    muteState,
     dailyTaskBoard,
     arenaStart,
     arenaStop,
