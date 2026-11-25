@@ -1933,15 +1933,6 @@ class AppUI:
         self.assist_cooldown_status = tk.StringVar(value="尚未开启")
         ttk.Label(combat, textvariable=self.assist_cooldown_status, foreground="#9fb0c9", wraplength=320).grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
 
-        ttk.Label(combat, text="视野").grid(row=3, column=0, sticky=tk.W, pady=(6, 0))
-        self.assist_vision_var = tk.StringVar(value=_vision_text(assist.get("vision_mode", -1)))
-        ttk.Combobox(combat, textvariable=self.assist_vision_var, values=VISION_CHOICES, width=18,
-                     state="readonly").grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=8, pady=(6, 0))
-        self.assist_vision_btn = ttk.Button(combat, text="应用", width=6, command=lambda: self.toggle_combat("vision"))
-        self.assist_vision_btn.grid(row=3, column=3, padx=(6, 4), pady=(6, 0))
-        self.assist_vision_status = tk.StringVar(value="尚未开启")
-        ttk.Label(combat, textvariable=self.assist_vision_status, foreground="#9fb0c9", wraplength=320).grid(row=3, column=4, sticky=tk.W, pady=(6, 0))
-
         ttk.Label(
             combat,
             text=(
@@ -2229,7 +2220,6 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
-            ("mute", "无怪开图"),
             ("arena", "荣耀竞技场"),
             ("rogue", "杀戮尖塔"),
             ("plank", "跳一跳"),
@@ -2303,37 +2293,6 @@ class AppUI:
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         self._play_panels["daily"] = daily
-
-        # ---- 无怪开图 ----
-        mute = ttk.LabelFrame(content, text="无怪开图", padding=8)
-        tk.Label(
-            mute,
-            text="进图前点「清空刷怪」，进图后不会刷出野怪；开完图点「恢复刷怪」。\n"
-                 "只在本次游戏窗口有效，重进游戏会自动恢复。",
-            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
-            anchor="w", wraplength=440, padx=8, pady=6,
-            highlightthickness=1, highlightbackground="#f0d9a8",
-        ).pack(fill=tk.X, pady=(0, 6))
-        mute_row = ttk.Frame(mute)
-        mute_row.pack(fill=tk.X, pady=(0, 6))
-        self.mute_off_btn = ttk.Button(
-            mute_row, text="清空刷怪", width=12, style="Accent.TButton", command=self._mute_monsters,
-        )
-        self.mute_off_btn.pack(side=tk.LEFT, padx=(0, 4))
-        self.mute_on_btn = ttk.Button(
-            mute_row, text="恢复刷怪", width=12, command=self._restore_monsters,
-        )
-        self.mute_on_btn.pack(side=tk.LEFT)
-        self.combat_restore_btn = ttk.Button(
-            mute_row, text="还原战斗数据", width=13, command=self._restore_combat_data,
-        )
-        self.combat_restore_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self.mute_status = tk.StringVar(value="未清空")
-        ttk.Label(
-            mute, textvariable=self.mute_status, foreground="#1a4d8f",
-            wraplength=440, justify=tk.LEFT,
-        ).pack(anchor=tk.W)
-        self._play_panels["mute"] = mute
 
         # ---- 荣耀竞技场 ----
         arena = ttk.LabelFrame(content, text="荣耀竞技场", padding=8)
