@@ -2614,11 +2614,15 @@ class AppUI:
             self.farm_auto_btn.configure(state=tk.DISABLED)
             self.farm_own_btn.configure(state=tk.DISABLED)
             self.farm_visit_btn.configure(state=tk.DISABLED)
-            self.farm_status.set({
-                "auto": "已开始：自动循环",
-                "own": "已开始：收自己的菜",
-                "visit": "已开始：偷菜/施肥",
-            }.get(mode_value, "已开始"))
+            message = str(data.get("message") or "").strip()
+            if message:
+                self.farm_status.set(message)
+            else:
+                self.farm_status.set({
+                    "auto": "已开始：自动循环",
+                    "own": "已开始：收自己的菜",
+                    "visit": "已开始：偷菜/施肥",
+                }.get(mode_value, "已开始"))
         except tk.TclError:
             pass
         self.root.after(300, self._farm_poll)

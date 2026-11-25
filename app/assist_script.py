@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 160
+RUNTIME_VERSION = 161
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 160
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 160;
+  const VERSION = 161;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -6376,8 +6376,11 @@ RUNTIME_JS = r"""
     farmAuto.mode = mode;
     farmAuto.stop = false;
     farmAuto.steps = 0;
+    const anyQuota = farmQuotaLeft(counters);
     farmAuto.last = mode === 'own' ? '开始收自己的菜/种菜'
-      : (mode === 'auto' ? '开始自动循环：收菜优先，没熟就去偷菜' : '开始偷菜/施肥');
+      : (mode === 'auto'
+        ? (anyQuota ? '开始自动循环：收菜优先，没熟就去偷菜' : '今日次数已用完：只监控自己的菜')
+        : '开始偷菜/施肥');
     farmAuto.action = '';
     farmAuto.error = '';
     farmAuto.busyUntil = 0;
