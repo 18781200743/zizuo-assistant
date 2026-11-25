@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 176
+RUNTIME_VERSION = 177
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 176
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 176;
+  const VERSION = 177;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3148,7 +3148,7 @@ RUNTIME_JS = r"""
     step: '',
     last: '',
     error: '',
-    counts: { task: 0, welfare: 0, shop: 0, mail: 0 },
+    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0 },
     log: [],
     token: 0,
   };
@@ -3437,7 +3437,7 @@ RUNTIME_JS = r"""
     dailyClaim.running = true;
     dailyClaim.error = '';
     dailyClaim.log = [];
-    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0 };
+    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0 };
     dailyLog('开始日常领取');
     try {
       dailyClaim.step = '关闭弹窗';
@@ -3454,6 +3454,23 @@ RUNTIME_JS = r"""
           dailyLog('任务奖励：' + ((res && res.error) || '读取失败'));
         }
         if (!(await pause(700))) return;
+      }
+
+      if (items && items.cards) {
+        dailyClaim.step = '任务卡完成';
+        const used = completeDailyWithCards();
+        dailyClaim.counts.cards = Number(used && used.used || 0);
+        if (used && used.ok) {
+          dailyLog('任务卡：使用 ' + dailyClaim.counts.cards + ' 张');
+          const again = claimDailyViaService();
+          if (again && again.ok && again.claimed) {
+            dailyClaim.counts.task += Number(again.claimed || 0);
+            dailyLog('任务卡后补领：' + again.claimed + ' 个');
+          }
+        } else {
+          dailyLog('任务卡：' + ((used && (used.error || used.message)) || '不可用'));
+        }
+        if (!(await pause(900))) return;
       }
 
       if (items && items.welfare) {
@@ -3538,7 +3555,7 @@ RUNTIME_JS = r"""
     if (dailyClaim.running) return { ok: true, message: '正在领取中' };
     dailyClaim.token += 1;
     const token = dailyClaim.token;
-    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true }, token);
+    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false }, token);
     return { ok: true, message: '开始日常领取' };
   }
 
