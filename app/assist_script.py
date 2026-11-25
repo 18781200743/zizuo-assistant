@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 196
+RUNTIME_VERSION = 197
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 196
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 196;
+  const VERSION = 197;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1919,9 +1919,42 @@ RUNTIME_JS = r"""
     return ['damage', 'vision', 'cooldown'].some(name => state.combat[name].enabled);
   }
 
+  function combatServerWarning() {
+    try {
+      const scene = window.cc && window.cc.director && window.cc.director.getScene();
+      if (!scene) return false;
+      let hit = false;
+      (function walk(node) {
+        if (hit) return;
+        (node.components || node._components || []).forEach(function (comp) {
+          if (hit) return;
+          try {
+            if (comp instanceof window.cc.Label && comp.string
+              && String(comp.string).indexOf('战斗数据与服务器不一致') >= 0) hit = true;
+          } catch (_) { /* ignore */ }
+        });
+        (node.children || []).forEach(walk);
+      })(scene);
+      return hit;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function tickCombat() {
     // 战斗参数不依赖红包服务是否可用，只要有当前版本映射就能跑
     if (!mapping()) return;
+    // 服务器校验弹窗：立刻还原视野等会被校验的参数，避免继续积累
+    if ((state.combat.vision.enabled || state.combat.damage.enabled || state.combat.cooldown.enabled)
+      && combatServerWarning()) {
+      for (const name of ['vision', 'damage', 'cooldown']) {
+        if (state.combat[name].enabled) {
+          try { stopCombat(name); } catch (_) { /* ignore */ }
+          state.combat[name].enabled = false;
+          state.combat[name].reason = '已自动关闭：服务器提示战斗数据不一致';
+        }
+      }
+    }
     if (now() < combatSyncAt) return;
     combatSyncAt = now() + 2000;
 
