@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 197
+RUNTIME_VERSION = 198
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 197
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 197;
+  const VERSION = 198;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1731,8 +1731,10 @@ RUNTIME_JS = r"""
       }
     }
     // 当前地图的活怪：直接写活体属性（新版单位结构：位置.JUZL / 属性.YGSG / 阵营.SNAW）
+    // 服务端会校验活体改动：默认只改配置（进图前开），不碰场上已生成的怪
     let units = 0;
     try {
+      if (cfg.vision && cfg.vision.configOnly) throw Error('skip-live');
       const ctx = mapContext();
       const mcfg = ctx.cfg;
       const attrKey = mcfg.unitAttr || 'YGSG';

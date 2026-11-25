@@ -354,7 +354,8 @@
     "vision": {
      "normal": 350,
      "wide": 500,
-     "expand": 1400
+     "expand": 1400,
+     "configOnly": true
     },
     "ranges": {
      "damage": [
@@ -888,7 +889,8 @@
     "vision": {
      "normal": 350,
      "wide": 500,
-     "expand": 1400
+     "expand": 1400,
+     "configOnly": true
     },
     "ranges": {
      "damage": [
