@@ -2992,10 +2992,44 @@ class AppUI:
                 pass
             return
         try:
-            self.tap_status.set("已飞过去 (%.0f, %.0f)，落地后自动点柱子…" % (x, y))
+            self.tap_status.set("已飞过去 (%.0f, %.0f)，等复活后自动点柱子…" % (x, y))
         except tk.TclError:
             pass
-        self.root.after(2200, lambda: self._tap_burst(5))
+        self._tap_wait_alive(x, y, 16)
+
+    def _tap_wait_alive(self, x: float, y: float, left: int) -> None:
+        if left <= 0:
+            try:
+                self.tap_status.set("等复活超时：先开启快速复活再试")
+            except tk.TclError:
+                pass
+            return
+        alive = True
+        dead = 0
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var s=window.__zzAssist.snapshot?window.__zzAssist.snapshot():{};"
+                "var r=s.heroRevive||{};return JSON.stringify({dead:r.dead||0,heroes:r.heroes||0});}"
+                "catch(e){return '{}'}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            dead = int((data or {}).get("dead") or 0)
+            heroes = int((data or {}).get("heroes") or 0)
+            alive = not (heroes > 0 and dead >= heroes)
+        except Exception:  # noqa: BLE001
+            alive = True
+        if alive:
+            try:
+                self.tap_status.set("已复活，开始点柱子…")
+            except tk.TclError:
+                pass
+            self.root.after(600, lambda: self._tap_burst(5))
+            return
+        try:
+            self.tap_status.set("全员阵亡，等快速复活中…（剩 %d 次检查）" % left)
+        except tk.TclError:
+            pass
+        self.root.after(800, lambda: self._tap_wait_alive(x, y, left - 1))
 
     def _tap_burst(self, left: int) -> None:
         if left <= 0:
