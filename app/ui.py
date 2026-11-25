@@ -2273,8 +2273,12 @@ class AppUI:
         self.daily_mail_var = tk.BooleanVar(value=True)
         self.daily_cards_var = tk.BooleanVar(value=False)
         self.daily_market_var = tk.BooleanVar(value=True)
+        self.daily_fund_var = tk.BooleanVar(value=True)
+        self.daily_activity_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(daily_checks, text="任务奖励", variable=self.daily_task_var).pack(side=tk.LEFT)
         ttk.Checkbutton(daily_checks, text="福利战令", variable=self.daily_welfare_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(daily_checks, text="超值基金", variable=self.daily_fund_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(daily_checks, text="活动", variable=self.daily_activity_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="商店免费", variable=self.daily_shop_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="黑市免费", variable=self.daily_market_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="邮件", variable=self.daily_mail_var).pack(side=tk.LEFT, padx=(8, 0))
@@ -2534,6 +2538,8 @@ class AppUI:
             "mail": bool(self.daily_mail_var.get()),
             "cards": bool(self.daily_cards_var.get()),
             "market": bool(self.daily_market_var.get()),
+            "fund": bool(self.daily_fund_var.get()),
+            "activity": bool(self.daily_activity_var.get()),
         }
         if not any(items.values()):
             try:
@@ -2606,9 +2612,11 @@ class AppUI:
         if isinstance(st, dict):
             counts = st.get("counts") or {}
             text = "领取中：%s" % (st.get("step") or "")
-            text += " · 任务 %d · 福利 %d · 商店 %d · 黑市 %d · 邮件 %d · 任务卡 %d" % (
+            text += " · 任务 %d · 福利 %d · 基金 %d · 活动 %d · 商店 %d · 黑市 %d · 邮件 %d · 任务卡 %d" % (
                 int(counts.get("task") or 0),
                 int(counts.get("welfare") or 0),
+                int(counts.get("fund") or 0),
+                int(counts.get("activity") or 0),
                 int(counts.get("shop") or 0),
                 int(counts.get("market") or 0),
                 int(counts.get("mail") or 0),

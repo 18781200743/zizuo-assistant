@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 189
+RUNTIME_VERSION = 190
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 189
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 189;
+  const VERSION = 190;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3148,7 +3148,7 @@ RUNTIME_JS = r"""
     step: '',
     last: '',
     error: '',
-    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0 },
+    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0 },
     log: [],
     token: 0,
   };
@@ -3437,7 +3437,7 @@ RUNTIME_JS = r"""
     dailyClaim.running = true;
     dailyClaim.error = '';
     dailyClaim.log = [];
-    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0 };
+    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0 };
     dailyLog('开始日常领取');
     try {
       dailyClaim.step = '关闭弹窗';
@@ -3504,6 +3504,40 @@ RUNTIME_JS = r"""
           dailyLog('福利：没找到入口');
         }
         if (!(await pause(500))) return;
+      }
+
+      if (items && items.fund) {
+        dailyClaim.step = '超值基金';
+        dailyCloseAll(4);
+        if (dailyClickName('FundCenterMenuIconView')) {
+          if (!(await pause(2200))) return;
+          const got = dailyClickTexts(['一键领取', '领取'], 40);
+          dailyClaim.counts.fund = got;
+          dailyLog('超值基金：领取 ' + got + ' 次');
+          if (!(await pause(700))) return;
+          dailyConfirm();
+          dailyCloseAll(4);
+        } else {
+          dailyLog('超值基金：没找到入口');
+        }
+        if (!(await pause(400))) return;
+      }
+
+      if (items && items.activity) {
+        dailyClaim.step = '活动';
+        dailyCloseAll(4);
+        if (dailyClickName('ActivityCenterMenuIconView')) {
+          if (!(await pause(2200))) return;
+          const got = dailyClickTexts(['一键领取', '领取'], 40);
+          dailyClaim.counts.activity = got;
+          dailyLog('活动：领取 ' + got + ' 次');
+          if (!(await pause(700))) return;
+          dailyConfirm();
+          dailyCloseAll(4);
+        } else {
+          dailyLog('活动：没找到入口');
+        }
+        if (!(await pause(400))) return;
       }
 
       if (items && items.shop) {
@@ -4308,7 +4342,7 @@ RUNTIME_JS = r"""
     if (dailyClaim.running) return { ok: true, message: '正在领取中' };
     dailyClaim.token += 1;
     const token = dailyClaim.token;
-    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false, market: true }, token);
+    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false, market: true, fund: true, activity: true }, token);
     return { ok: true, message: '开始日常领取' };
   }
 
