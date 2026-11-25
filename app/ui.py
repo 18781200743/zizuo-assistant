@@ -2230,6 +2230,7 @@ class AppUI:
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
             ("arena", "荣耀竞技场"),
+            ("rogue", "杀戮尖塔"),
             ("plank", "跳一跳"),
             ("farm", "农场"),
             ("talisman", "护符升级"),
@@ -2329,6 +2330,38 @@ class AppUI:
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         self._play_panels["arena"] = arena
+
+        # ---- 杀戮尖塔 ----
+        rogue = ttk.LabelFrame(content, text="杀戮尖塔挑战", padding=8)
+        tk.Label(
+            rogue,
+            text="扫荡层数填 0 = 用当前已通关的最高难度；每日最多扫荡 2 次（和游戏一致）。\n"
+                 "活动没开或不在可挑战状态时会直接提示，不会乱点。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
+        rogue_row = ttk.Frame(rogue)
+        rogue_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(rogue_row, text="扫荡层数").pack(side=tk.LEFT)
+        self.rogue_floor_var = tk.StringVar(value="0")
+        ttk.Spinbox(
+            rogue_row, from_=0, to=9999, width=7, textvariable=self.rogue_floor_var,
+        ).pack(side=tk.LEFT, padx=(6, 12))
+        self.rogue_start_btn = ttk.Button(
+            rogue_row, text="开始扫荡", width=12, style="Accent.TButton", command=self._rogue_start,
+        )
+        self.rogue_start_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.rogue_stop_btn = ttk.Button(
+            rogue_row, text="停止", width=8, command=self._rogue_stop,
+        )
+        self.rogue_stop_btn.pack(side=tk.LEFT)
+        self.rogue_status = tk.StringVar(value="未开始")
+        ttk.Label(
+            rogue, textvariable=self.rogue_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        self._play_panels["rogue"] = rogue
 
         # ---- 跳一跳（秘境探宝） ----
         plank = ttk.LabelFrame(content, text="跳一跳（秘境探宝自动跳）", padding=8)
@@ -2694,6 +2727,93 @@ class AppUI:
             except tk.TclError:
                 pass
         self.root.after(900, self._arena_poll)
+
+    def _rogue_start(self) -> None:
+        if getattr(self, "_rogue_running", False):
+            return
+        try:
+            floor = int(float(self.rogue_floor_var.get() or 0))
+        except (TypeError, ValueError):
+            floor = 0
+        payload = json.dumps({"floor": max(0, min(9999, floor))})
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.rogueStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.rogueStart(" + payload + "));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.rogue_status.set("启动失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            try:
+                self.rogue_status.set(str((data or {}).get("message") or "启动失败"))
+            except tk.TclError:
+                pass
+            return
+        self._rogue_running = True
+        try:
+            self.rogue_start_btn.configure(state=tk.DISABLED)
+            self.rogue_status.set("开始扫荡…")
+        except tk.TclError:
+            pass
+        self._rogue_poll()
+
+    def _rogue_stop(self) -> None:
+        try:
+            self._plank_eval(
+                "(window.__zzAssist&&window.__zzAssist.rogueStop"
+                "&&window.__zzAssist.rogueStop(),'ok')"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        self._rogue_running = False
+        try:
+            self.rogue_start_btn.configure(state=tk.NORMAL)
+            self.rogue_status.set("已停止")
+        except tk.TclError:
+            pass
+
+    def _rogue_poll(self) -> None:
+        if not getattr(self, "_rogue_running", False):
+            return
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.rogueState)return 'null';"
+                "return JSON.stringify(a.rogueState());}catch(e){return 'null'}})()"
+            )
+            st = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception:  # noqa: BLE001
+            st = None
+        if isinstance(st, dict):
+            info = st.get("info") or {}
+            text = "杀戮尖塔：%s" % (st.get("step") or "")
+            if info.get("error"):
+                text += " · " + str(info.get("error"))
+            else:
+                text += " · 已通关 %s · 剩余 %s" % (info.get("cleared"), info.get("remaining"))
+            text += " · 已扫 %d" % int(st.get("done") or 0)
+            if st.get("last"):
+                text += " · " + str(st.get("last"))
+            if st.get("error"):
+                text += " · " + str(st.get("error"))
+            try:
+                if st.get("running"):
+                    self.rogue_status.set(text)
+                else:
+                    self._rogue_running = False
+                    self.rogue_start_btn.configure(state=tk.NORMAL)
+                    self.rogue_status.set("已结束：" + text.replace("杀戮尖塔：", ""))
+                    return
+            except tk.TclError:
+                pass
+        self.root.after(900, self._rogue_poll)
 
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 183
+RUNTIME_VERSION = 184
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 183
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 183;
+  const VERSION = 184;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3549,6 +3549,258 @@ RUNTIME_JS = r"""
       dailyClaim.running = false;
       dailyClaim.step = '';
     }
+  }
+
+  // ---------------- 杀戮尖塔扫荡 ----------------
+  const rogueAuto = {
+    running: false,
+    step: '',
+    last: '',
+    error: '',
+    done: 0,
+    targetFloor: 0,
+    info: {},
+    token: 0,
+    log: [],
+  };
+
+  function rogueLog(text) {
+    const line = String(text || '');
+    rogueAuto.last = line;
+    rogueAuto.log.push(line);
+    if (rogueAuto.log.length > 30) rogueAuto.log.shift();
+  }
+
+  function rogueExports() {
+    try {
+      return [...window.System.entries()].map(function (pair) { return pair[1]; });
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function rogueFindService() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.GSAH && typeof ex.GSAH === 'object') return ex.GSAH;
+    }
+    return null;
+  }
+
+  function rogueFindEnums() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.QNUP && ex.ZOUH) return { challenge: ex.QNUP, activity: ex.ZOUH };
+    }
+    return null;
+  }
+
+  function rogueFindConfig() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.CGWQ) {
+        try {
+          const fn = ex.CGWQ.AWXW;
+          return fn && typeof fn === 'object' ? fn : (typeof ex.CGWQ === 'function' ? ex.CGWQ.AWXW : null);
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  function rogueModel() {
+    const svc = rogueFindService();
+    if (!svc) return { ok: false, error: '游戏里没有杀戮尖塔服务' };
+    const holder = svc.RTEZ;
+    const model = holder && holder.ERQM;
+    if (!model) return { ok: false, svc: svc, error: '杀戮尖塔数据还没加载' };
+    return {
+      ok: true,
+      svc: svc,
+      model: model,
+      cleared: Number(model.BMFY),
+      limit: Number(model.VJSQ),
+      remaining: Number(model.VFDQ),
+      exhausted: model.TOBI === true,
+      permission: model.XWLN === true,
+      challengeState: model.JQAN,
+      activityState: model.IJFJ,
+    };
+  }
+
+  function rogueQuotaKey() {
+    let openId = '';
+    try { openId = String(window.localStorage.getItem('OpenID') || ''); } catch (_) { /* ignore */ }
+    return 'zz_rogue_sweeps:' + (openId || 'default');
+  }
+
+  function rogueToday() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function rogueQuota() {
+    try {
+      const raw = window.localStorage.getItem(rogueQuotaKey());
+      if (!raw) return { day: rogueToday(), count: 0 };
+      const data = JSON.parse(raw);
+      if (!data || data.day !== rogueToday() || !Number.isInteger(data.count)) return { day: rogueToday(), count: 0 };
+      return data;
+    } catch (_) {
+      return { day: rogueToday(), count: 0 };
+    }
+  }
+
+  function rogueSetQuota(count) {
+    try {
+      window.localStorage.setItem(rogueQuotaKey(), JSON.stringify({ day: rogueToday(), count: count }));
+    } catch (_) { /* ignore */ }
+  }
+
+  function rogueState() {
+    const m = rogueModel();
+    const enums = rogueFindEnums();
+    const idle = enums ? enums.challenge && enums.challenge.ZNHE : null;
+    const active = enums ? enums.activity && enums.activity.PXOQ : null;
+    const quota = rogueQuota();
+    const info = m.ok
+      ? {
+          cleared: m.cleared,
+          limit: m.limit,
+          remaining: m.remaining,
+          exhausted: m.exhausted,
+          permission: m.permission,
+          available: m.challengeState === idle && m.activityState === active,
+          usedToday: quota.count,
+        }
+      : { error: m.error };
+    return {
+      running: rogueAuto.running,
+      step: rogueAuto.step,
+      last: rogueAuto.last,
+      error: rogueAuto.error,
+      done: rogueAuto.done,
+      targetFloor: rogueAuto.targetFloor,
+      info: info,
+      log: rogueAuto.log.slice(-10),
+    };
+  }
+
+  async function rogueRun(floorInput, token) {
+    const alive = function () { return rogueAuto.running && rogueAuto.token === token; };
+    rogueAuto.running = true;
+    rogueAuto.error = '';
+    rogueAuto.done = 0;
+    rogueAuto.targetFloor = Number(floorInput) || 0;
+    rogueAuto.log = [];
+    rogueAuto.step = '检查活动';
+    rogueLog('开始杀戮尖塔扫荡');
+    try {
+      const m = rogueModel();
+      if (!m.ok) {
+        rogueAuto.error = m.error;
+        rogueLog(m.error);
+        return;
+      }
+      rogueAuto.step = '刷新状态';
+      try {
+        if (typeof m.svc.TNXU === 'function') await m.svc.TNXU();
+      } catch (_) { /* ignore */ }
+      if (!alive()) return;
+      const enums = rogueFindEnums();
+      const idle = enums && enums.challenge ? enums.challenge.ZNHE : null;
+      const active = enums && enums.activity ? enums.activity.PXOQ : null;
+      const now = rogueModel();
+      if (!now.ok) { rogueAuto.error = now.error; rogueLog(now.error); return; }
+      if (!(now.challengeState === idle && now.activityState === active)) {
+        rogueAuto.error = '活动未开放或正在挑战中';
+        rogueLog('活动未开放或正在挑战中');
+        return;
+      }
+      if (!now.permission) {
+        rogueAuto.error = '没有扫荡权限';
+        rogueLog('没有扫荡权限');
+        return;
+      }
+      const config = rogueFindConfig();
+      let maxFloor = 0;
+      try { maxFloor = Number(config && config.EGJU ? config.EGJU() : 0); } catch (_) { maxFloor = 0; }
+      let target = rogueAuto.targetFloor;
+      if (!(target > 0)) target = now.cleared > 0 ? now.cleared : maxFloor;
+      if (!(target > 0)) { rogueAuto.error = '填写的扫荡层数无效'; rogueLog('填写的扫荡层数无效'); return; }
+      if (maxFloor > 0 && target > maxFloor) {
+        rogueAuto.error = '填写的难度未开放';
+        rogueLog('填写的难度未开放');
+        return;
+      }
+      if (target > now.cleared) {
+        rogueAuto.error = '尚未通关难度 ' + target;
+        rogueLog('尚未通关难度 ' + target);
+        return;
+      }
+      rogueAuto.targetFloor = target;
+      const quota = rogueQuota();
+      if (quota.count >= 2) {
+        rogueAuto.error = '今日已扫荡两次';
+        rogueLog('今日已扫荡两次');
+        return;
+      }
+      let count = quota.count;
+      for (let i = 0; i < 2; i += 1) {
+        if (!alive()) return;
+        rogueAuto.step = '扫荡难度 ' + target + '（第 ' + (count + 1) + ' 次）';
+        const cur = rogueModel();
+        if (!cur.ok) { rogueAuto.error = cur.error; break; }
+        if (cur.exhausted || (cur.limit > 0 && cur.remaining <= 0)) {
+          rogueLog('游戏扫荡次数已用尽');
+          break;
+        }
+        try {
+          const ok = await cur.svc.SLLF(target);
+          if (ok !== true) { rogueAuto.error = '扫荡没有返回成功'; rogueLog('扫荡没有返回成功'); break; }
+        } catch (cause) {
+          rogueAuto.error = '扫荡失败：' + msgOf(cause);
+          rogueLog(rogueAuto.error);
+          break;
+        }
+        count += 1;
+        rogueAuto.done += 1;
+        rogueSetQuota(count);
+        rogueLog('扫荡成功（' + count + '/2）');
+        try { if (typeof cur.svc.TNXU === 'function') await cur.svc.TNXU(); } catch (_) { /* ignore */ }
+        await dailySleep(1200);
+        if (count >= 2) break;
+      }
+      rogueAuto.step = '完成';
+      rogueLog('杀戮尖塔扫荡完成');
+    } catch (cause) {
+      rogueAuto.error = msgOf(cause);
+      rogueLog('出错：' + msgOf(cause));
+    } finally {
+      rogueAuto.running = false;
+      rogueAuto.step = '';
+    }
+  }
+
+  function rogueStart(opts) {
+    if (rogueAuto.running) return { ok: true, message: '正在扫荡中' };
+    rogueAuto.token += 1;
+    const token = rogueAuto.token;
+    void rogueRun(opts && opts.floor, token);
+    return { ok: true, message: '开始杀戮尖塔扫荡' };
+  }
+
+  function rogueStop() {
+    rogueAuto.running = false;
+    rogueAuto.token += 1;
+    rogueAuto.step = '';
+    rogueLog('已停止');
+    return { ok: true };
   }
 
   // ---------------- 荣耀竞技场 ----------------
@@ -7385,6 +7637,9 @@ RUNTIME_JS = r"""
     arenaStart,
     arenaStop,
     arenaState,
+    rogueStart,
+    rogueStop,
+    rogueState,
     stopAll: stopAllFeatures,
     claimAllDailyTabs,
     claimDailyViaService,

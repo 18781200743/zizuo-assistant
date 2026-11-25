@@ -1193,6 +1193,28 @@
    "confirmPopup": {
     "className": "IHCJ",
     "confirmMethod": "SOET"
+   },
+   "rogue": {
+    "service": "GSAH",
+    "refresh": "TNXU",
+    "sweep": "SLLF",
+    "model": "RTEZ",
+    "basic": "ERQM",
+    "challengeState": "JQAN",
+    "activityState": "IJFJ",
+    "permission": "XWLN",
+    "cleared": "BMFY",
+    "limit": "VJSQ",
+    "remaining": "VFDQ",
+    "exhausted": "TOBI",
+    "challengeEnum": "QNUP",
+    "idle": "ZNHE",
+    "activityEnum": "ZOUH",
+    "active": "PXOQ",
+    "config": "CGWQ",
+    "configGetter": "AWXW",
+    "maxFloor": "EGJU",
+    "entryCost": "TSMK"
    }
   }
  }
