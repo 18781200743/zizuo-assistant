@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 188
+RUNTIME_VERSION = 189
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 188
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 188;
+  const VERSION = 189;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3446,6 +3446,11 @@ RUNTIME_JS = r"""
 
       if (items && items.task) {
         dailyClaim.step = '任务奖励';
+        if (!taskService()) {
+          // 任务模块是打开面板才加载的：先打开任务面板
+          dailyClickName('TasksBoardMenuIconView');
+          if (!(await pause(1800))) return;
+        }
         const res = claimDailyViaService();
         if (res && res.ok) {
           dailyClaim.counts.task = Number(res.claimed || 0);
