@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 156
+RUNTIME_VERSION = 158
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 156
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 156;
+  const VERSION = 158;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5816,6 +5816,33 @@ RUNTIME_JS = r"""
     try {
       const scene = cc.director.getScene();
       if (!scene) return false;
+
+      const clickVisitItem = function () {
+        let button = null;
+        (function walk(n) {
+          if (!n || button) return;
+          if (String(n.name || '') === 'FarmVisitItemView' && n.activeInHierarchy) {
+            (function findButton(k) {
+              if (!k || button) return;
+              if (String(k.name || '') === 'CommonBlueButton' && k.activeInHierarchy) {
+                const comps = k.components || k._components || [];
+                for (let i = 0; i < comps.length; i += 1) {
+                  let cls = '';
+                  try { cls = cc.js.getClassName(comps[i]); } catch (_) { /* ignore */ }
+                  if (cls === 'BPNN' || cls === 'cc.Button') {
+                    button = k;
+                    return;
+                  }
+                }
+              }
+              (k.children || []).forEach(findButton);
+            })(n);
+          }
+          (n.children || []).forEach(walk);
+        })(scene);
+        return button ? farmClickNode(button) : false;
+      };
+
       let hit = null;
       (function walk(n) {
         if (!n || hit) return;
@@ -5826,7 +5853,8 @@ RUNTIME_JS = r"""
         });
         (n.children || []).forEach(walk);
       })(scene);
-      if (!hit) return false;
+      if (!hit) return clickVisitItem();
+
       let node = hit;
       for (let depth = 0; depth < 5 && node; depth += 1, node = node.parent) {
         const comps = node.components || node._components || [];
@@ -5840,6 +5868,7 @@ RUNTIME_JS = r"""
           }
         }
       }
+      return clickVisitItem();
     } catch (_) { /* ignore */ }
     return false;
   }
@@ -6104,24 +6133,21 @@ RUNTIME_JS = r"""
   function farmTickAutoEnter(svc) {
     farmAuto.action = '进入好友农场';
     if (farmClickFirstFriend()) {
+      farmAuto.noVisitTries = 0;
       farmAuto.last = '正在进入好友农场…';
       farmAuto.busyUntil = Date.now() + 3000;
       farmAuto.timer = setTimeout(farmTick, 3000);
       return;
+    }
+    farmAuto.noVisitTries += 1;
+    if (farmAuto.noVisitTries >= 6) {
+      return farmFail('没有找到「拜访好友」入口：请先在游戏里打开农场 → 拜访好友，再点自动循环');
     }
     const tab = farmFindNode('VisitTab');
     if (tab) {
       farmClickNode(tab);
       farmAuto.last = '打开「拜访好友」…';
     } else {
-      farmAuto.noVisitTries += 1;
-      if (farmAuto.noVisitTries >= 6) {
-        farmAuto.phase = 'home';
-        farmAuto.visitCooldown = Date.now() + 5 * 60 * 1000;
-        farmAuto.last = '没找到拜访入口，先等自己的菜';
-        farmWaitOwn();
-        return;
-      }
       farmAuto.last = '等待拜访入口…';
     }
     farmAuto.busyUntil = Date.now() + 2000;
