@@ -2657,6 +2657,11 @@ class AppUI:
                     int(counters.get("steal") or 0),
                     int(counters.get("fertilize") or 0),
                 )
+            empty = int(state.get("emptyPlots") or 0)
+            if empty:
+                text += " · 空地 %d 块" % empty
+            if state.get("seedMissing"):
+                text += " · 无种子"
             self.farm_stats.set(text)
         except (tk.TclError, TypeError, ValueError):
             pass

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 161
+RUNTIME_VERSION = 162
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 161
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 161;
+  const VERSION = 162;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5711,6 +5711,7 @@ RUNTIME_JS = r"""
     farmKey: '', didSteal: false, didHelp: false,
     visited: Object.create(null), pendingKey: '', nextMisses: 0,
     stealCount: 0, helpCount: 0, nextCount: 0, openedFarm: false,
+    seedMissing: false, seedMissingAt: 0,
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
@@ -5949,6 +5950,7 @@ RUNTIME_JS = r"""
       stealCount: farmAuto.stealCount || 0,
       helpCount: farmAuto.helpCount || 0,
       nextCount: farmAuto.nextCount || 0,
+      seedMissing: !!farmAuto.seedMissing,
       ownMature: farmAuto.ownMature,
       emptyPlots: farmAuto.emptyPlots,
       nextOwnAt: farmAuto.nextOwnAt,
@@ -6002,10 +6004,22 @@ RUNTIME_JS = r"""
       if (ret && typeof ret.then === 'function') {
         ret.then(function (res) {
           planted = !!res;
-          if (!res) farmAuto.last = '没有可用的种子，暂时不播种';
+          if (!res) {
+            farmAuto.seedMissing = true;
+            farmAuto.seedMissingAt = Date.now();
+            farmAuto.last = '没有可用的种子，暂时不补种';
+          } else {
+            farmAuto.seedMissing = false;
+            farmAuto.seedMissingAt = 0;
+          }
         }).catch(function () { /* ignore */ });
       } else {
         planted = !!ret;
+        if (!planted) {
+          farmAuto.seedMissing = true;
+          farmAuto.seedMissingAt = Date.now();
+          farmAuto.last = '没有可用的种子，暂时不补种';
+        }
       }
     } catch (_) { /* ignore */ }
     return planted;
@@ -6083,7 +6097,8 @@ RUNTIME_JS = r"""
       farmAuto.timer = setTimeout(farmTick, 4000);
       return;
     }
-    if (status.empty > 0 && Date.now() - farmAuto.lastPlantAt >= 20000) {
+    const seedWait = farmAuto.seedMissing && Date.now() - farmAuto.seedMissingAt < 2 * 60 * 1000;
+    if (status.empty > 0 && !seedWait && Date.now() - farmAuto.lastPlantAt >= 20000) {
       farmAuto.action = '种菜';
       farmAuto.last = '自动种菜（' + status.empty + ' 块空地）';
       farmAuto.steps += 1;
@@ -6113,7 +6128,8 @@ RUNTIME_JS = r"""
       farmAuto.timer = setTimeout(farmTick, 4000);
       return;
     }
-    if (status.empty > 0 && Date.now() - farmAuto.lastPlantAt >= 20000) {
+    const seedWait = farmAuto.seedMissing && Date.now() - farmAuto.seedMissingAt < 2 * 60 * 1000;
+    if (status.empty > 0 && !seedWait && Date.now() - farmAuto.lastPlantAt >= 20000) {
       farmAuto.action = '种菜';
       farmAuto.last = '自动种菜（' + status.empty + ' 块空地）';
       farmAuto.steps += 1;
@@ -6398,6 +6414,8 @@ RUNTIME_JS = r"""
     farmAuto.helpCount = 0;
     farmAuto.nextCount = 0;
     farmAuto.openedFarm = false;
+    farmAuto.seedMissing = false;
+    farmAuto.seedMissingAt = 0;
     farmAuto.phase = visiting ? 'visit' : '';
     farmAuto.ownMature = 0;
     farmAuto.emptyPlots = 0;
