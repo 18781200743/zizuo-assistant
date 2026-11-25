@@ -1257,6 +1257,13 @@
     "claim": "THBX",
     "sceneEnum": "NHQN",
     "sceneId": "VGAN"
+   },
+   "taskBoard": {
+    "taskId": "NWCO",
+    "taskType": "NDBP",
+    "taskProgress": "GPIC",
+    "taskTarget": "GXOH",
+    "taskStatus": "ROPG"
    }
   }
  }

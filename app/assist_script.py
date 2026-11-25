@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 192
+RUNTIME_VERSION = 193
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 192
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 192;
+  const VERSION = 193;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4447,6 +4447,41 @@ RUNTIME_JS = r"""
     return { ok: true };
   }
 
+  /** 任务面板整表：读取日常/周常/成就/公会四条线的任务与状态。 */
+  function dailyTaskBoard() {
+    const svc = taskService();
+    if (!svc) return { ok: false, error: '任务服务还没加载' };
+    const rows = [];
+    const groups = [];
+    if (typeof svc.DHPZ === 'function') groups.push({ id: 1, name: '日常', list: svc.DHPZ() });
+    if (typeof svc.HEOT === 'function') groups.push({ id: 2, name: '周常', list: svc.HEOT() });
+    if (typeof svc.CNUM === 'function') groups.push({ id: 3, name: '成就', list: svc.CNUM() });
+    if (typeof svc.NSCD === 'function') groups.push({ id: 4, name: '公会', list: svc.NSCD() });
+    groups.forEach(function (group) {
+      const list = Array.isArray(group.list) ? group.list : [];
+      list.forEach(function (task, index) {
+        if (!task) return;
+        let status = task.ROPG !== undefined ? task.ROPG : task.GXFI;
+        let progress = 0;
+        try {
+          const jindu = task.GPIC;
+          if (jindu && jindu.EDRL !== undefined) progress = Number(jindu.EDRL);
+          else if (jindu && jindu.jl_wupinShuliang !== undefined) progress = Number(jindu.jl_wupinShuliang);
+        } catch (_) { progress = 0; }
+        rows.push({
+          group: group.name,
+          index: index,
+          id: Number(task.NWCO || 0),
+          type: Number(task.NDBP || 0),
+          status: Number(status),
+          progress: progress,
+          target: Number(task.GXOH || 0),
+        });
+      });
+    });
+    return { ok: true, rows: rows };
+  }
+
   function dailyClaimsStart(items) {
     if (dailyClaim.running) return { ok: true, message: '正在领取中' };
     dailyClaim.token += 1;
@@ -8005,6 +8040,7 @@ RUNTIME_JS = r"""
     dailyClaimsStart,
     dailyClaimsStop,
     dailyClaimsState,
+    dailyTaskBoard,
     arenaStart,
     arenaStop,
     arenaState,
