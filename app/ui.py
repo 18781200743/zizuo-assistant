@@ -20,6 +20,7 @@ except Exception:  # noqa: BLE001
 
 from .config_store import (
     load_config,
+    project_root,
     normalize_assist,
     save_config,
 )
@@ -1015,29 +1016,107 @@ class AppUI:
     # 首页按参考图（1152x2048）的比例排版
     HOME_W, HOME_H = 1152.0, 2048.0
 
+    def _home_bg_custom_path(self):
+        try:
+            ui = self.config.get("ui") or {}
+            path = str(ui.get("bg_image") or "").strip()
+        except Exception:  # noqa: BLE001
+            return ""
+        return path if path and os.path.exists(path) else ""
+
     def _home_bg(self, w: int, h: int):
-        """整页背景（原画），按尺寸缓存。"""
-        key = (int(w), int(h))
+        """整页背景：自定义图片优先，否则内置原画；按尺寸缓存。"""
+        custom = self._home_bg_custom_path()
+        key = (int(w), int(h), custom)
         if getattr(self, "_home_bg_key", None) == key:
             return getattr(self, "_home_bg_photo", None)
         photo = None
-        for name in ("home_bg.jpg", "home_bg.png"):
-            try:
-                from PIL import Image, ImageTk
+        try:
+            from PIL import Image, ImageEnhance, ImageTk
 
-                path = os.path.join(self.ASSET_DIR, name)
-                if not os.path.exists(path):
-                    continue
-                im = Image.open(path).convert("RGB")
-                im = im.resize((max(1, int(w)), max(1, int(h))), Image.LANCZOS)
+            if custom:
+                im = Image.open(custom).convert("RGB")
+                tw, th = max(1, int(w)), max(1, int(h))
+                src_w, src_h = im.size
+                scale = max(tw / src_w, th / src_h)
+                nw, nh = max(1, int(src_w * scale + 0.5)), max(1, int(src_h * scale + 0.5))
+                im = im.resize((nw, nh), Image.LANCZOS)
+                left = max(0, (nw - tw) // 2)
+                top = max(0, (nh - th) // 2)
+                im = im.crop((left, top, left + tw, top + th))
+                im = ImageEnhance.Brightness(im).enhance(0.62)
                 self._home_bg_pil = im
                 photo = ImageTk.PhotoImage(im)
-                break
-            except Exception:  # noqa: BLE001
-                photo = None
+            else:
+                for name in ("home_bg.jpg", "home_bg.png"):
+                    path = os.path.join(self.ASSET_DIR, name)
+                    if not os.path.exists(path):
+                        continue
+                    im = Image.open(path).convert("RGB")
+                    im = im.resize((max(1, int(w)), max(1, int(h))), Image.LANCZOS)
+                    self._home_bg_pil = im
+                    photo = ImageTk.PhotoImage(im)
+                    break
+        except Exception:  # noqa: BLE001
+            photo = None
         self._home_bg_key = key
         self._home_bg_photo = photo
         return photo
+
+    def _pick_home_bg(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="选择主页背景图片",
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.webp *.bmp"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            from PIL import Image
+
+            im = Image.open(path)
+            im.load()
+            if im.width < 200 or im.height < 200:
+                raise ValueError("图片太小（至少 200×200）")
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("更换背景", "图片打不开：%s" % exc)
+            return
+        try:
+            folder = os.path.join(project_root(), "saves", "backgrounds")
+            os.makedirs(folder, exist_ok=True)
+            ext = os.path.splitext(path)[1].lower() or ".png"
+            target = os.path.join(folder, "home_bg" + ext)
+            import shutil
+
+            shutil.copyfile(path, target)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("更换背景", "保存失败：%s" % exc)
+            return
+        try:
+            ui = self.config.get("ui")
+            if not isinstance(ui, dict):
+                ui = {}
+            ui["bg_image"] = target
+            self.config["ui"] = ui
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        self._home_bg_key = None
+        self._draw_home()
+        self.append_log("主页背景已更换：%s" % target)
+
+    def _reset_home_bg(self) -> None:
+        try:
+            ui = self.config.get("ui")
+            if isinstance(ui, dict):
+                ui.pop("bg_image", None)
+                self.config["ui"] = ui
+                save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        self._home_bg_key = None
+        self._draw_home()
+        self.append_log("主页背景已恢复默认")
 
     def _frosted(self, w: int, h: int, box, tint, alpha: float, radius: float, key: str):
         """从背景裁一块做磨砂玻璃卡片（圆角），按尺寸缓存。"""
@@ -1358,6 +1437,20 @@ class AppUI:
             w / 2, sy(2006), text="脚本版本 %s" % APP_VERSION,
             fill="#a9b8d4", font=(ui_font, 9),
         )
+        c.create_text(
+            w * 0.26, sy(2036), text="更换背景", fill="#9fd0ff", font=(ui_font, 9),
+            tags=("home_pickbg",),
+        )
+        c.create_text(
+            w * 0.74, sy(2036), text="恢复默认背景", fill="#9fd0ff", font=(ui_font, 9),
+            tags=("home_resetbg",),
+        )
+        c.tag_bind("home_pickbg", "<Button-1>", lambda _e: self._pick_home_bg())
+        c.tag_bind("home_pickbg", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_pickbg", "<Leave>", lambda _e: c.configure(cursor=""))
+        c.tag_bind("home_resetbg", "<Button-1>", lambda _e: self._reset_home_bg())
+        c.tag_bind("home_resetbg", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_resetbg", "<Leave>", lambda _e: c.configure(cursor=""))
 
     def _show_about(self) -> None:
         messagebox.showinfo(
