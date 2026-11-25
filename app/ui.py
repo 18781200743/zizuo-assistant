@@ -2318,6 +2318,17 @@ class AppUI:
         self.tap_once_btn.pack(side=tk.LEFT, padx=(0, 4))
         self.tap_auto_btn = ttk.Button(tap_btns, text="连点", width=10, style="Accent.TButton", command=self._toggle_tap_auto)
         self.tap_auto_btn.pack(side=tk.LEFT, padx=(0, 4))
+        tap_fly = ttk.Frame(tap)
+        tap_fly.pack(fill=tk.X, pady=(0, 6))
+        self.tap_coord_btn = ttk.Button(
+            tap_fly, text="取柱子坐标", width=11, command=self._tap_pick_coord,
+        )
+        self.tap_coord_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.tap_fly_btn = ttk.Button(
+            tap_fly, text="飞过去并点柱子", width=15, style="Accent.TButton",
+            command=self._fly_and_tap,
+        )
+        self.tap_fly_btn.pack(side=tk.LEFT)
         self.tap_status = tk.StringVar(value="未开始")
         ttk.Label(tap, textvariable=self.tap_status, foreground="#1a4d8f", wraplength=440, justify=tk.LEFT).pack(anchor=tk.W)
         self._play_panels["tap"] = tap
@@ -2941,6 +2952,60 @@ class AppUI:
         if w <= 0 or h <= 0:
             return None
         return w / 2.0, h / 2.0 - offset
+
+    def _tap_pick_coord(self) -> None:
+        try:
+            self.pick_coord()
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.tap_status.set("取坐标失败：%s" % exc)
+            except tk.TclError:
+                pass
+
+    def _fly_and_tap(self) -> None:
+        world = getattr(self, "_picked_world", None)
+        if not world:
+            try:
+                self.tap_status.set("先点「取柱子坐标」，在游戏里点一下柱子")
+            except tk.TclError:
+                pass
+            return
+        x, y = float(world[0]), float(world[1])
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.set)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.set('blinkTo',{x:%f,y:%f,mode:'instant'}));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()" % (x, y)
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.tap_status.set("飞过去失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            try:
+                self.tap_status.set(str((data or {}).get("message") or "飞过去失败"))
+            except tk.TclError:
+                pass
+            return
+        try:
+            self.tap_status.set("已飞过去 (%.0f, %.0f)，落地后自动点柱子…" % (x, y))
+        except tk.TclError:
+            pass
+        self.root.after(2200, lambda: self._tap_burst(5))
+
+    def _tap_burst(self, left: int) -> None:
+        if left <= 0:
+            try:
+                self.tap_status.set("已点完，看看柱子亮没亮")
+            except tk.TclError:
+                pass
+            return
+        self._tap_once()
+        self.root.after(700, lambda: self._tap_burst(left - 1))
 
     def _tap_once(self) -> None:
         point = self._tap_point()
