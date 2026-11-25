@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 158
+RUNTIME_VERSION = 159
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 158
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 158;
+  const VERSION = 159;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5710,7 +5710,7 @@ RUNTIME_JS = r"""
     noVisitTries: 0, noActionTries: 0, noActionStreak: 0, dryRun: false,
     farmKey: '', didSteal: false, didHelp: false,
     visited: Object.create(null), pendingKey: '', nextMisses: 0,
-    stealCount: 0, helpCount: 0, nextCount: 0,
+    stealCount: 0, helpCount: 0, nextCount: 0, openedFarm: false,
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
@@ -6121,6 +6121,7 @@ RUNTIME_JS = r"""
       farmAuto.visited = Object.create(null);
       farmAuto.pendingKey = '';
       farmAuto.nextMisses = 0;
+      farmAuto.openedFarm = false;
       farmAuto.action = '去偷菜/施肥';
       farmAuto.last = '自己的菜还没熟，去好友农场偷菜/施肥…';
       farmAuto.busyUntil = Date.now() + 200;
@@ -6137,6 +6138,14 @@ RUNTIME_JS = r"""
       farmAuto.last = '正在进入好友农场…';
       farmAuto.busyUntil = Date.now() + 3000;
       farmAuto.timer = setTimeout(farmTick, 3000);
+      return;
+    }
+    if (!farmAuto.openedFarm && svc && typeof svc.LXAY === 'function') {
+      farmAuto.openedFarm = true;
+      farmAuto.last = '打开农场界面…';
+      try { svc.LXAY(); } catch (_) { /* ignore */ }
+      farmAuto.busyUntil = Date.now() + 2500;
+      farmAuto.timer = setTimeout(farmTick, 2500);
       return;
     }
     farmAuto.noVisitTries += 1;
@@ -6303,6 +6312,15 @@ RUNTIME_JS = r"""
     }
 
     if (!svc.OUDX || !svc.OUDX()) {
+      if (!farmAuto.openedFarm && typeof svc.LXAY === 'function') {
+        farmAuto.openedFarm = true;
+        farmAuto.action = '打开农场界面';
+        farmAuto.last = '打开农场界面…';
+        try { svc.LXAY(); } catch (_) { /* ignore */ }
+        farmAuto.busyUntil = Date.now() + 2500;
+        farmAuto.timer = setTimeout(farmTick, 2500);
+        return;
+      }
       farmAuto.noVisitTries += 1;
       farmAuto.action = '进入好友农场';
       farmAuto.last = '正在打开好友农场…';
@@ -6360,6 +6378,7 @@ RUNTIME_JS = r"""
     farmAuto.stealCount = 0;
     farmAuto.helpCount = 0;
     farmAuto.nextCount = 0;
+    farmAuto.openedFarm = false;
     farmAuto.phase = visiting ? 'visit' : '';
     farmAuto.ownMature = 0;
     farmAuto.emptyPlots = 0;
