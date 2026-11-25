@@ -1105,6 +1105,47 @@ class AppUI:
         self._draw_home()
         self.append_log("主页背景已更换：%s" % target)
 
+    def _home_bg_options(self):
+        folder = os.path.join(project_root(), "saves", "backgrounds")
+        items = [""]
+        try:
+            for name in sorted(os.listdir(folder)):
+                if name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                    items.append(os.path.join(folder, name))
+        except OSError:
+            pass
+        return items
+
+    def _cycle_home_bg(self) -> None:
+        options = self._home_bg_options()
+        if len(options) <= 1:
+            self._pick_home_bg()
+            return
+        current = self._home_bg_custom_path()
+        try:
+            index = options.index(current)
+        except ValueError:
+            index = -1
+        target = options[(index + 1) % len(options)]
+        try:
+            ui = self.config.get("ui")
+            if not isinstance(ui, dict):
+                ui = {}
+            if target:
+                ui["bg_image"] = target
+            else:
+                ui.pop("bg_image", None)
+            self.config["ui"] = ui
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        self._home_bg_key = None
+        self._draw_home()
+        try:
+            self.append_log("已切换主页背景：%s" % (os.path.basename(target) if target else "默认"))
+        except Exception:  # noqa: BLE001
+            pass
+
     def _reset_home_bg(self) -> None:
         try:
             ui = self.config.get("ui")
@@ -1438,13 +1479,20 @@ class AppUI:
             fill="#a9b8d4", font=(ui_font, 9),
         )
         c.create_text(
-            w * 0.26, sy(2036), text="更换背景", fill="#9fd0ff", font=(ui_font, 9),
+            w * 0.20, sy(2036), text="切换背景", fill="#9fd0ff", font=(ui_font, 9),
+            tags=("home_cyclebg",),
+        )
+        c.create_text(
+            w * 0.50, sy(2036), text="更换背景", fill="#9fd0ff", font=(ui_font, 9),
             tags=("home_pickbg",),
         )
         c.create_text(
-            w * 0.74, sy(2036), text="恢复默认背景", fill="#9fd0ff", font=(ui_font, 9),
+            w * 0.80, sy(2036), text="恢复默认", fill="#9fd0ff", font=(ui_font, 9),
             tags=("home_resetbg",),
         )
+        c.tag_bind("home_cyclebg", "<Button-1>", lambda _e: self._cycle_home_bg())
+        c.tag_bind("home_cyclebg", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_cyclebg", "<Leave>", lambda _e: c.configure(cursor=""))
         c.tag_bind("home_pickbg", "<Button-1>", lambda _e: self._pick_home_bg())
         c.tag_bind("home_pickbg", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_pickbg", "<Leave>", lambda _e: c.configure(cursor=""))
