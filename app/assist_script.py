@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 172
+RUNTIME_VERSION = 176
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 172
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 172;
+  const VERSION = 176;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3161,9 +3161,10 @@ RUNTIME_JS = r"""
   }
 
   function dailySleep(ms) {
-    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
   }
-
   function dailyActiveNode(name) {
     try {
       const scene = window.cc.director.getScene();
@@ -3213,7 +3214,24 @@ RUNTIME_JS = r"""
       const views = dailyViews();
       if (!views.length) break;
       const name = views[views.length - 1];
-      const view = dailyActiveNode(name);
+      let view = dailyActiveNode(name);
+      if (!view) {
+        // 有些弹窗的视图名和 Modal 名不一致（如 Modal_MailView -> MailListPopupView）
+        const base = name.replace(/View$/, '');
+        try {
+          const scene = window.cc.director.getScene();
+          (function walk(node) {
+            if (view) return;
+            const nm = String(node.name || '');
+            if (node.activeInHierarchy && nm.indexOf('Modal_') !== 0 && /View$/.test(nm)
+              && (nm.indexOf(name) >= 0 || (base.length >= 3 && nm.indexOf(base) >= 0))) {
+              view = node;
+              return;
+            }
+            (node.children || []).forEach(walk);
+          })(scene);
+        } catch (_) { /* ignore */ }
+      }
       if (!view) break;
       let done = false;
       (view.components || view._components || []).forEach(function (comp) {
@@ -3225,6 +3243,45 @@ RUNTIME_JS = r"""
           try { comp.SCWE(); closed += 1; done = true; } catch (_) { /* ignore */ }
         }
       });
+      if (!done) {
+        // 没有 SCWE：找关闭按钮
+        const names = ['btn_close', 'closeBtn', 'CloseBtn', 'BtnClose', 'close', 'Close', 'btn'];
+        let hit = null;
+        (function find(node, depth) {
+          if (hit || depth > 10) return;
+          if (node.activeInHierarchy && names.indexOf(String(node.name || '')) >= 0) {
+            hit = node;
+            return;
+          }
+          (node.children || []).forEach(function (kid) { find(kid, depth + 1); });
+        })(view, 0);
+        if (hit) {
+          const comps = hit.components || hit._components || [];
+          for (let c = 0; c < comps.length; c += 1) {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(comps[c]) || ''; } catch (_) { cls = ''; }
+            if (cls === 'BPNN' || cls === 'cc.Button') {
+              try { hit.emit('click', comps[c]); closed += 1; done = true; } catch (_) { /* ignore */ }
+              break;
+            }
+          }
+        }
+      }
+      if (!done) {
+        // 再不行就点弹窗遮罩本身
+        const modal = dailyActiveNode('Modal_' + name);
+        if (modal) {
+          const comps = modal.components || modal._components || [];
+          for (let m = 0; m < comps.length; m += 1) {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(comps[m]) || ''; } catch (_) { cls = ''; }
+            if (cls === 'cc.Button') {
+              try { modal.emit('click', comps[m]); closed += 1; done = true; } catch (_) { /* ignore */ }
+              break;
+            }
+          }
+        }
+      }
       if (!done) break;
     }
     return closed;
@@ -5402,6 +5459,15 @@ RUNTIME_JS = r"""
     message: '「' + label + '」还没接入当前版本（红包已经可用，其它功能正在做）',
   });
 
+  function stopAllFeatures() {
+    try { farmStop('已关闭'); } catch (_) { /* ignore */ }
+    try { farmClearStopTimers(); } catch (_) { /* ignore */ }
+    try { dailyClaimsStop(); } catch (_) { /* ignore */ }
+    try { plankStop('已关闭'); } catch (_) { /* ignore */ }
+    try { set('stopAll'); } catch (_) { /* ignore */ }
+    return { ok: true, message: '已全部关闭' };
+  }
+
   function set(feature, value) {
     probe();
     if (feature === 'stopAll') {
@@ -7026,6 +7092,7 @@ RUNTIME_JS = r"""
     dailyClaimsStart,
     dailyClaimsStop,
     dailyClaimsState,
+    stopAll: stopAllFeatures,
     claimAllDailyTabs,
     claimDailyViaService,
     completeDailyWithCards,
