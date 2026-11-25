@@ -2273,7 +2273,7 @@ class AppUI:
         self.daily_mail_var = tk.BooleanVar(value=True)
         self.daily_cards_var = tk.BooleanVar(value=False)
         self.daily_market_var = tk.BooleanVar(value=True)
-        self.daily_fund_var = tk.BooleanVar(value=True)
+        self.daily_fund_var = tk.BooleanVar(value=False)
         self.daily_activity_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(daily_checks, text="任务奖励", variable=self.daily_task_var).pack(side=tk.LEFT)
         ttk.Checkbutton(daily_checks, text="福利战令", variable=self.daily_welfare_var).pack(side=tk.LEFT, padx=(8, 0))
