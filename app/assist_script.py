@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 194
+RUNTIME_VERSION = 195
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 194
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 194;
+  const VERSION = 195;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1411,7 +1411,7 @@ RUNTIME_JS = r"""
    *
    * 全部照参考工具的接口实现（别名 → 4 位随机名的映射见 assist_mapping.json）：
    *   倍伤：hook 受伤结算 JPVU.prototype.BMGQ，只放大「我方英雄」打出的伤害字段；
-   *   视野：改怪物配置 MonsterAttribute.QOML（初始索敌半径），当前地图实例再写 QJVQ.NAYM；
+   *   视野：改怪物配置 MonsterAttribute.PKMY（初始索敌半径），当前地图实例再写 QJVQ.NAYM；
    *   冷却：改技能冷却对象 VSWM.XAEU（毫秒）——优先写当前战斗配置，退回全局技能表。
    * 这三项和「地图刷新」互斥：参考工具同样要求先关地图刷新再改战斗参数。
    * ------------------------------------------------------------------ */
@@ -1457,6 +1457,19 @@ RUNTIME_JS = r"""
 
   /** 配置读取器：参考工具的 az_peizhiGen + fw_tongyongDanli + az_chaPeizhi。 */
   function combatManager(cfg) {
+    // 新版配置读取器：挂在服务持有者下面（如 DYCU.NFCJ），是已初始化的实例
+    if (cfg.config.holder) {
+      for (const pair of window.System.entries()) {
+        const exports = pair && pair[1];
+        if (!exports || typeof exports !== 'object') continue;
+        let value = null;
+        try { value = exports[cfg.config.holder]; } catch (_) { continue; }
+        if (value && cfg.config.manager) {
+          try { value = value[cfg.config.manager]; } catch (_) { value = null; }
+        }
+        if (value && typeof value[cfg.config.table] === 'function') return value;
+      }
+    }
     const cls = combatClass(cfg.config.module);
     if (!cls) throw Error('游戏配置模块（' + cfg.config.module + '）还没加载，请进入游戏主界面后重试');
     let manager = null;
@@ -1688,7 +1701,7 @@ RUNTIME_JS = r"""
     for (const row of monsters) {
       if (!row) continue;
       const value = row[cfg.config.vision];
-      if (value === 350 || value === 500) rows.push(row);
+      if (typeof value === 'number' && value >= 300 && value <= 600) rows.push(row);
     }
     if (!rows.length) throw Error('怪物配置里没找到可改的视野字段（版本可能变了）');
     return { manager, monsters, rows };
@@ -1703,6 +1716,10 @@ RUNTIME_JS = r"""
     const ids = new Set();
     for (const row of scan.rows) ids.add(row[cfg.world.configId]);
     let configs = 0;
+    // 配置表行本身就是刷怪用的对象：直接改，进图后新刷的怪都会用 0 视野
+    for (const row of scan.rows) {
+      if (combatWrite(list, row, cfg.config.vision, target)) configs += 1;
+    }
     if (core && typeof core[cfg.world.monsterConfig] === 'function') {
       for (const row of scan.rows) {
         const id = row[cfg.world.configId];
