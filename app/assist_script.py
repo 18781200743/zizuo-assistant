@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 177
+RUNTIME_VERSION = 179
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 177
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 177;
+  const VERSION = 179;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3549,6 +3549,163 @@ RUNTIME_JS = r"""
       dailyClaim.running = false;
       dailyClaim.step = '';
     }
+  }
+
+  // ---------------- 荣耀竞技场 ----------------
+  const arenaAuto = {
+    running: false,
+    step: '',
+    last: '',
+    error: '',
+    done: 0,
+    wins: 0,
+    rank: '',
+    token: 0,
+    log: [],
+  };
+
+  function arenaLog(text) {
+    const line = String(text || '');
+    arenaAuto.last = line;
+    arenaAuto.log.push(line);
+    if (arenaAuto.log.length > 30) arenaAuto.log.shift();
+  }
+
+  function arenaView() {
+    return dailyActiveNode('NormalArenaMainView') || dailyActiveNode('ArenaMainView');
+  }
+
+  function arenaOpponents() {
+    const rows = [];
+    const root = arenaView();
+    if (!root) return rows;
+    (function walk(node) {
+      if (String(node.name || '') === 'ArenaMainItem' && node.activeInHierarchy) rows.push(node);
+      (node.children || []).forEach(walk);
+    })(root);
+    return rows;
+  }
+
+  function arenaChild(node, name) {
+    let hit = null;
+    (function walk(n) {
+      if (hit) return;
+      if (String(n.name || '') === name && n.activeInHierarchy) { hit = n; return; }
+      (n.children || []).forEach(walk);
+    })(node);
+    return hit;
+  }
+
+  function arenaText(node, name) {
+    const target = arenaChild(node, name);
+    if (!target) return '';
+    return dailyNodeText(target, 2);
+  }
+
+  function arenaState() {
+    const root = arenaView();
+    const rank = root ? arenaText(root, 'rankText') : '';
+    return {
+      running: arenaAuto.running,
+      step: arenaAuto.step,
+      last: arenaAuto.last,
+      error: arenaAuto.error,
+      done: arenaAuto.done,
+      wins: arenaAuto.wins,
+      rank: rank || arenaAuto.rank,
+      log: arenaAuto.log.slice(-10),
+      viewed: !!root,
+    };
+  }
+
+  async function arenaFight(item) {
+    const free = arenaChild(item, 'freeBtn');
+    const attack = arenaChild(item, 'attackBtn');
+    const btn = free || attack;
+    if (!btn) return false;
+    if (!dailyClickNode(btn)) return false;
+    await dailySleep(2600);
+    // 战斗/结算界面：点确定、继续挑战，直到回到竞技场主界面
+    for (let i = 0; i < 30; i += 1) {
+      if (arenaView()) return true;
+      if (dailyActiveNode('ArenaBattleResultView')) {
+        dailyClickTexts(['确定', '继续挑战', '关闭'], 3);
+      } else {
+        dailyClickTexts(['跳过', '自动', '继续挑战'], 3);
+      }
+      await dailySleep(1000);
+    }
+    return !!arenaView();
+  }
+
+  async function arenaRun(count, takeFirst, token) {
+    const alive = function () { return arenaAuto.running && arenaAuto.token === token; };
+    arenaAuto.running = true;
+    arenaAuto.error = '';
+    arenaAuto.done = 0;
+    arenaAuto.wins = 0;
+    arenaAuto.log = [];
+    arenaAuto.step = '检查界面';
+    arenaLog('开始荣耀竞技场');
+    try {
+      if (!arenaView()) {
+        arenaAuto.error = '请先打开荣耀竞技场';
+        arenaLog('请先打开荣耀竞技场');
+        return;
+      }
+      const limit = Math.max(0, Number(count) || 0) || 99;
+      while (arenaAuto.done < limit) {
+        if (!alive()) return;
+        const items = arenaOpponents();
+        if (!items.length) {
+          arenaLog('没有可挑战的对手');
+          break;
+        }
+        // 抢第一：优先打列表第一个（排名最高的对手）
+        let pick = items[0];
+        if (!takeFirst) {
+          pick = items.find(function (it) { return !!arenaChild(it, 'freeBtn'); }) || items[0];
+        }
+        arenaAuto.step = '第 ' + (arenaAuto.done + 1) + ' 场';
+        const name = arenaText(pick, 'userName') || '对手';
+        arenaLog('挑战：' + name);
+        const ok = await arenaFight(pick);
+        arenaAuto.done += 1;
+        if (!ok) {
+          arenaAuto.error = '战斗没有返回竞技场';
+          arenaLog('战斗没有返回竞技场');
+          break;
+        }
+        const st = arenaState();
+        arenaAuto.rank = st.rank || arenaAuto.rank;
+        arenaLog('完成第 ' + arenaAuto.done + ' 场' + (arenaAuto.rank ? '（' + arenaAuto.rank + '）' : ''));
+        await dailySleep(1200);
+      }
+      arenaAuto.step = '完成';
+      arenaLog('竞技场完成');
+    } catch (cause) {
+      arenaAuto.error = msgOf(cause);
+      arenaLog('出错：' + msgOf(cause));
+    } finally {
+      arenaAuto.running = false;
+      arenaAuto.step = '';
+    }
+  }
+
+  function arenaStart(opts) {
+    if (arenaAuto.running) return { ok: true, message: '正在挑战中' };
+    arenaAuto.token += 1;
+    const token = arenaAuto.token;
+    void arenaRun(opts && opts.count, !!(opts && opts.takeFirst), token);
+    return { ok: true, message: '开始竞技场挑战' };
+  }
+
+  function arenaStop() {
+    arenaAuto.running = false;
+    arenaAuto.token += 1;
+    arenaAuto.step = '';
+    arenaLog('已停止');
+    return { ok: true };
   }
 
   function dailyClaimsStart(items) {
@@ -7109,6 +7266,9 @@ RUNTIME_JS = r"""
     dailyClaimsStart,
     dailyClaimsStop,
     dailyClaimsState,
+    arenaStart,
+    arenaStop,
+    arenaState,
     stopAll: stopAllFeatures,
     claimAllDailyTabs,
     claimDailyViaService,

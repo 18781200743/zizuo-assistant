@@ -2229,6 +2229,7 @@ class AppUI:
             chooser.columnconfigure(col, weight=1)
         for index, (key, text) in enumerate((
             ("daily", "日常任务"),
+            ("arena", "荣耀竞技场"),
             ("plank", "跳一跳"),
             ("farm", "农场"),
             ("talisman", "护符升级"),
@@ -2292,6 +2293,42 @@ class AppUI:
             wraplength=440, justify=tk.LEFT,
         ).pack(anchor=tk.W)
         self._play_panels["daily"] = daily
+
+        # ---- 荣耀竞技场 ----
+        arena = ttk.LabelFrame(content, text="荣耀竞技场", padding=8)
+        tk.Label(
+            arena,
+            text="先打开游戏里的荣耀竞技场，再点开始。\n"
+                 "次数填 0 = 一直打到没次数；勾「抢第一」会一直打列表最上面的对手。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
+        arena_row = ttk.Frame(arena)
+        arena_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(arena_row, text="挑战次数").pack(side=tk.LEFT)
+        self.arena_count_var = tk.StringVar(value="0")
+        ttk.Spinbox(
+            arena_row, from_=0, to=99, width=5, textvariable=self.arena_count_var,
+        ).pack(side=tk.LEFT, padx=(6, 12))
+        self.arena_first_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(arena_row, text="抢第一", variable=self.arena_first_var).pack(side=tk.LEFT)
+        arena_btns = ttk.Frame(arena)
+        arena_btns.pack(fill=tk.X, pady=(0, 6))
+        self.arena_start_btn = ttk.Button(
+            arena_btns, text="开始挑战", width=12, style="Accent.TButton", command=self._arena_start,
+        )
+        self.arena_start_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.arena_stop_btn = ttk.Button(
+            arena_btns, text="停止", width=8, command=self._arena_stop,
+        )
+        self.arena_stop_btn.pack(side=tk.LEFT)
+        self.arena_status = tk.StringVar(value="未开始")
+        ttk.Label(
+            arena, textvariable=self.arena_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        self._play_panels["arena"] = arena
 
         # ---- 跳一跳（秘境探宝） ----
         plank = ttk.LabelFrame(content, text="跳一跳（秘境探宝自动跳）", padding=8)
@@ -2556,6 +2593,89 @@ class AppUI:
             except tk.TclError:
                 pass
         self.root.after(800, self._daily_poll)
+
+    def _arena_start(self) -> None:
+        if getattr(self, "_arena_running", False):
+            return
+        try:
+            count = int(float(self.arena_count_var.get() or 0))
+        except (TypeError, ValueError):
+            count = 0
+        payload = json.dumps({"count": max(0, min(99, count)), "takeFirst": bool(self.arena_first_var.get())})
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.arenaStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.arenaStart(" + payload + "));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.arena_status.set("启动失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            try:
+                self.arena_status.set(str((data or {}).get("message") or "启动失败"))
+            except tk.TclError:
+                pass
+            return
+        self._arena_running = True
+        try:
+            self.arena_start_btn.configure(state=tk.DISABLED)
+            self.arena_status.set("开始挑战…")
+        except tk.TclError:
+            pass
+        self._arena_poll()
+
+    def _arena_stop(self) -> None:
+        try:
+            self._plank_eval(
+                "(window.__zzAssist&&window.__zzAssist.arenaStop"
+                "&&window.__zzAssist.arenaStop(),'ok')"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        self._arena_running = False
+        try:
+            self.arena_start_btn.configure(state=tk.NORMAL)
+            self.arena_status.set("已停止")
+        except tk.TclError:
+            pass
+
+    def _arena_poll(self) -> None:
+        if not getattr(self, "_arena_running", False):
+            return
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.arenaState)return 'null';"
+                "return JSON.stringify(a.arenaState());}catch(e){return 'null'}})()"
+            )
+            st = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception:  # noqa: BLE001
+            st = None
+        if isinstance(st, dict):
+            text = "竞技场：%s · 已打 %d 场" % (st.get("step") or "", int(st.get("done") or 0))
+            if st.get("rank"):
+                text += " · " + str(st.get("rank"))
+            if st.get("last"):
+                text += " · " + str(st.get("last"))
+            if st.get("error"):
+                text += " · " + str(st.get("error"))
+            try:
+                if st.get("running"):
+                    self.arena_status.set(text)
+                else:
+                    self._arena_running = False
+                    self.arena_start_btn.configure(state=tk.NORMAL)
+                    self.arena_status.set("已结束：" + text.replace("竞技场：", ""))
+                    return
+            except tk.TclError:
+                pass
+        self.root.after(900, self._arena_poll)
 
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)
