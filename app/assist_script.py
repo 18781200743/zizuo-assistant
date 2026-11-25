@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 193
+RUNTIME_VERSION = 194
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 193
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 193;
+  const VERSION = 194;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3446,17 +3446,16 @@ RUNTIME_JS = r"""
 
       if (items && items.task) {
         dailyClaim.step = '任务奖励';
-        if (!taskService()) {
-          // 任务模块是打开面板才加载的：先打开任务面板
-          dailyClickName('TasksBoardMenuIconView');
-          if (!(await pause(1800))) return;
-        }
-        const res = claimDailyViaService();
-        if (res && res.ok) {
-          dailyClaim.counts.task = Number(res.claimed || 0);
-          dailyLog('任务奖励：领取 ' + dailyClaim.counts.task + ' 个');
+        const engine = await dailyTaskEngine();
+        if (engine.ok) {
+          dailyClaim.counts.task = Number(engine.claimed || 0);
+          const pending = engine.pendingTypes || {};
+          const types = Object.keys(pending).map(function (k) { return k + '×' + pending[k]; }).join(' ');
+          dailyLog('任务：领取 ' + engine.claimed + ' 个'
+            + (engine.adDone ? '，广告已完成' : '')
+            + (types ? '；待做类型 ' + types : ''));
         } else {
-          dailyLog('任务奖励：' + ((res && res.error) || '读取失败'));
+          dailyLog('任务：' + (engine.error || '读取失败'));
         }
         if (!(await pause(700))) return;
       }
@@ -4480,6 +4479,33 @@ RUNTIME_JS = r"""
       });
     });
     return { ok: true, rows: rows };
+  }
+
+  /** 日常任务按类型调度：先领已完成，再处理无需战斗的类型（62 广告）。 */
+  async function dailyTaskEngine() {
+    let svc = taskService();
+    if (!svc) {
+      dailyClickName('TasksBoardMenuIconView');
+      await dailySleep(1800);
+      svc = taskService();
+    }
+    if (!svc) return { ok: false, error: '任务服务还没加载' };
+    let claimed = 0;
+    try {
+      const res = claimDailyViaService();
+      if (res && res.ok) claimed = Number(res.claimed || 0);
+    } catch (_) { /* ignore */ }
+    const board = dailyTaskBoard();
+    const pendingTypes = {};
+    (board.rows || []).forEach(function (row) {
+      if (row.status === 1) pendingTypes[row.type] = (pendingTypes[row.type] || 0) + 1;
+    });
+    let adDone = 0;
+    if (pendingTypes[62]) {
+      const ad = await adClaimDaily();
+      if (ad.ok) adDone = 1;
+    }
+    return { ok: true, claimed: claimed, adDone: adDone, pendingTypes: pendingTypes };
   }
 
   function dailyClaimsStart(items) {
