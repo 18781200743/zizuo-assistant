@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 179
+RUNTIME_VERSION = 182
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 179
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 179;
+  const VERSION = 182;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3618,6 +3618,81 @@ RUNTIME_JS = r"""
     };
   }
 
+  function arenaCloseResult() {
+    let root = dailyActiveNode('ArenaBattleResultView');
+    if (!root) {
+      const modal = dailyActiveNode('Modal_ArenaBattleResultView');
+      if (modal) {
+        const comps = modal.components || modal._components || [];
+        for (let i = 0; i < comps.length; i += 1) {
+          let cls = '';
+          try { cls = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { cls = ''; }
+          if (cls === 'cc.Button') {
+            try { modal.emit('click', comps[i]); return true; } catch (_) { /* ignore */ }
+          }
+        }
+      }
+      // 结果面板可能没有独立节点，退化为按名字找
+      root = dailyActiveNode('Modal_ArenaBattleResultView');
+    }
+    if (!root) return false;
+    let anyButton = null;
+    let textButton = null;
+    (function walk(node) {
+      const comps = node.components || node._components || [];
+      let btn = null;
+      for (let i = 0; i < comps.length; i += 1) {
+        let cls = '';
+        try { cls = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { cls = ''; }
+        if (cls === 'BPNN' || cls === 'cc.Button') { btn = comps[i]; break; }
+      }
+      if (btn && node.activeInHierarchy) {
+        if (!anyButton) anyButton = { node: node, comp: btn };
+        const text = dailyNodeText(node, 3);
+        if (!textButton && /确定|继续|关闭|领取/.test(text)) textButton = { node: node, comp: btn };
+      }
+      (node.children || []).forEach(walk);
+    })(root);
+    const target = textButton || anyButton;
+    if (target) {
+      try {
+        target.node.emit('click', target.comp);
+        return true;
+      } catch (_) { /* 继续找 */ }
+    }
+    // 结果面板外的按钮：按文字找到 Label，再向上找可点击组件
+    let clicked = false;
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        if (clicked) return;
+        (node.components || node._components || []).forEach(function (comp) {
+          if (clicked) return;
+          let label = '';
+          try {
+            if (comp instanceof window.cc.Label && comp.string) label = String(comp.string);
+          } catch (_) { label = ''; }
+          if (!/确定|继续挑战|关闭/.test(label)) return;
+          let parent = node;
+          for (let depth = 0; depth < 4 && parent; depth += 1) {
+            const comps = parent.components || parent._components || [];
+            for (let i = 0; i < comps.length; i += 1) {
+              let cls = '';
+              try { cls = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { cls = ''; }
+              if (cls === 'BPNN' || cls === 'cc.Button') {
+                try { parent.emit('click', comps[i]); clicked = true; } catch (_) { /* ignore */ }
+                return;
+              }
+            }
+            parent = parent.parent;
+          }
+        });
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return clicked;
+  }
+
   async function arenaFight(item) {
     const free = arenaChild(item, 'freeBtn');
     const attack = arenaChild(item, 'attackBtn');
@@ -3628,11 +3703,12 @@ RUNTIME_JS = r"""
     // 战斗/结算界面：点确定、继续挑战，直到回到竞技场主界面
     for (let i = 0; i < 30; i += 1) {
       if (arenaView()) return true;
-      if (dailyActiveNode('ArenaBattleResultView')) {
-        dailyClickTexts(['确定', '继续挑战', '关闭'], 3);
-      } else {
-        dailyClickTexts(['跳过', '自动', '继续挑战'], 3);
+      if (arenaCloseResult()) {
+        await dailySleep(1200);
+        if (arenaView()) return true;
+        continue;
       }
+      dailyClickTexts(['跳过', '自动'], 3);
       await dailySleep(1000);
     }
     return !!arenaView();
@@ -3648,6 +3724,8 @@ RUNTIME_JS = r"""
     arenaAuto.step = '检查界面';
     arenaLog('开始荣耀竞技场');
     try {
+      // 上次战斗停在结算界面：先关掉再继续
+      if (arenaCloseResult()) await dailySleep(1400);
       if (!arenaView()) {
         arenaAuto.error = '请先打开荣耀竞技场';
         arenaLog('请先打开荣耀竞技场');
