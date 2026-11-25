@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 154
+RUNTIME_VERSION = 155
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 154
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 154;
+  const VERSION = 155;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -5709,6 +5709,7 @@ RUNTIME_JS = r"""
     steps: 0, last: '', action: '', error: '', busyUntil: 0,
     noVisitTries: 0, noActionTries: 0, noActionStreak: 0, dryRun: false,
     farmKey: '', didSteal: false, didHelp: false,
+    visited: Object.create(null), pendingKey: '', nextMisses: 0,
     service: null, serviceAt: 0,
     counters: { steal: 0, fertilize: 0, water: 0, pest: 0, known: false },
     phase: '', ownMature: 0, emptyPlots: 0, nextOwnAt: 0,
@@ -6084,6 +6085,9 @@ RUNTIME_JS = r"""
       farmAuto.didHelp = false;
       farmAuto.noActionStreak = 0;
       farmAuto.farmKey = '';
+      farmAuto.visited = Object.create(null);
+      farmAuto.pendingKey = '';
+      farmAuto.nextMisses = 0;
       farmAuto.action = '去偷菜/施肥';
       farmAuto.last = '自己的菜还没熟，去好友农场偷菜/施肥…';
       farmAuto.busyUntil = Date.now() + 200;
@@ -6122,10 +6126,19 @@ RUNTIME_JS = r"""
 
   function farmTickVisit(svc, counters, allowAuto) {
     const key = String(svc.HBJS && svc.HBJS.BZUO ? svc.HBJS.BZUO : '');
+    farmAuto.visited = farmAuto.visited || Object.create(null);
     if (key && key !== farmAuto.farmKey) {
       farmAuto.farmKey = key;
       farmAuto.didSteal = false;
       farmAuto.didHelp = false;
+      farmAuto.pendingKey = '';
+      farmAuto.nextMisses = 0;
+      if (farmAuto.visited[key]) {
+        farmAuto.visitCooldown = Date.now() + 5 * 60 * 1000;
+        if (allowAuto) return farmGoHome('已经拜访完一轮好友');
+        return farmStop('已经拜访完一轮好友');
+      }
+      farmAuto.visited[key] = 1;
     }
     const stealQuota = !counters.known || counters.steal > 0;
     const helpQuota = !counters.known || counters.fertilize > 0
@@ -6168,12 +6181,22 @@ RUNTIME_JS = r"""
           return farmStop('连续 5 位好友没有可偷/可照料作物，可能今日次数或道具已用完');
         }
       }
+      if (farmAuto.pendingKey) {
+        if (key === farmAuto.pendingKey) {
+          farmAuto.nextMisses += 1;
+          if (farmAuto.nextMisses >= 3) {
+            farmAuto.visitCooldown = Date.now() + 5 * 60 * 1000;
+            if (allowAuto) return farmGoHome('快速拜访没有切换好友，先回个人农场');
+            return farmStop('快速拜访没有切换好友，请检查游戏是否卡住或已到拜访上限');
+          }
+        } else {
+          farmAuto.nextMisses = 0;
+        }
+      }
       farmAuto.action = '下一位好友';
       farmAuto.last = '快速拜访下一位好友…';
       farmClick('GoVisitNextoneBtn');
-      farmAuto.farmKey = '';
-      farmAuto.didSteal = false;
-      farmAuto.didHelp = false;
+      farmAuto.pendingKey = key;
       farmAuto.steps += 1;
       farmAuto.noActionTries = 0;
       farmAuto.busyUntil = Date.now() + 2500;
@@ -6298,6 +6321,9 @@ RUNTIME_JS = r"""
     farmAuto.farmKey = '';
     farmAuto.didSteal = false;
     farmAuto.didHelp = false;
+    farmAuto.visited = Object.create(null);
+    farmAuto.pendingKey = '';
+    farmAuto.nextMisses = 0;
     farmAuto.phase = visiting ? 'visit' : '';
     farmAuto.ownMature = 0;
     farmAuto.emptyPlots = 0;

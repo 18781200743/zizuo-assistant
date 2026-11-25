@@ -2334,19 +2334,8 @@ class AppUI:
             farm_btns, text="停止", width=7, command=self._farm_stop,
         )
         self.farm_stop_btn.pack(side=tk.LEFT)
-        farm_log_frame = ttk.Frame(farm)
-        farm_log_frame.pack(fill=tk.BOTH, expand=True)
-        self.farm_log_text = tk.Text(
-            farm_log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
-            font=("Microsoft YaHei UI", 9), background="#f8fafc",
-        )
-        farm_sb = ttk.Scrollbar(farm_log_frame, orient=tk.VERTICAL, command=self.farm_log_text.yview)
-        self.farm_log_text.configure(yscrollcommand=farm_sb.set)
-        self.farm_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        farm_sb.pack(side=tk.RIGHT, fill=tk.Y)
         self._farm_running = False
         self._farm_last = ""
-        self._append_farm_log("农场：先打开农场界面，再点开始。")
         self._play_panels["farm"] = farm
 
         # ---- 护符升级 ----
@@ -2616,14 +2605,13 @@ class AppUI:
             self.farm_auto_btn.configure(state=tk.DISABLED)
             self.farm_own_btn.configure(state=tk.DISABLED)
             self.farm_visit_btn.configure(state=tk.DISABLED)
-            self.farm_status.set("运行中…")
+            self.farm_status.set({
+                "auto": "已开始：自动循环",
+                "own": "已开始：收自己的菜",
+                "visit": "已开始：偷菜/施肥",
+            }.get(mode_value, "已开始"))
         except tk.TclError:
             pass
-        self._append_farm_log({
-            "auto": "开始自动循环：自己的菜优先收+种，没熟就去偷菜/施肥",
-            "own": "开始收自己的菜（熟了会种菜）",
-            "visit": "开始偷菜/施肥（会快速拜访下一位好友）",
-        }.get(mode_value, "开始农场自动"))
         self.root.after(300, self._farm_poll)
 
     def _farm_stop(self) -> None:
@@ -2640,7 +2628,6 @@ class AppUI:
             self.farm_status.set("已停止")
         except tk.TclError:
             pass
-        self._append_farm_log("已停止农场自动")
 
     def _farm_poll(self) -> None:
         if not getattr(self, "_farm_running", False):
@@ -2654,11 +2641,11 @@ class AppUI:
             state = json.loads(raw) if isinstance(raw, str) else (raw or {})
             if not isinstance(state, dict):
                 state = {}
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self._farm_running = False
             self._farm_reset_buttons()
             try:
-                self.farm_status.set("读取状态失败：%s" % exc)
+                self.farm_status.set("已停止：读取状态失败")
             except tk.TclError:
                 pass
             return
@@ -2667,68 +2654,18 @@ class AppUI:
             self._farm_running = False
             self._farm_reset_buttons()
             try:
-                self.farm_status.set("停止：" + error)
+                self.farm_status.set("已停止：" + error)
             except tk.TclError:
                 pass
-            self._append_farm_log("停止：" + error)
             return
         if not state.get("running"):
             self._farm_running = False
             self._farm_reset_buttons()
-            last = str(state.get("last") or "完成")
             try:
-                self.farm_status.set("已结束：" + last)
+                self.farm_status.set("已停止")
             except tk.TclError:
                 pass
-            self._append_farm_log("农场自动结束：" + last)
             return
-        last = str(state.get("last") or "")
-        if last and last != self._farm_last:
-            self._farm_last = last
-            self._append_farm_log(last)
-        try:
-            steps = int(state.get("steps") or 0)
-        except (TypeError, ValueError):
-            steps = 0
-        action = str(state.get("action") or "")
-        mode = str(state.get("mode") or "")
-        if mode == "auto":
-            phase = str(state.get("phase") or "")
-            if phase == "visit":
-                text = "自动循环 · 好友农场偷菜/施肥"
-            elif phase in ("enter", "leave"):
-                text = "自动循环 · 切换农场"
-            else:
-                text = "自动循环 · 个人农场"
-            text += "：已处理 %d 次" % steps
-            try:
-                mature = int(state.get("ownMature") or 0)
-                empty = int(state.get("emptyPlots") or 0)
-            except (TypeError, ValueError):
-                mature = 0
-                empty = 0
-            if mature:
-                text += " · 成熟 %d 块" % mature
-            if empty:
-                text += " · 空地 %d 块" % empty
-        else:
-            text = ("收菜" if mode == "own" else "偷菜/施肥") + "：已处理 %d 次" % steps
-        if action:
-            text += " · " + action
-        counters = state.get("counters") or {}
-        if mode != "own" and isinstance(counters, dict) and counters.get("known"):
-            try:
-                steal_left = int(counters.get("steal") or 0)
-                fert_left = int(counters.get("fertilize") or 0)
-                text += " · 偷菜剩 %d · 施肥剩 %d" % (steal_left, fert_left)
-            except (TypeError, ValueError):
-                pass
-        if last:
-            text += " · " + last
-        try:
-            self.farm_status.set(text)
-        except tk.TclError:
-            pass
         try:
             self.root.after(700, self._farm_poll)
         except tk.TclError:
