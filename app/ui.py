@@ -2254,8 +2254,41 @@ class AppUI:
         self._play_content = content
 
         # ---- 日常任务 ----
-        daily = ttk.LabelFrame(content, text="日常任务", padding=10)
-        ttk.Label(daily, text="日常任务：下一步实现。").pack(anchor=tk.W)
+        daily = ttk.LabelFrame(content, text="日常任务（领取类）", padding=10)
+        tk.Label(
+            daily,
+            text="一键领取：任务奖励 / 福利战令 / 商店免费礼包 / 邮件。\n"
+                 "需要游戏已登录；弹窗会自动关闭，找不到的项会跳过并在下面提示。",
+            foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
+            anchor="w", wraplength=440, padx=8, pady=6,
+            highlightthickness=1, highlightbackground="#f0d9a8",
+        ).pack(fill=tk.X, pady=(0, 6))
+        daily_checks = ttk.Frame(daily)
+        daily_checks.pack(fill=tk.X, pady=(0, 6))
+        self.daily_task_var = tk.BooleanVar(value=True)
+        self.daily_welfare_var = tk.BooleanVar(value=True)
+        self.daily_shop_var = tk.BooleanVar(value=True)
+        self.daily_mail_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(daily_checks, text="任务奖励", variable=self.daily_task_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(daily_checks, text="福利战令", variable=self.daily_welfare_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(daily_checks, text="商店免费", variable=self.daily_shop_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(daily_checks, text="邮件", variable=self.daily_mail_var).pack(side=tk.LEFT, padx=(8, 0))
+        daily_btns = ttk.Frame(daily)
+        daily_btns.pack(fill=tk.X, pady=(0, 6))
+        self.daily_start_btn = ttk.Button(
+            daily_btns, text="开始领取", width=12, style="Accent.TButton",
+            command=self._daily_start,
+        )
+        self.daily_start_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self.daily_stop_btn = ttk.Button(
+            daily_btns, text="停止", width=8, command=self._daily_stop,
+        )
+        self.daily_stop_btn.pack(side=tk.LEFT)
+        self.daily_status = tk.StringVar(value="未开始")
+        ttk.Label(
+            daily, textvariable=self.daily_status, foreground="#1a4d8f",
+            wraplength=440, justify=tk.LEFT,
+        ).pack(anchor=tk.W)
         self._play_panels["daily"] = daily
 
         # ---- 跳一跳（秘境探宝） ----
@@ -2416,6 +2449,109 @@ class AppUI:
             self.plank_run_btn.configure(text="开始自动跳")
         except tk.TclError:
             pass
+
+    def _daily_start(self) -> None:
+        if getattr(self, "_daily_running", False):
+            return
+        items = {
+            "task": bool(self.daily_task_var.get()),
+            "welfare": bool(self.daily_welfare_var.get()),
+            "shop": bool(self.daily_shop_var.get()),
+            "mail": bool(self.daily_mail_var.get()),
+        }
+        if not any(items.values()):
+            try:
+                self.daily_status.set("先勾选要领取的项目")
+            except tk.TclError:
+                pass
+            return
+        if not self.assist.running:
+            try:
+                self.start_assist()
+            except Exception:  # noqa: BLE001
+                pass
+        payload = json.dumps(items)
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.dailyClaimsStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+                "return JSON.stringify(a.dailyClaimsStart(" + payload + "));}"
+                "catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()"
+            )
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.daily_status.set("启动失败：%s" % exc)
+            except tk.TclError:
+                pass
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            message = str((data or {}).get("message") or "启动失败")
+            try:
+                self.daily_status.set(message)
+            except tk.TclError:
+                pass
+            return
+        self._daily_running = True
+        try:
+            self.daily_start_btn.configure(state=tk.DISABLED)
+            self.daily_status.set("开始领取…")
+        except tk.TclError:
+            pass
+        self._daily_poll()
+
+    def _daily_stop(self) -> None:
+        try:
+            self._plank_eval(
+                "(window.__zzAssist&&window.__zzAssist.dailyClaimsStop"
+                "&&window.__zzAssist.dailyClaimsStop(),'ok')"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        self._daily_running = False
+        try:
+            self.daily_start_btn.configure(state=tk.NORMAL)
+            self.daily_status.set("已停止")
+        except tk.TclError:
+            pass
+
+    def _daily_poll(self) -> None:
+        if not getattr(self, "_daily_running", False):
+            return
+        try:
+            raw = self._plank_eval(
+                "(function(){try{var a=window.__zzAssist;"
+                "if(!a||!a.dailyClaimsState)return 'null';"
+                "return JSON.stringify(a.dailyClaimsState());}catch(e){return 'null'}})()"
+            )
+            st = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception:  # noqa: BLE001
+            st = None
+        if isinstance(st, dict):
+            counts = st.get("counts") or {}
+            text = "领取中：%s" % (st.get("step") or "")
+            text += " · 任务 %d · 福利 %d · 商店 %d · 邮件 %d" % (
+                int(counts.get("task") or 0),
+                int(counts.get("welfare") or 0),
+                int(counts.get("shop") or 0),
+                int(counts.get("mail") or 0),
+            )
+            if st.get("last"):
+                text += " · " + str(st.get("last"))
+            if st.get("error"):
+                text += " · 出错：" + str(st.get("error"))
+            try:
+                if st.get("running"):
+                    self.daily_status.set(text)
+                else:
+                    self._daily_running = False
+                    self.daily_start_btn.configure(state=tk.NORMAL)
+                    done = "完成" in str(st.get("last") or "")
+                    self.daily_status.set(("完成：" if done else "已结束：") + text.replace("领取中：", ""))
+                    return
+            except tk.TclError:
+                pass
+        self.root.after(800, self._daily_poll)
 
     def _plank_eval(self, expression: str) -> Any:
         bridge = getattr(self.assist, "bridge", None)

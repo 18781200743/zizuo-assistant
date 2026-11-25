@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 171
+RUNTIME_VERSION = 172
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 171
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 171;
+  const VERSION = 172;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3140,6 +3140,357 @@ RUNTIME_JS = r"""
     } catch (cause) {
       return { ok: false, error: msgOf(cause) };
     }
+  }
+
+  // ---------------- 日常领取：任务(接口) / 福利战令 / 商店免费 / 邮件 ----------------
+  const dailyClaim = {
+    running: false,
+    step: '',
+    last: '',
+    error: '',
+    counts: { task: 0, welfare: 0, shop: 0, mail: 0 },
+    log: [],
+    token: 0,
+  };
+
+  function dailyLog(text) {
+    const line = String(text || '');
+    dailyClaim.last = line;
+    dailyClaim.log.push(line);
+    if (dailyClaim.log.length > 40) dailyClaim.log.shift();
+  }
+
+  function dailySleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function dailyActiveNode(name) {
+    try {
+      const scene = window.cc.director.getScene();
+      const stack = [scene];
+      let guard = 0;
+      while (stack.length && guard < 9000) {
+        guard += 1;
+        const node = stack.pop();
+        if (!node) continue;
+        if (String(node.name || '') === name && node.activeInHierarchy) return node;
+        const kids = node.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function dailyNodesByName(name) {
+    const rows = [];
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        if (String(node.name || '') === name && node.activeInHierarchy) rows.push(node);
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return rows;
+  }
+
+  function dailyViews() {
+    const views = [];
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        const nm = String(node.name || '');
+        if (node.activeInHierarchy && nm.indexOf('Modal_') === 0) views.push(nm.replace(/^Modal_/, ''));
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return views;
+  }
+
+  /** 关掉当前所有弹窗（视图基类 SCWE = 关闭自己）。 */
+  function dailyCloseAll(limit) {
+    let closed = 0;
+    for (let i = 0; i < (limit || 6); i += 1) {
+      const views = dailyViews();
+      if (!views.length) break;
+      const name = views[views.length - 1];
+      const view = dailyActiveNode(name);
+      if (!view) break;
+      let done = false;
+      (view.components || view._components || []).forEach(function (comp) {
+        if (done) return;
+        let cls = '';
+        try { cls = window.cc.js.getClassName(comp) || ''; } catch (_) { cls = ''; }
+        if (cls.indexOf('cc.') === 0) return;
+        if (typeof comp.SCWE === 'function') {
+          try { comp.SCWE(); closed += 1; done = true; } catch (_) { /* ignore */ }
+        }
+      });
+      if (!done) break;
+    }
+    return closed;
+  }
+
+  function dailyNodeText(node, maxDepth) {
+    const parts = [];
+    (function sub(n, depth) {
+      if (depth > (maxDepth || 4)) return;
+      (n.components || n._components || []).forEach(function (comp) {
+        try {
+          if (comp instanceof window.cc.Label && comp.string) parts.push(String(comp.string).trim());
+        } catch (_) { /* ignore */ }
+      });
+      (n.children || []).forEach(function (kid) { sub(kid, depth + 1); });
+    })(node, 0);
+    return parts.filter(function (x) { return x; }).join('|');
+  }
+
+  function dailyClickNode(node) {
+    if (!node) return false;
+    let btn = null;
+    (node.components || node._components || []).forEach(function (comp) {
+      if (btn) return;
+      let cls = '';
+      try { cls = window.cc.js.getClassName(comp) || ''; } catch (_) { cls = ''; }
+      if (cls === 'BPNN' || cls === 'cc.Button') btn = comp;
+    });
+    if (!btn) {
+      (function find(kid, depth) {
+        if (btn || depth > 2) return;
+        (kid.components || kid._components || []).forEach(function (comp) {
+          if (btn) return;
+          let cls = '';
+          try { cls = window.cc.js.getClassName(comp) || ''; } catch (_) { cls = ''; }
+          if (cls === 'BPNN' || cls === 'cc.Button') btn = comp;
+        });
+        (kid.children || []).forEach(function (next) { find(next, depth + 1); });
+      })(node, 0);
+    }
+    if (!btn) return false;
+    try {
+      node.emit('click', btn);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function dailyClickName(name) {
+    return dailyClickNode(dailyActiveNode(name));
+  }
+
+  /** 点当前面板里带指定文字的按钮；跳过解锁/购买/充值/前往。 */
+  function dailyClickTexts(patterns, limit) {
+    let clicked = 0;
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        if (clicked >= (limit || 20)) return;
+        if (node.activeInHierarchy) {
+          const comps = node.components || node._components || [];
+          let isBtn = false;
+          for (let i = 0; i < comps.length; i += 1) {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { cls = ''; }
+            if (cls === 'BPNN' || cls === 'cc.Button') { isBtn = true; break; }
+          }
+          if (isBtn) {
+            const text = dailyNodeText(node, 3);
+            const bad = /解锁|购买|充值|前往|升级|挑战/.test(text);
+            if (!bad) {
+              for (let p = 0; p < patterns.length; p += 1) {
+                if (text.indexOf(patterns[p]) >= 0) {
+                  if (dailyClickNode(node)) {
+                    clicked += 1;
+                    dailyLog('领取：' + text.slice(0, 24));
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        }
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return clicked;
+  }
+
+  function dailyConfirm() {
+    let clicked = 0;
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        if (clicked >= 6) return;
+        if (node.activeInHierarchy) {
+          const comps = node.components || node._components || [];
+          let isBtn = false;
+          for (let i = 0; i < comps.length; i += 1) {
+            let cls = '';
+            try { cls = window.cc.js.getClassName(comps[i]) || ''; } catch (_) { cls = ''; }
+            if (cls === 'BPNN' || cls === 'cc.Button') { isBtn = true; break; }
+          }
+          if (isBtn) {
+            const text = dailyNodeText(node, 3).replace(/\s/g, '');
+            if (/^(确定|确认|购买|领取|领取奖励|立即领取)$/.test(text)) {
+              if (dailyClickNode(node)) clicked += 1;
+            }
+          }
+        }
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return clicked;
+  }
+
+  function dailyShopFree(limit) {
+    let clicked = 0;
+    try {
+      const scene = window.cc.director.getScene();
+      (function walk(node) {
+        if (clicked >= (limit || 30)) return;
+        if (String(node.name || '') === 'clickBtn' && node.activeInHierarchy) {
+          const text = dailyNodeText(node, 6);
+          if (text.indexOf('免费') >= 0 && text.indexOf('已售罄') < 0) {
+            if (dailyClickNode(node)) {
+              clicked += 1;
+              dailyLog('免费礼包：' + text.slice(0, 24));
+            }
+          }
+        }
+        (node.children || []).forEach(walk);
+      })(scene);
+    } catch (_) { /* ignore */ }
+    return clicked;
+  }
+
+  function dailyClaimsState() {
+    return {
+      running: dailyClaim.running,
+      step: dailyClaim.step,
+      last: dailyClaim.last,
+      error: dailyClaim.error,
+      counts: dailyClaim.counts,
+      log: dailyClaim.log.slice(-12),
+    };
+  }
+
+  async function dailyClaimsRun(items, token) {
+    const alive = function () { return dailyClaim.running && dailyClaim.token === token; };
+    const pause = async function (ms) { await dailySleep(ms); return alive(); };
+    dailyClaim.running = true;
+    dailyClaim.error = '';
+    dailyClaim.log = [];
+    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0 };
+    dailyLog('开始日常领取');
+    try {
+      dailyClaim.step = '关闭弹窗';
+      dailyCloseAll(6);
+      if (!(await pause(500))) return;
+
+      if (items && items.task) {
+        dailyClaim.step = '任务奖励';
+        const res = claimDailyViaService();
+        if (res && res.ok) {
+          dailyClaim.counts.task = Number(res.claimed || 0);
+          dailyLog('任务奖励：领取 ' + dailyClaim.counts.task + ' 个');
+        } else {
+          dailyLog('任务奖励：' + ((res && res.error) || '读取失败'));
+        }
+        if (!(await pause(700))) return;
+      }
+
+      if (items && items.welfare) {
+        dailyClaim.step = '福利 / 战令';
+        dailyCloseAll(4);
+        if (dailyClickName('WalfareCenterMenuIconView')) {
+          if (!(await pause(2200))) return;
+          let got = 0;
+          if (dailyClickName('onekeyGetRewardBtn')) got += 1;
+          got += dailyClickTexts(['一键领取', '领取'], 25);
+          dailyClaim.counts.welfare = got;
+          dailyLog('福利/战令：领取 ' + got + ' 次');
+          if (!(await pause(900))) return;
+          dailyConfirm();
+          dailyCloseAll(4);
+        } else {
+          dailyLog('福利：没找到入口');
+        }
+        if (!(await pause(500))) return;
+      }
+
+      if (items && items.shop) {
+        dailyClaim.step = '商店免费礼包';
+        dailyCloseAll(4);
+        if (dailyClickName('ShopMenuIconView')) {
+          if (!(await pause(2200))) return;
+          const navs = dailyNodesByName('ShopBottomBtnItem');
+          if (navs.length > 1) {
+            dailyClickNode(navs[1]);
+            if (!(await pause(1600))) return;
+          }
+          const tabs = ['tabItem1', 'tabItem2', 'tabItem3'];
+          for (let i = 0; i < tabs.length; i += 1) {
+            if (!dailyClickName(tabs[i])) continue;
+            if (!(await pause(1600))) return;
+            const got = dailyShopFree(30);
+            dailyClaim.counts.shop += got;
+            if (got) dailyConfirm();
+            if (!(await pause(600))) return;
+          }
+          dailyLog('商店免费：' + dailyClaim.counts.shop + ' 个');
+          dailyCloseAll(4);
+        } else {
+          dailyLog('商店：没找到入口');
+        }
+        if (!(await pause(500))) return;
+      }
+
+      if (items && items.mail) {
+        dailyClaim.step = '邮件';
+        dailyCloseAll(4);
+        if (dailyClickName('MoreMenuIconView')) {
+          if (!(await pause(900))) return;
+          if (dailyClickName('EmailMenuIconView')) {
+            if (!(await pause(2000))) return;
+            const got = dailyClickTexts(['一键领取', '全部领取', '领取'], 40);
+            dailyClaim.counts.mail = got;
+            dailyLog('邮件：领取 ' + got + ' 次');
+            if (!(await pause(700))) return;
+            dailyConfirm();
+            dailyCloseAll(4);
+          } else {
+            dailyLog('邮件：没找到入口');
+          }
+        } else {
+          dailyLog('更多：没找到入口');
+        }
+      }
+
+      dailyClaim.step = '完成';
+      dailyLog('日常领取完成');
+    } catch (cause) {
+      dailyClaim.error = msgOf(cause);
+      dailyLog('出错：' + msgOf(cause));
+    } finally {
+      dailyClaim.running = false;
+      dailyClaim.step = '';
+    }
+  }
+
+  function dailyClaimsStart(items) {
+    if (dailyClaim.running) return { ok: true, message: '正在领取中' };
+    dailyClaim.token += 1;
+    const token = dailyClaim.token;
+    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true }, token);
+    return { ok: true, message: '开始日常领取' };
+  }
+
+  function dailyClaimsStop() {
+    dailyClaim.running = false;
+    dailyClaim.token += 1;
+    dailyClaim.step = '';
+    dailyLog('已停止');
+    return { ok: true };
   }
 
   /** 立刻重进当前地图（刷怪用），成功返回 true。 */
@@ -6672,6 +7023,9 @@ RUNTIME_JS = r"""
     monsters: monsterList,
     openDailyTasks,
     claimDailyTasks,
+    dailyClaimsStart,
+    dailyClaimsStop,
+    dailyClaimsState,
     claimAllDailyTabs,
     claimDailyViaService,
     completeDailyWithCards,
