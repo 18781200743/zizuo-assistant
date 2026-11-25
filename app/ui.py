@@ -2272,9 +2272,11 @@ class AppUI:
         self.daily_shop_var = tk.BooleanVar(value=True)
         self.daily_mail_var = tk.BooleanVar(value=True)
         self.daily_cards_var = tk.BooleanVar(value=False)
+        self.daily_market_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(daily_checks, text="任务奖励", variable=self.daily_task_var).pack(side=tk.LEFT)
         ttk.Checkbutton(daily_checks, text="福利战令", variable=self.daily_welfare_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="商店免费", variable=self.daily_shop_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(daily_checks, text="黑市免费", variable=self.daily_market_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="邮件", variable=self.daily_mail_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(daily_checks, text="用任务卡", variable=self.daily_cards_var).pack(side=tk.LEFT, padx=(8, 0))
         daily_btns = ttk.Frame(daily)
@@ -2531,6 +2533,7 @@ class AppUI:
             "shop": bool(self.daily_shop_var.get()),
             "mail": bool(self.daily_mail_var.get()),
             "cards": bool(self.daily_cards_var.get()),
+            "market": bool(self.daily_market_var.get()),
         }
         if not any(items.values()):
             try:
@@ -2603,10 +2606,11 @@ class AppUI:
         if isinstance(st, dict):
             counts = st.get("counts") or {}
             text = "领取中：%s" % (st.get("step") or "")
-            text += " · 任务 %d · 福利 %d · 商店 %d · 邮件 %d · 任务卡 %d" % (
+            text += " · 任务 %d · 福利 %d · 商店 %d · 黑市 %d · 邮件 %d · 任务卡 %d" % (
                 int(counts.get("task") or 0),
                 int(counts.get("welfare") or 0),
                 int(counts.get("shop") or 0),
+                int(counts.get("market") or 0),
                 int(counts.get("mail") or 0),
                 int(counts.get("cards") or 0),
             )

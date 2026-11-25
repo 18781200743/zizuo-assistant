@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 184
+RUNTIME_VERSION = 186
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 184
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 184;
+  const VERSION = 186;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3148,7 +3148,7 @@ RUNTIME_JS = r"""
     step: '',
     last: '',
     error: '',
-    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0 },
+    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0 },
     log: [],
     token: 0,
   };
@@ -3437,7 +3437,7 @@ RUNTIME_JS = r"""
     dailyClaim.running = true;
     dailyClaim.error = '';
     dailyClaim.log = [];
-    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0 };
+    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0 };
     dailyLog('开始日常领取');
     try {
       dailyClaim.step = '关闭弹窗';
@@ -3454,6 +3454,15 @@ RUNTIME_JS = r"""
           dailyLog('任务奖励：' + ((res && res.error) || '读取失败'));
         }
         if (!(await pause(700))) return;
+      }
+
+      if (items && items.market) {
+        dailyClaim.step = '黑市免费';
+        await marketClaimFree();
+        dailyClaim.counts.market = Number(marketAuto.bought || 0);
+        dailyLog('黑市免费：' + dailyClaim.counts.market + ' 份'
+          + (marketAuto.error ? '（' + marketAuto.error + '）' : ''));
+        if (!(await pause(500))) return;
       }
 
       if (items && items.cards) {
@@ -3549,6 +3558,151 @@ RUNTIME_JS = r"""
       dailyClaim.running = false;
       dailyClaim.step = '';
     }
+  }
+
+  // ---------------- 黑市（只买免费） ----------------
+  const marketAuto = {
+    running: false,
+    last: '',
+    error: '',
+    bought: 0,
+    log: [],
+  };
+
+  function marketLog(text) {
+    const line = String(text || '');
+    marketAuto.last = line;
+    marketAuto.log.push(line);
+    if (marketAuto.log.length > 30) marketAuto.log.shift();
+  }
+
+  function marketFindService() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.NKZU && typeof ex.NKZU === 'object') return ex.NKZU;
+    }
+    return null;
+  }
+
+  function marketCategories() {
+    const exports = rogueExports();
+    for (let i = 0; i < exports.length; i += 1) {
+      const ex = exports[i];
+      if (ex && typeof ex === 'object' && ex.UBIM && typeof ex.UBIM === 'object') {
+        return Object.keys(ex.UBIM).map(function (k) { return ex.UBIM[k]; })
+          .filter(function (v) { return Number.isInteger(v); });
+      }
+    }
+    return [];
+  }
+
+  function marketFreeItems(svc) {
+    const model = svc && svc.MFAX;
+    const list = model && model.QKLX;
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (item) {
+      if (!item) return false;
+      const price = Number(item.OHRU);
+      const currency = Number(item.AYWH);
+      const remaining = Number(item.GDYL);
+      if (price !== 0 || currency !== 0) return false;
+      if (!(remaining > 0)) return false;
+      if (item.SSXU) return false;           // 需要看广告，跳过
+      try { if (typeof item.WMBY === 'function' && !item.WMBY()) return false; } catch (_) { return false; }
+      try { if (typeof item.YHDB === 'function' && !item.YHDB()) return false; } catch (_) { return false; }
+      return true;
+    });
+  }
+
+  async function marketClaimFree() {
+    marketAuto.running = true;
+    marketAuto.error = '';
+    marketAuto.bought = 0;
+    marketAuto.log = [];
+    marketLog('开始黑市免费领取');
+    try {
+      let svc = marketFindService();
+      if (!svc) {
+        // 黑市模块是打开界面才加载的：先点主界面的黑市图标
+        if (dailyClickName('BlackMarketMenuIconView')) {
+          marketLog('打开黑市界面…');
+          await dailySleep(2200);
+          svc = marketFindService();
+        }
+      }
+      if (!svc) {
+        marketAuto.error = '游戏里没有黑市服务（黑市界面可能没开）';
+        marketLog(marketAuto.error);
+        return;
+      }
+      const tabs = marketCategories();
+      if (!tabs.length) {
+        marketAuto.error = '黑市分类还没加载';
+        marketLog(marketAuto.error);
+        return;
+      }
+      for (let t = 0; t < tabs.length; t += 1) {
+        try { await svc.DFNL(tabs[t]); } catch (_) { /* ignore */ }
+      }
+      const items = marketFreeItems(svc);
+      if (!items.length) {
+        marketLog('没有可领取的免费商品');
+        return;
+      }
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        const id = item.FYXR;
+        const zu = item.BXTK;
+        let remaining = Number(item.GDYL) || 0;
+        const label = '商品 ' + id;
+        marketLog('领取：' + label + ' × ' + remaining);
+        for (let n = 0; n < remaining; n += 1) {
+          if (svc.AWFN) {
+            marketLog('游戏正在购买其他商品，稍后再试');
+            break;
+          }
+          let result = null;
+          try {
+            svc.AWFN = true;
+            result = await svc.ROFZ(id, zu, 1, false);
+            if (result && typeof result.YVVI === 'function' && !result.YVVI()) {
+              result.YLBY();
+              result = await svc.ADHB(result);
+            }
+          } catch (cause) {
+            marketAuto.error = '领取失败：' + msgOf(cause);
+            marketLog(marketAuto.error);
+            break;
+          } finally {
+            try { svc.AWFN = false; } catch (_) { /* ignore */ }
+          }
+          marketAuto.bought += 1;
+          try { if (typeof item.HHXQ === 'function') item.HHXQ(1); } catch (_) { /* ignore */ }
+          try { if (typeof svc.CDMY === 'function') svc.CDMY(); } catch (_) { /* ignore */ }
+          try { if (typeof svc.NDZZ === 'function') svc.NDZZ(); } catch (_) { /* ignore */ }
+          await dailySleep(600);
+        }
+        await dailySleep(300);
+      }
+      marketLog('黑市免费领取完成，共 ' + marketAuto.bought + ' 份');
+      dailyCloseAll(3);
+    } catch (cause) {
+      marketAuto.error = msgOf(cause);
+      marketLog('出错：' + msgOf(cause));
+    } finally {
+      marketAuto.running = false;
+    }
+  }
+
+  function marketState() {
+    return {
+      running: marketAuto.running,
+      last: marketAuto.last,
+      error: marketAuto.error,
+      bought: marketAuto.bought,
+      log: marketAuto.log.slice(-10),
+    };
   }
 
   // ---------------- 杀戮尖塔扫荡 ----------------
@@ -4080,7 +4234,7 @@ RUNTIME_JS = r"""
     if (dailyClaim.running) return { ok: true, message: '正在领取中' };
     dailyClaim.token += 1;
     const token = dailyClaim.token;
-    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false }, token);
+    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false, market: true }, token);
     return { ok: true, message: '开始日常领取' };
   }
 
@@ -7640,6 +7794,8 @@ RUNTIME_JS = r"""
     rogueStart,
     rogueStop,
     rogueState,
+    marketClaimFree,
+    marketState,
     stopAll: stopAllFeatures,
     claimAllDailyTabs,
     claimDailyViaService,

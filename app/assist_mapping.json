@@ -1215,6 +1215,29 @@
     "configGetter": "AWXW",
     "maxFloor": "EGJU",
     "entryCost": "TSMK"
+   },
+   "market": {
+    "service": "NKZU",
+    "query": "DFNL",
+    "categoryEnum": "UBIM",
+    "model": "MFAX",
+    "goodsList": "QKLX",
+    "goodsId": "FYXR",
+    "groupId": "BXTK",
+    "price": "OHRU",
+    "currency": "AYWH",
+    "remaining": "GDYL",
+    "needAd": "SSXU",
+    "canBuy": "WMBY",
+    "valid": "YHDB",
+    "buying": "AWFN",
+    "buy": "ROFZ",
+    "receipt": "YVVI",
+    "switchStage": "YLBY",
+    "queryReceipt": "ADHB",
+    "apply": "HHXQ",
+    "afterBuy": "CDMY",
+    "afterReward": "NDZZ"
    }
   }
  }
