@@ -1249,6 +1249,14 @@
     "activityId": "DBUI",
     "rewardList": "YCPD",
     "rewardState": "FMAE"
+   },
+   "ad": {
+    "service": "BVMD",
+    "serviceGetter": "AWXW",
+    "refresh": "XZXI",
+    "claim": "THBX",
+    "sceneEnum": "NHQN",
+    "sceneId": "VGAN"
    }
   }
  }

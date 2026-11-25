@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 191
+RUNTIME_VERSION = 192
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 191
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 191;
+  const VERSION = 192;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -3148,7 +3148,7 @@ RUNTIME_JS = r"""
     step: '',
     last: '',
     error: '',
-    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0 },
+    counts: { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0, ad: 0 },
     log: [],
     token: 0,
   };
@@ -3437,7 +3437,7 @@ RUNTIME_JS = r"""
     dailyClaim.running = true;
     dailyClaim.error = '';
     dailyClaim.log = [];
-    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0 };
+    dailyClaim.counts = { task: 0, welfare: 0, shop: 0, mail: 0, cards: 0, market: 0, fund: 0, activity: 0, ad: 0 };
     dailyLog('开始日常领取');
     try {
       dailyClaim.step = '关闭弹窗';
@@ -3504,6 +3504,18 @@ RUNTIME_JS = r"""
           dailyLog('福利：没找到入口');
         }
         if (!(await pause(500))) return;
+      }
+
+      if (items && items.ad) {
+        dailyClaim.step = '观看视频广告';
+        const res = await adClaimDaily();
+        if (res.ok) {
+          dailyClaim.counts.ad = 1;
+          dailyLog('看广告：已领取');
+        } else {
+          dailyLog('看广告：' + (res.error || '失败'));
+        }
+        if (!(await pause(600))) return;
       }
 
       if (items && items.fund) {
@@ -3594,6 +3606,35 @@ RUNTIME_JS = r"""
     } finally {
       dailyClaim.running = false;
       dailyClaim.step = '';
+    }
+  }
+
+  // ---------------- 观看视频广告（免费次数） ----------------
+  async function adClaimDaily() {
+    try {
+      const exports = rogueExports();
+      let gen = null;
+      let sceneEnum = null;
+      for (let i = 0; i < exports.length; i += 1) {
+        const ex = exports[i];
+        if (ex && typeof ex === 'object') {
+          if (!gen && ex.BVMD) gen = ex.BVMD;
+          if (!sceneEnum && ex.NHQN) sceneEnum = ex.NHQN;
+        }
+      }
+      if (!gen) return { ok: false, error: '广告模块还没加载' };
+      let svc = gen;
+      try { if (gen.AWXW) svc = gen.AWXW; } catch (_) { svc = gen; }
+      const sceneId = sceneEnum ? Number(sceneEnum.VGAN) : 0;
+      if (!(sceneId > 0)) return { ok: false, error: '广告场景无效' };
+      if (typeof svc.XZXI === 'function') {
+        try { await svc.XZXI(); } catch (_) { /* ignore */ }
+      }
+      if (typeof svc.THBX !== 'function') return { ok: false, error: '广告领取入口不可用' };
+      const res = await svc.THBX(sceneId);
+      return { ok: true, response: res };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause) };
     }
   }
 
@@ -4410,7 +4451,7 @@ RUNTIME_JS = r"""
     if (dailyClaim.running) return { ok: true, message: '正在领取中' };
     dailyClaim.token += 1;
     const token = dailyClaim.token;
-    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false, market: true, fund: true, activity: true }, token);
+    void dailyClaimsRun(items || { task: true, welfare: true, shop: true, mail: true, cards: false, market: true, fund: false, activity: true, ad: true }, token);
     return { ok: true, message: '开始日常领取' };
   }
 
