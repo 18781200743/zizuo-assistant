@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 195
+RUNTIME_VERSION = 196
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 195
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 195;
+  const VERSION = 196;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -1730,17 +1730,21 @@ RUNTIME_JS = r"""
         if (combatWrite(list, conf, cfg.config.vision, target)) configs += 1;
       }
     }
-    // 已经在场上的怪：只改「原本就在 350/500 这档」的那几类，别波及别的怪
+    // 当前地图的活怪：直接写活体属性（新版单位结构：位置.JUZL / 属性.YGSG / 阵营.SNAW）
     let units = 0;
     try {
       const ctx = mapContext();
+      const mcfg = ctx.cfg;
+      const attrKey = mcfg.unitAttr || 'YGSG';
+      const visionKey = mcfg.unitVision || 'QOGE';
+      const campKey = mcfg.unitCamp || 'SNAW';
+      const posKey = mcfg.unitPos || 'JUZL';
+      const monsterCamp = Number(mcfg.monsterCamp || 3);
       ctx.units[ctx.cfg.each](function (_index, unit) {
-        const u = ctx.cfg.unit;
-        if (u.monster && typeof unit[u.monster] === 'function' && unit[u.monster]() !== true) return false;
-        const unitId = unit[cfg.world.configId] !== undefined ? unit[cfg.world.configId] : unit[cfg.world.entityId];
-        if (!ids.has(unitId) && !ids.has(unit[cfg.world.entityId])) return false;
-        const attr = u.attribute ? unit[u.attribute] : null;
-        if (attr && combatWrite(list, attr, cfg.world.visionLive, target)) units += 1;
+        const pos = unit[posKey];
+        if (!pos || Number(pos[campKey]) !== monsterCamp) return false;
+        const attr = unit[attrKey];
+        if (attr && combatWrite(list, attr, visionKey, target)) units += 1;
         return false;
       });
     } catch (_) { /* 不在普通地图时只改配置，进图后再生效 */ }
