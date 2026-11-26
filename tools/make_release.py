@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +14,101 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 RELEASE_NAME = f"zizuo助手_{datetime.now().strftime('%Y%m%d')}"
+
+# 打包发布时绝对不带的个人字段（仅顶层）：密钥、命令、任务、抽卡记录、自定义背景
+PERSONAL_TOP_KEYS = {"license", "commands_text", "tasks", "gacha_cdp", "ui"}
+
+# 敏感字段名（不区分大小写）；注意不要用单独的 key，避免误伤 hotkey / boss_keywords
+SENSITIVE_KEY_RE = re.compile(
+    r"(license|game_?id|role_?id|openid|secret|token|cookie|password|passwd|"
+    r"account|login|session|auth|credential)",
+    re.IGNORECASE,
+)
+
+# 密钥/OpenID 形态，出现在任何值里都清掉
+SENSITIVE_VALUE_RES = (
+    re.compile(r"\bXS-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}\b", re.IGNORECASE),
+    re.compile(r"\bSS-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}\b", re.IGNORECASE),
+    re.compile(r"\bo[A-Za-z0-9_-]{20,}\b"),
+)
+
+
+def sanitize_config(value, path="$"):
+    """递归去掉密钥、游戏 ID 等个人字段，返回 (清理后的数据, 被移除的路径列表)。"""
+    removed = []
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            child = path + "." + str(key)
+            if path == "$" and key in PERSONAL_TOP_KEYS:
+                removed.append(child)
+                continue
+            if SENSITIVE_KEY_RE.search(str(key)):
+                removed.append(child)
+                continue
+            cleaned, sub = sanitize_config(item, child)
+            out[key] = cleaned
+            removed.extend(sub)
+        return out, removed
+    if isinstance(value, list):
+        out = []
+        for index, item in enumerate(value):
+            cleaned, sub = sanitize_config(item, path + "[" + str(index) + "]")
+            out.append(cleaned)
+            removed.extend(sub)
+        return out, removed
+    if isinstance(value, str) and any(rx.search(value) for rx in SENSITIVE_VALUE_RES):
+        return "", removed + [path]
+    return value, removed
+
+
+def check_config() -> list[str]:
+    """检查 config.json 并把清理后的示例配置写到 config.example.json 供预览。"""
+    path = ROOT / "config.json"
+    if not path.exists():
+        print("[安全] 没有 config.json，跳过检查")
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print("[安全] config.json 读取失败：%s" % exc)
+        return []
+    example, removed = sanitize_config(raw)
+    text = json.dumps(example, ensure_ascii=False, indent=2)
+    leaks = []
+    for rx in SENSITIVE_VALUE_RES:
+        leaks.extend(match.group(0) for match in rx.finditer(text))
+    if removed:
+        print("[安全] config.json 含个人/敏感字段，示例配置已移除：")
+        for item in removed:
+            print("       -", item)
+    else:
+        print("[安全] config.json 未发现敏感字段")
+    if leaks:
+        print("[安全][警告] 清理后仍出现密钥形态，请手动检查：", ", ".join(leaks))
+    else:
+        print("[安全] 未发现 XS-/SS- 密钥或 OpenID 残留")
+    return removed
+
+
+def write_example_config(stage: Path) -> None:
+    path = ROOT / "config.json"
+    example_path = stage / "config.example.json"
+    if not path.exists():
+        example_path.write_text("{}\n", encoding="utf-8")
+        return
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        example, removed = sanitize_config(raw)
+        example_path.write_text(
+            json.dumps(example, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if removed:
+            print("[安全] config.example.json 已移除：", ", ".join(removed))
+    except (OSError, ValueError) as exc:
+        print("[安全] config.json 读取失败，示例配置留空：", exc)
+        example_path.write_text("{}\n", encoding="utf-8")
 
 
 def _copy_tree(src: Path, dst: Path, ignore_names: set[str]) -> None:
@@ -65,12 +162,7 @@ def make_portable_zip() -> Path:
     # 空存档目录（不带你的登录态/个人存档）
     (stage / "saves").mkdir(exist_ok=True)
     (stage / "saves" / ".gitkeep").write_text("", encoding="utf-8")
-    (stage / "config.example.json").write_text(
-        (ROOT / "config.json").read_text(encoding="utf-8")
-        if (ROOT / "config.json").exists()
-        else "{}",
-        encoding="utf-8",
-    )
+    write_example_config(stage)
 
     zip_path = DIST / f"{RELEASE_NAME}.zip"
     if zip_path.exists():
@@ -175,6 +267,10 @@ def make_exe() -> Path | None:
 
 
 def main() -> None:
+    if "--check" in sys.argv:
+        check_config()
+        print("\n只检查配置，不打包。")
+        return
     DIST.mkdir(exist_ok=True)
     # 确保本机模板已在项目内
     hero = ROOT / "人物图片"
