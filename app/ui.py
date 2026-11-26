@@ -2371,8 +2371,9 @@ class AppUI:
             button = tk.Button(
                 chooser, text=text, command=lambda k=key: self._play_select(k),
                 relief=tk.FLAT, bd=0, padx=10, pady=8, cursor="hand2",
-                bg="#eef2ff", fg="#1e3a8a",
-                activebackground="#dbeafe", activeforeground="#1e3a8a",
+                bg="#ffffff", fg="#1e3a8a",
+                highlightthickness=1, highlightbackground="#e2e8f4",
+                activebackground="#eef2ff", activeforeground="#1e3a8a",
                 font=("Microsoft YaHei UI", 10, "bold"),
             )
             button.grid(
