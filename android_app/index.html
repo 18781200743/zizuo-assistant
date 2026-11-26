@@ -652,6 +652,7 @@
     <div class="sec" id="secCmd">
       <div class="sec-title">运行命令</div>
       <div class="row" style="margin-top:0"><span class="muted">一行一条，# 开头是注释</span></div>
+      <div class="row" style="margin-top:0"><span class="muted">不回城也能直接传送：传送(章节,地图)，例如 传送(1,2)</span></div>
       <select class="num sel" id="cmdCategory" style="width:100%;margin-bottom:8px"></select>
       <select class="num sel" id="cmdPreset" style="width:100%;margin-bottom:8px">
         <option value="">选择指令…</option>
@@ -663,7 +664,7 @@
         <button class="btn sm" id="cmdClear">清空</button>
         <button class="btn sm" id="cmdRecord">录制</button>
       </div>
-      <textarea class="cmdtext" id="cmdText" spellcheck="false" placeholder="点击(50.00,50.00)&#10;等待(1)&#10;移动(上,2)"></textarea>
+      <textarea class="cmdtext" id="cmdText" spellcheck="false" placeholder="点击(50.00,50.00)&#10;等待(1)&#10;移动(上,2)&#10;# 不回城也能直接传送：传送(1,2)"></textarea>
       <div class="row">
         <button class="btn" id="cmdRun">运行</button>
         <button class="btn danger" id="cmdStop">停止</button>

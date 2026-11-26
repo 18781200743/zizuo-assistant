@@ -2136,7 +2136,8 @@
     var CMD_SLOT_KEY = "zz_cmd_slots_v1";
     var CMD_SLOT_COUNT = 10;
     var CMD_DEFAULT = "# 运行命令：一行一条，# 开头是注释\n" +
-      "# 点击(50.00,50.00)\n# 等待(1)\n# 移动(上,2)\n";
+      "# 点击(50.00,50.00)\n# 等待(1)\n# 移动(上,2)\n" +
+      "# 不回城也能直接传送：传送(章节,地图)，例如 传送(1,2)\n";
 
     function cmdStatus(text) {
       if (cmdInfo) cmdInfo.textContent = text;
