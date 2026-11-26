@@ -1388,6 +1388,27 @@ class AppUI:
         c.tag_bind("home_sponsor", "<Enter>", lambda _e: c.configure(cursor="hand2"))
         c.tag_bind("home_sponsor", "<Leave>", lambda _e: c.configure(cursor=""))
 
+        # ---------- 密钥 ----------
+        kx0, ky0, kx1, ky1 = sx(591), sy(108), sx(747), sy(195)
+        unlocked = False
+        try:
+            unlocked = self._license_ok()
+        except Exception:  # noqa: BLE001
+            unlocked = False
+        c.create_polygon(
+            self._round_points(kx0, ky0, kx1, ky1, sx(14)),
+            fill="#ffffff", outline="#e6ecf7", tags=("home_license",),
+        )
+        c.create_text(
+            (kx0 + kx1) / 2, (ky0 + ky1) / 2,
+            text=("已解锁" if unlocked else "输入密钥"),
+            fill=("#0f9d58" if unlocked else "#1c4f9c"),
+            font=(ui_font, 10, "bold"), tags=("home_license",),
+        )
+        c.tag_bind("home_license", "<Button-1>", lambda _e: self._license_click())
+        c.tag_bind("home_license", "<Enter>", lambda _e: c.configure(cursor="hand2"))
+        c.tag_bind("home_license", "<Leave>", lambda _e: c.configure(cursor=""))
+
         # ---------- 辅助工具（发光六边形） ----------
         hx0, hx1 = sx(150), sx(1000)
         hy0, hy1 = sy(1145), sy(1345)
@@ -2139,6 +2160,16 @@ class AppUI:
             return is_valid_key(key, saved_id)
         except Exception:  # noqa: BLE001
             return False
+
+    def _license_click(self) -> None:
+        """首页「密钥」按钮：查看状态 / 输入密钥。"""
+        if self._license_ok():
+            game_id = self._game_role_id() or "（未打开游戏）"
+            if not messagebox.askyesno(
+                "密钥", "当前已解锁。\n游戏ID：%s\n\n要重新输入密钥吗？" % game_id,
+            ):
+                return
+        self._ask_license("全部功能")
 
     def _ask_license(self, name: str) -> bool:
         if self._license_ok():
