@@ -2180,6 +2180,23 @@ class AppUI:
         body = tk.Frame(win, bg="#f5f6fa", padx=16, pady=14)
         body.pack(fill=tk.BOTH, expand=True)
 
+        # 购买二维码：放在密钥输入上方
+        photo = None
+        try:
+            from PIL import Image, ImageTk
+
+            path = os.path.join(self.ASSET_DIR, "pay_qr.png")
+            if os.path.exists(path):
+                im = Image.open(path).convert("RGB")
+                im.thumbnail((190, 210), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+        except Exception:  # noqa: BLE001
+            photo = None
+        if photo is not None:
+            qr = tk.Label(body, image=photo, bg="#ffffff", bd=0)
+            qr.image = photo  # type: ignore[attr-defined]  # 防止被回收
+            qr.pack(pady=(0, 10))
+
         row1 = tk.Frame(body, bg="#f5f6fa")
         row1.pack(fill=tk.X, pady=(0, 10))
         tk.Label(row1, text="游戏ID：", bg="#f5f6fa", fg="#333333",
