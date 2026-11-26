@@ -48,6 +48,7 @@ from .instruction_library import (
     load_sync_presets,
     script_title,
 )
+from .license import is_valid_key
 from .instruction_runner import InstructionRunner
 from .chest_4758a import run_chest_4758a
 from .commands_store import SLOT_COUNT, load_slots, save_slots, set_slot, slot_label
@@ -2102,11 +2103,45 @@ class AppUI:
             "blink": blink,
         }
 
+    # ---------------- 密钥 ----------------
+    PROTECTED_TOOLS = {"map": "地图 / 红包", "red": "地图 / 红包",
+                       "revive": "复活 / 闪现", "blink": "复活 / 闪现"}
+    PROTECTED_PLAY = {"plank": "跳一跳", "guild": "公会情报"}
+
+    def _license_ok(self) -> bool:
+        try:
+            lic = self.config.get("license") or {}
+            return bool(lic.get("unlocked")) and is_valid_key(str(lic.get("key") or ""))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _ask_license(self, name: str) -> bool:
+        if self._license_ok():
+            return True
+        key = simpledialog.askstring(
+            "需要密钥", "「%s」需要密钥解锁：\n（找作者获取）" % name, parent=self.root,
+        )
+        if key is None:
+            return False
+        if not is_valid_key(key):
+            messagebox.showerror("密钥无效", "密钥不对，无法解锁「%s」" % name)
+            return False
+        try:
+            self.config["license"] = {"unlocked": True, "key": str(key).strip()}
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        messagebox.showinfo("已解锁", "「%s」已解锁。" % name)
+        return True
+
     def _show_tool(self, key: str) -> None:
         """点分类：只显示这一个功能；再点一次收起。"""
         if key == "gacha":
             self._switch_mode(key)
             return
+        if key in self.PROTECTED_TOOLS:
+            if not self._ask_license(self.PROTECTED_TOOLS[key]):
+                return
         sections = getattr(self, "_tool_sections", {}) or {}
         for widget in sections.values():
             try:
@@ -2114,7 +2149,10 @@ class AppUI:
             except Exception:  # noqa: BLE001
                 pass
         if key == "all":
-            for widget in sections.values():
+            locked = not self._license_ok()
+            for name, widget in sections.items():
+                if locked and name in ("map", "red", "revive", "blink"):
+                    continue
                 widget.pack(fill=tk.X, pady=(0, 8))
             self._tool_current = "all"
             return
@@ -2605,6 +2643,8 @@ class AppUI:
 
     def _play_select(self, key: str) -> None:
         """点功能按钮：只显示选中功能的下面内容，并高亮按钮。"""
+        if key in self.PROTECTED_PLAY and not self._ask_license(self.PROTECTED_PLAY[key]):
+            return
         panel = self._play_panels.get(key)
         if panel is None:
             return
