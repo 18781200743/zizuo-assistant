@@ -2212,6 +2212,12 @@ class AppUI:
         else:
             tk.Frame(card, bg="#ffffff", height=12).pack()
 
+        tk.Label(
+            card, text="先进入游戏再获取ID\n一个ID一个账户",
+            bg="#ffffff", fg="#8a94a6", justify="center",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(pady=(0, 10))
+
         self._license_id_var = tk.StringVar()
         self._license_key_var = tk.StringVar()
         self._license_status_var = tk.StringVar()
