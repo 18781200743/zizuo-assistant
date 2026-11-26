@@ -4706,7 +4706,7 @@ class AppUI:
                 pass
 
     def _guild_export_all(self) -> None:
-        """一键查询全部据点 + 每个成员的三个队战力，然后导出 CSV。"""
+        """一键查询全部据点 + 每个成员的三个队战力，然后导出 TXT（可选 CSV）。"""
         if getattr(self, "_guild_exporting", False):
             return
         self._guild_set_export_busy(True)
@@ -4810,19 +4810,23 @@ class AppUI:
         if not getattr(self, "_guild_rows", []):
             self._guild_status.set("没有可导出的数据")
             return
-        default_name = "公会战情报_%s.csv" % time.strftime("%Y%m%d_%H%M")
+        default_name = "公会战情报_%s.txt" % time.strftime("%Y%m%d_%H%M")
         path = filedialog.asksaveasfilename(
             parent=self.root,
             title="导出公会战情报",
-            defaultextension=".csv",
+            defaultextension=".txt",
             initialfile=default_name,
-            filetypes=[("CSV 文件", "*.csv"), ("所有文件", "*.*")],
+            filetypes=[
+                ("文本文件（微信/QQ 可直接打开）", "*.txt"),
+                ("CSV 文件", "*.csv"),
+                ("所有文件", "*.*"),
+            ],
         )
         if not path:
             self._guild_status.set("已取消导出（数据已缓存，可直接选中据点查看）")
             return
         try:
-            members = self._guild_write_csv(path)
+            members = self._guild_write_table(path)
         except OSError as exc:
             self._guild_status.set("导出失败：%s" % exc)
             messagebox.showerror("导出失败", str(exc), parent=self.root)
@@ -4835,10 +4839,11 @@ class AppUI:
             text += "；%d 个据点读取失败" % errors
         self._guild_status.set(text + "：" + path)
 
-    def _guild_write_csv(self, path: str) -> int:
+    def _guild_write_table(self, path: str) -> int:
         total_members = 0
+        delimiter = "\t" if path.lower().endswith(".txt") else ","
         with open(path, "w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle)
+            writer = csv.writer(handle, delimiter=delimiter)
             writer.writerow([
                 "阵营", "据点", "序号", "成员", "总战力",
                 "队1战力", "队2战力", "队3战力", "等级", "区服", "ID",

@@ -1462,9 +1462,9 @@
     next();
   }
 
-  function guildCsvCell(value) {
+  function guildTsvCell(value) {
     var text = String(value === null || value === undefined ? "" : value);
-    return '"' + text.replace(/"/g, '""') + '"';
+    return text.replace(/[\t\r\n]+/g, " ");
   }
 
   function saveTextFile(name, text, cb) {
@@ -1494,7 +1494,7 @@
         var Environment = plus.android.importClass("android.os.Environment");
         var values = new ContentValues();
         values.put("_display_name", name);
-        values.put("mime_type", "text/csv");
+        values.put("mime_type", "text/plain");
         values.put("relative_path", "Download/小太阳脚本");
         resolver = plus.android.runtimeMainActivity().getContentResolver();
         uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values);
@@ -1588,12 +1588,12 @@
         lines.push([camp === 1 ? "我方" : "敌方", members.length, g.total, g.unset]);
       });
       var text = "\ufeff" + lines.map(function (line) {
-        return line.map(guildCsvCell).join(",");
+        return line.map(guildTsvCell).join("\t");
       }).join("\r\n");
       var stamp = new Date();
       function pad(n) { return n < 10 ? "0" + n : "" + n; }
       var name = "公会战情报_" + stamp.getFullYear() + pad(stamp.getMonth() + 1)
-        + pad(stamp.getDate()) + "_" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + ".csv";
+        + pad(stamp.getDate()) + "_" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + ".txt";
       saveTextFile(name, text, function (message) {
         $("gStatus").textContent = message;
       });
@@ -1608,13 +1608,13 @@
     var url = guildExportFile.url || "";
     var path = guildExportFile.path || "";
 
-    // Android 原生分享：用 content:// 带上 CSV 文件本体
+    // Android 原生分享：用 content:// 带上 TXT 文件本体
     if (window.plus && plus.android && url.indexOf("content://") === 0) {
       try {
         var Intent = plus.android.importClass("android.content.Intent");
         var Uri = plus.android.importClass("android.net.Uri");
         var intent = new Intent(Intent.ACTION_SEND);
-        intent.setType("text/csv");
+        intent.setType("text/plain");
         intent.putExtra(Intent.EXTRA_STREAM, Uri.parse(url));
         var ClipData = plus.android.importClass("android.content.ClipData");
         intent.setClipData(ClipData.newRawUri("公会战情报", Uri.parse(url)));
@@ -1656,11 +1656,11 @@
         var Intent = plus.android.importClass("android.content.Intent");
         var Uri = plus.android.importClass("android.net.Uri");
         var intent = new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(Uri.parse(url), "text/csv");
+        intent.setDataAndType(Uri.parse(url), "text/plain");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         plus.android.runtimeMainActivity().startActivity(intent);
         return;
-      } catch (e) { /* 没有能打开 csv 的应用 */ }
+      } catch (e) { /* 没有能打开 txt 的应用 */ }
     }
     guildShare();
   }
