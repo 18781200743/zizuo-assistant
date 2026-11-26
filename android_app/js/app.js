@@ -1799,6 +1799,13 @@
       var button = $(item[2]);
       if (panel) panel.classList.toggle("open", name === key);
       if (button) button.classList.toggle("sel", name === key);
+      if (panel && name === key) {
+        setTimeout(function () {
+          try { panel.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {
+            try { panel.scrollIntoView(); } catch (e2) { /* ignore */ }
+          }
+        }, 80);
+      }
     });
     if (guildTimer) { clearInterval(guildTimer); guildTimer = null; }
     if (mazeTimer) { clearInterval(mazeTimer); mazeTimer = null; }
@@ -1869,6 +1876,26 @@
       plankSetStatus("自动跳中…");
       plankPoll();
     });
+  }
+
+  var farmRunning = false;
+  var farmTimer = null;
+  var farmLast = "";
+  var farmLogLines = [];
+
+  function farmSetStatus(text) {
+    var el = $("farmStatus");
+    if (el) el.textContent = String(text || "");
+  }
+
+  function farmLog(text) {
+    var el = $("farmLog");
+    if (!el) return;
+    var line = String(text || "").trim();
+    if (!line) return;
+    farmLogLines.push(line);
+    if (farmLogLines.length > 8) farmLogLines.shift();
+    el.textContent = farmLogLines.join("\n");
   }
 
   function farmReset() {
