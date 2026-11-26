@@ -2142,6 +2142,8 @@ class AppUI:
                 "var e2=p[1]; if(!e2||typeof e2!=='object') continue;"
                 "var m2=e2.HBJS||e2; if(m2&&typeof m2==='object'&&m2.XRFZ) return String(m2.XRFZ);"
                 "}"
+                "var rid = window.localStorage.getItem('RoleID') || window.localStorage.getItem('roleId');"
+                "if (rid) return String(rid);"
                 "return String(window.localStorage.getItem('OpenID')||'');"
                 "}catch(e){return ''}})()"
             )
