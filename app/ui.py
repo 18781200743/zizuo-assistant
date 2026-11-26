@@ -2108,30 +2108,63 @@ class AppUI:
                        "revive": "复活 / 闪现", "blink": "复活 / 闪现"}
     PROTECTED_PLAY = {"plank": "跳一跳", "guild": "公会情报"}
 
+    def _game_role_id(self) -> str:
+        """从游戏里读当前角色 ID（模型 GZZR）。"""
+        try:
+            raw = self._plank_eval(
+                "(function(){try{"
+                "for (const p of window.System.entries()) {"
+                "var e=p[1]; if(!e||typeof e!=='object') continue;"
+                "var m=e.HBJS||e; if(m&&typeof m==='object'&&m.GZZR) return String(m.GZZR);"
+                "} return ''; }catch(e){return ''}})()"
+            )
+            return str(raw or "").strip()
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _license_ok(self) -> bool:
         try:
             lic = self.config.get("license") or {}
-            return bool(lic.get("unlocked")) and is_valid_key(str(lic.get("key") or ""))
+            key = str(lic.get("key") or "")
+            saved_id = str(lic.get("game_id") or "").strip()
+            if not lic.get("unlocked") or not saved_id:
+                return False
+            current = self._game_role_id()
+            if current and saved_id != current:
+                return False
+            return is_valid_key(key, saved_id)
         except Exception:  # noqa: BLE001
             return False
 
     def _ask_license(self, name: str) -> bool:
         if self._license_ok():
             return True
+        game_id = self._game_role_id()
+        if not game_id:
+            messagebox.showwarning(
+                "需要密钥", "请先打开游戏窗口并登录角色，\n密钥要和游戏角色 ID 绑定。",
+            )
+            return False
         key = simpledialog.askstring(
-            "需要密钥", "「%s」需要密钥解锁：\n（找作者获取）" % name, parent=self.root,
+            "需要密钥",
+            "「%s」需要密钥解锁。\n当前游戏ID：%s\n（把ID发给作者获取密钥）" % (name, game_id),
+            parent=self.root,
         )
         if key is None:
             return False
-        if not is_valid_key(key):
-            messagebox.showerror("密钥无效", "密钥不对，无法解锁「%s」" % name)
+        if not is_valid_key(key, game_id):
+            messagebox.showerror("密钥无效", "密钥不对，或不是这个游戏ID的密钥。")
             return False
         try:
-            self.config["license"] = {"unlocked": True, "key": str(key).strip()}
+            self.config["license"] = {
+                "unlocked": True,
+                "key": str(key).strip(),
+                "game_id": game_id,
+            }
             save_config(self.config)
         except Exception:  # noqa: BLE001
             pass
-        messagebox.showinfo("已解锁", "「%s」已解锁。" % name)
+        messagebox.showinfo("已解锁", "「%s」已解锁（游戏ID %s）。" % (name, game_id))
         return True
 
     def _show_tool(self, key: str) -> None:
