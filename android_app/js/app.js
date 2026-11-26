@@ -1470,7 +1470,7 @@
   function saveTextFile(name, text, cb) {
     function finish(path, url) {
       guildExportFile = { name: name, path: path || "", url: url || "" };
-      cb("已导出：" + (path || url || name));
+      cb("已导出：" + (path || url || name) + "（内容 " + text.length + " 字符）");
     }
 
     function copyFallback() {
@@ -1489,29 +1489,26 @@
       var uri = null;
       var resolver = null;
       try {
-        var VERSION = plus.android.importClass("android.os.Build$VERSION");
-        if (VERSION.SDK_INT >= 29) {
-          var Downloads = plus.android.importClass("android.provider.MediaStore$Downloads");
-          var ContentValues = plus.android.importClass("android.content.ContentValues");
-          var Environment = plus.android.importClass("android.os.Environment");
-          var values = new ContentValues();
-          values.put("_display_name", name);
-          values.put("mime_type", "text/csv");
-          values.put("relative_path", "Download/小太阳脚本");
-          resolver = plus.android.runtimeMainActivity().getContentResolver();
-          uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values);
-          if (uri) {
-            var os = resolver.openOutputStream(uri);
-            var OutputStreamWriter = plus.android.importClass("java.io.OutputStreamWriter");
-            var writer = new OutputStreamWriter(os);
-            writer.write(text);
-            writer.flush();
-            writer.close();
-            var down = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-            var full = down.getAbsolutePath() + "/小太阳脚本/" + name;
-            finish(full, String(uri.toString()));
-            return;
-          }
+        var Downloads = plus.android.importClass("android.provider.MediaStore$Downloads");
+        var ContentValues = plus.android.importClass("android.content.ContentValues");
+        var Environment = plus.android.importClass("android.os.Environment");
+        var values = new ContentValues();
+        values.put("_display_name", name);
+        values.put("mime_type", "text/csv");
+        values.put("relative_path", "Download/小太阳脚本");
+        resolver = plus.android.runtimeMainActivity().getContentResolver();
+        uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri) {
+          var os = resolver.openOutputStream(uri);
+          var OutputStreamWriter = plus.android.importClass("java.io.OutputStreamWriter");
+          var writer = new OutputStreamWriter(os);
+          writer.write(text, 0, text.length);
+          writer.flush();
+          writer.close();
+          var down = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+          var full = down.getAbsolutePath() + "/小太阳脚本/" + name;
+          finish(full, String(uri.toString()));
+          return;
         }
       } catch (e) {
         try {
@@ -1619,6 +1616,8 @@
         var intent = new Intent(Intent.ACTION_SEND);
         intent.setType("text/csv");
         intent.putExtra(Intent.EXTRA_STREAM, Uri.parse(url));
+        var ClipData = plus.android.importClass("android.content.ClipData");
+        intent.setClipData(ClipData.newRawUri("公会战情报", Uri.parse(url)));
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         var chooser = Intent.createChooser(intent, "分享公会战情报");
         plus.android.runtimeMainActivity().startActivity(chooser);
@@ -1644,6 +1643,26 @@
     } catch (e) { /* ignore */ }
     copyText(path || url);
     $("gStatus").textContent = "已复制文件路径";
+  }
+
+  function guildOpenFile() {
+    if (!guildExportFile || !(guildExportFile.url || guildExportFile.path)) {
+      $("gStatus").textContent = "请先点「全部导出」";
+      return;
+    }
+    var url = guildExportFile.url || "";
+    if (window.plus && plus.android && url.indexOf("content://") === 0) {
+      try {
+        var Intent = plus.android.importClass("android.content.Intent");
+        var Uri = plus.android.importClass("android.net.Uri");
+        var intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.parse(url), "text/csv");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        plus.android.runtimeMainActivity().startActivity(intent);
+        return;
+      } catch (e) { /* 没有能打开 csv 的应用 */ }
+    }
+    guildShare();
   }
 
   function guildCopyPath() {
@@ -2129,6 +2148,10 @@
     var gExportBtn = $("gExport");
     if (gExportBtn) gExportBtn.onclick = function () {
       needLicense("公会情报", guildExport);
+    };
+    var gOpenBtn = $("gOpen");
+    if (gOpenBtn) gOpenBtn.onclick = function () {
+      needLicense("公会情报", guildOpenFile);
     };
     var gShareBtn = $("gShare");
     if (gShareBtn) gShareBtn.onclick = function () {
