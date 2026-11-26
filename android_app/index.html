@@ -292,6 +292,8 @@
     .row .muted { color: #b9b3d6; font-size: 13px; }
     body.day .row span { color: #374151; }
     body.day .row .muted { color: #6b7280; }
+    .guild-bar .num.sel { flex: 1 1 96px; min-width: 96px; }
+    .guild-actions .btn.sm { flex: 1 1 0; padding: 9px 6px; }
     .num {
       width: 66px; padding: 9px 6px; border-radius: 9px; text-align: center;
       border: 1px solid rgba(120,200,230,.55); background: rgba(10,30,45,.75);
@@ -713,7 +715,7 @@
           说明：战力 100 / 200 / 300 是游戏给未配置队伍下发的占位值（每队默认 100），不是真实战力。
           工具会显示为「未配置」，并且不计入总战力。
         </div>
-        <div class="row">
+        <div class="row guild-bar">
           <span>阵营</span>
           <select class="num sel" id="gCamp">
             <option value="0">全部</option>
@@ -721,6 +723,8 @@
             <option value="2">敌方</option>
           </select>
           <button class="btn sm" id="gQuery">查询</button>
+        </div>
+        <div class="row guild-actions">
           <button class="btn sm" id="gCopy">复制</button>
           <button class="btn sm" id="gTeams">读取三队</button>
           <button class="btn sm" id="gExport">全部导出</button>
