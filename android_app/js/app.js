@@ -24,6 +24,7 @@
   var reviveFlashTimer = null;
   var guildTimer = null;
   var guildRows = [];
+  var guildExportFile = null;
   var guildTeamsCache = {};
   var mazeTimer = null;
   var mazeLastStamp = "";
@@ -1467,39 +1468,82 @@
   }
 
   function saveTextFile(name, text, cb) {
-    if (window.plus && plus.io) {
-      try {
-        plus.io.resolveLocalFileSystemURL("_downloads/", function (root) {
-          root.getFile(name, { create: true }, function (entry) {
-            entry.createWriter(function (writer) {
-              writer.onwrite = function () {
-                cb("已保存到下载目录：" + entry.fullPath);
-              };
-              writer.onerror = function () {
-                copyText(text);
-                cb("保存失败，已复制到剪贴板");
-              };
-              writer.write(text);
-            }, function () {
-              copyText(text);
-              cb("保存失败，已复制到剪贴板");
-            });
-          }, function () {
-            copyText(text);
-            cb("保存失败，已复制到剪贴板");
-          });
-        }, function () {
-          copyText(text);
-          cb("保存失败，已复制到剪贴板");
-        });
-      } catch (e) {
-        copyText(text);
-        cb("保存失败，已复制到剪贴板");
-      }
-    } else {
+    function finish(path, url) {
+      guildExportFile = { name: name, path: path || "", url: url || "" };
+      cb("已导出：" + (path || url || name));
+    }
+
+    function copyFallback() {
+      copyText(text);
+      cb("保存失败，已复制到剪贴板");
+    }
+
+    if (!window.plus) {
       copyText(text);
       cb("已复制到剪贴板");
+      return;
     }
+
+    // Android 10+：用 MediaStore 写入系统「下载/小太阳脚本」，文件管理器可见
+    if (plus.android) {
+      var uri = null;
+      var resolver = null;
+      try {
+        var VERSION = plus.android.importClass("android.os.Build$VERSION");
+        if (VERSION.SDK_INT >= 29) {
+          var Downloads = plus.android.importClass("android.provider.MediaStore$Downloads");
+          var ContentValues = plus.android.importClass("android.content.ContentValues");
+          var Environment = plus.android.importClass("android.os.Environment");
+          var values = new ContentValues();
+          values.put("_display_name", name);
+          values.put("mime_type", "text/csv");
+          values.put("relative_path", "Download/小太阳脚本");
+          resolver = plus.android.runtimeMainActivity().getContentResolver();
+          uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values);
+          if (uri) {
+            var os = resolver.openOutputStream(uri);
+            var OutputStreamWriter = plus.android.importClass("java.io.OutputStreamWriter");
+            var writer = new OutputStreamWriter(os);
+            writer.write(text);
+            writer.flush();
+            writer.close();
+            var down = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            var full = down.getAbsolutePath() + "/小太阳脚本/" + name;
+            finish(full, String(uri.toString()));
+            return;
+          }
+        }
+      } catch (e) {
+        try {
+          if (uri && resolver) resolver.delete(uri, null, null);
+        } catch (e2) { /* ignore */ }
+      }
+    }
+
+    // 旧系统或 MediaStore 失败：写到 5+ 应用下载目录
+    if (plus.io) {
+      try {
+        plus.io.resolveLocalFileSystemURL("_downloads/", function (root) {
+          root.getDirectory("小太阳脚本", { create: true }, function (dirEntry) {
+            dirEntry.getFile(name, { create: true }, function (entry) {
+              entry.createWriter(function (writer) {
+                writer.onwrite = function () {
+                  var url = "";
+                  var path = "";
+                  try { url = entry.toLocalURL(); } catch (e) { url = ""; }
+                  try { path = plus.io.convertLocalFileSystemURL(url) || url; } catch (e) { path = url; }
+                  finish(path, url);
+                };
+                writer.onerror = copyFallback;
+                writer.write(text);
+              }, copyFallback);
+            }, copyFallback);
+          }, copyFallback);
+        }, copyFallback);
+        return;
+      } catch (e) { /* fall through */ }
+    }
+    copyFallback();
   }
 
   function guildExport() {
@@ -1557,6 +1601,43 @@
         $("gStatus").textContent = message;
       });
     });
+  }
+
+  function guildShare() {
+    if (!guildExportFile || !(guildExportFile.url || guildExportFile.path)) {
+      $("gStatus").textContent = "请先点「全部导出」";
+      return;
+    }
+    var files = [];
+    if (guildExportFile.path) files.push(guildExportFile.path);
+    if (!files.length && guildExportFile.url) files.push(guildExportFile.url);
+    try {
+      if (window.plus && plus.share && plus.share.sendWithSystem) {
+        plus.share.sendWithSystem({
+          type: "file",
+          content: "公会战情报",
+          files: files
+        }, function () {
+          $("gStatus").textContent = "已打开分享";
+        }, function () {
+          copyText(guildExportFile.path || guildExportFile.url);
+          $("gStatus").textContent = "分享不可用，已复制文件路径";
+        });
+        return;
+      }
+    } catch (e) { /* ignore */ }
+    copyText(guildExportFile.path || guildExportFile.url);
+    $("gStatus").textContent = "已复制文件路径";
+  }
+
+  function guildCopyPath() {
+    if (!guildExportFile) {
+      $("gStatus").textContent = "请先点「全部导出」";
+      return;
+    }
+    var path = guildExportFile.path || guildExportFile.url || "";
+    copyText(path);
+    $("gStatus").textContent = "已复制路径：" + path;
   }
 
   function guildCopy() {
@@ -2032,6 +2113,14 @@
     var gExportBtn = $("gExport");
     if (gExportBtn) gExportBtn.onclick = function () {
       needLicense("公会情报", guildExport);
+    };
+    var gShareBtn = $("gShare");
+    if (gShareBtn) gShareBtn.onclick = function () {
+      needLicense("公会情报", guildShare);
+    };
+    var gPathBtn = $("gPath");
+    if (gPathBtn) gPathBtn.onclick = function () {
+      needLicense("公会情报", guildCopyPath);
     };
     var playFarmBtn = $("playFarm");
     if (playFarmBtn) playFarmBtn.onclick = function () { showFeature("farm"); };
