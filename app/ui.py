@@ -2189,8 +2189,8 @@ class AppUI:
             )
             return False
         key = simpledialog.askstring(
-            "需要密钥",
-            "「%s」需要密钥解锁。\n当前游戏ID：%s\n（把ID发给作者获取密钥）" % (name, game_id),
+            "密钥",
+            "游戏ID：%s" % game_id,
             parent=self.root,
         )
         if key is None:
