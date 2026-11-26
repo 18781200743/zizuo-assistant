@@ -2137,7 +2137,13 @@ class AppUI:
                 "for (const p of window.System.entries()) {"
                 "var e=p[1]; if(!e||typeof e!=='object') continue;"
                 "var m=e.HBJS||e; if(m&&typeof m==='object'&&m.GZZR) return String(m.GZZR);"
-                "} return ''; }catch(e){return ''}})()"
+                "}"
+                "for (const p of window.System.entries()) {"
+                "var e2=p[1]; if(!e2||typeof e2!=='object') continue;"
+                "var m2=e2.HBJS||e2; if(m2&&typeof m2==='object'&&m2.XRFZ) return String(m2.XRFZ);"
+                "}"
+                "return String(window.localStorage.getItem('OpenID')||'');"
+                "}catch(e){return ''}})()"
             )
             return str(raw or "").strip()
         except Exception:  # noqa: BLE001
