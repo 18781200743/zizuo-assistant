@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小太阳脚本 · 密钥生成器</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(1200px 700px at 50% 0%, #2b2350 0%, #171233 45%, #0b0a17 100%);
+    color: #e8ecf8;
+  }
+  .card {
+    width: 420px; max-width: 92vw; padding: 26px 24px 22px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 16px; backdrop-filter: blur(8px);
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .5px; }
+  .sub { color: #9aa6c4; font-size: 12px; margin-bottom: 18px; }
+  label { display: block; font-size: 13px; color: #b9c3db; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 11px 12px; font-size: 15px; letter-spacing: .5px;
+    color: #fff; background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 10px; outline: none;
+  }
+  input:focus { border-color: #6f8cff; box-shadow: 0 0 0 3px rgba(111,140,255,.18); }
+  button {
+    width: 100%; margin-top: 16px; padding: 11px 12px; font-size: 15px; font-weight: 700;
+    color: #fff; cursor: pointer; border: 0; border-radius: 10px;
+    background: linear-gradient(135deg, #4f7cff, #7a5cff);
+    box-shadow: 0 8px 24px rgba(90,110,255,.35);
+  }
+  button:active { transform: translateY(1px); }
+  .result {
+    margin-top: 16px; padding: 14px; border-radius: 12px;
+    background: rgba(0,0,0,.3); border: 1px dashed rgba(255,255,255,.18);
+    min-height: 52px; display: flex; align-items: center; justify-content: center;
+    font-family: Consolas, monospace; font-size: 19px; letter-spacing: 1px; color: #8ef0c0;
+    word-break: break-all; text-align: center;
+  }
+  .hint { margin-top: 14px; font-size: 11px; line-height: 1.6; color: #7f8aa6; }
+  .err { color: #ff8f8f; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  .row button { margin-top: 0; background: rgba(255,255,255,.1); box-shadow: none; font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>小太阳脚本 · 密钥生成器</h1>
+    <div class="sub">输入游戏角色 ID，生成绑定该角色的密钥</div>
+
+    <label for="gid">游戏角色 ID</label>
+    <input id="gid" inputmode="numeric" autocomplete="off" placeholder="例如 214527225">
+
+    <button id="gen">生成密钥</button>
+
+    <div class="result" id="out">—</div>
+    <div class="row">
+      <button id="copy">复制密钥</button>
+      <button id="clear">清空</button>
+    </div>
+
+    <div class="hint">
+      密钥规则：SHA-256(SECRET + ":" + 游戏ID)，取前 12 位十六进制。<br>
+      SECRET 必须和 <b>app/license.py</b> 里的保持一致，否则生成的密钥无效。<br>
+      本文件包含 SECRET，请勿外传。
+    </div>
+  </div>
+
+<script>
+/* ---- 纯 JS SHA-256（无需联网 / 无需安全上下文） ---- */
+function sha256Hex(ascii) {
+  function rightRotate(v, a) { return (v >>> a) | (v << (32 - a)); }
+  var mathPow = Math.pow, maxWord = mathPow(2, 32);
+  var result = '', words = [], asciiBitLength = ascii.length * 8;
+  var hash = sha256Hex.h = sha256Hex.h || [];
+  var k = sha256Hex.k = sha256Hex.k || [];
+  var primeCounter = k.length, isComposite = {};
+  for (var candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      for (var i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+      hash[primeCounter] = (mathPow(candidate, .5) * maxWord) | 0;
+      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+  for (i = 0; i < ascii.length; i++) {
+    var j = ascii.charCodeAt(i);
+    if (j >> 8) return ''; // ASCII only
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words.length] = ((asciiBitLength / maxWord) | 0);
+  words[words.length] = (asciiBitLength);
+  for (j = 0; j < words.length;) {
+    var w = words.slice(j, j += 16);
+    var oldHash = hash;
+    hash = hash.slice(0, 8);
+    for (i = 0; i < 64; i++) {
+      var w15 = w[i - 15], w2 = w[i - 2];
+      var a = hash[0], e = hash[4];
+      var temp1 = hash[7]
+        + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+        + ((e & hash[5]) ^ ((~e) & hash[6]))
+        + k[i]
+        + (w[i] = (i < 16) ? w[i] : (
+            w[i - 16]
+            + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+            + w[i - 7]
+            + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+          ) | 0
+        );
+      var temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+        + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash = [(temp1 + temp2) | 0].concat(hash);
+      hash[4] = (hash[4] + temp1) | 0;
+    }
+    for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+  }
+  for (i = 0; i < 8; i++) {
+    for (j = 3; j + 1; j--) {
+      var b = (hash[i] >> (j * 8)) & 255;
+      result += ((b < 16) ? '0' : '') + b.toString(16);
+    }
+  }
+  return result.toUpperCase();
+}
+
+/* 必须和 app/license.py 的 SECRET 一致 */
+var SECRET = "xiaotaiyang-2026-11-26-v1";
+
+function makeKey(gameId) {
+  var id = String(gameId || '').replace(/\s+/g, '');
+  if (!id) return '';
+  var digest = sha256Hex(SECRET + ":" + id);
+  if (!digest) return '';
+  return "XS-" + digest.slice(0, 4) + "-" + digest.slice(4, 8) + "-" + digest.slice(8, 12);
+}
+
+/* ---- 页面逻辑 ---- */
+(function () {
+  var gid = document.getElementById('gid');
+  var out = document.getElementById('out');
+
+  function render() {
+    var key = makeKey(gid.value);
+    if (!key) {
+      out.textContent = '—';
+      out.classList.remove('err');
+      return;
+    }
+    out.textContent = key;
+    out.classList.remove('err');
+  }
+
+  document.getElementById('gen').addEventListener('click', render);
+  gid.addEventListener('keydown', function (e) { if (e.key === 'Enter') render(); });
+  document.getElementById('copy').addEventListener('click', function () {
+    var text = out.textContent || '';
+    if (!text || text === '—') return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {});
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  });
+  document.getElementById('clear').addEventListener('click', function () {
+    gid.value = ''; out.textContent = '—'; gid.focus();
+  });
+})();
+</script>
+</body>
+</html>
