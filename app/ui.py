@@ -697,6 +697,11 @@ class AppUI:
             pass
         elif mode == "assist":
             self._update_assist_labels()
+        if mode == "home":
+            try:
+                self.root.after_idle(self._draw_home)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _make_scroll(
         self, parent: ttk.Frame, key: str, bg: str = "#ffffff", frame_style: str = ""
@@ -2157,18 +2162,28 @@ class AppUI:
     def _license_ok(self) -> bool:
         try:
             lic = self.config.get("license") or {}
-            key = str(lic.get("key") or "")
-            saved_id = str(lic.get("game_id") or "").strip()
-            if not lic.get("unlocked"):
+            if not isinstance(lic, dict) or not lic.get("unlocked"):
                 return False
-            if is_super_key(key):
+            if is_super_key(str(lic.get("super_key") or "")) or is_super_key(
+                str(lic.get("key") or "")
+            ):
                 return True
-            if not saved_id:
+            keys = lic.get("keys")
+            if not isinstance(keys, dict):
+                keys = {}
+            try:
+                current = str(self._game_role_id() or "").strip()
+            except Exception:  # noqa: BLE001
+                current = ""
+            game_id = current or str(lic.get("game_id") or "").strip()
+            if not game_id:
                 return False
-            current = self._game_role_id()
-            if current and saved_id != current:
+            key = str(keys.get(game_id) or "").strip()
+            if not key and str(lic.get("game_id") or "").strip() == game_id:
+                key = str(lic.get("key") or "").strip()
+            if not key:
                 return False
-            return is_valid_key(key, saved_id)
+            return is_valid_key(key, game_id)
         except Exception:  # noqa: BLE001
             return False
 
@@ -2268,15 +2283,29 @@ class AppUI:
         ).pack(side=tk.LEFT)
 
     def _open_license_page(self) -> None:
+        game_id = ""
         try:
-            self._license_id_var.set(str(self._game_role_id() or ""))
+            game_id = str(self._game_role_id() or "").strip()
         except Exception:  # noqa: BLE001
-            self._license_id_var.set("")
+            game_id = ""
+        self._license_id_var.set(game_id)
         self._license_key_var.set("")
+        status = ""
         try:
-            self._license_status_var.set("已解锁" if self._license_ok() else "")
+            lic = self.config.get("license") or {}
+            if is_super_key(str(lic.get("super_key") or "")) or is_super_key(
+                str(lic.get("key") or "")
+            ):
+                status = "已解锁（超级密钥）"
+            elif self._license_ok():
+                status = "此账号已绑定"
+            elif game_id:
+                status = "此账号未绑定"
+            else:
+                status = "请先进入游戏"
         except Exception:  # noqa: BLE001
-            self._license_status_var.set("")
+            status = ""
+        self._license_status_var.set(status)
         self._switch_mode("license")
         self.root.after(80, self._license_focus)
 
@@ -2311,15 +2340,35 @@ class AppUI:
             self._license_status_var.set("密钥无效")
             return
         try:
+            lic = self.config.get("license")
+            if not isinstance(lic, dict):
+                lic = {}
+            keys = lic.get("keys")
+            if not isinstance(keys, dict):
+                keys = {}
+            # 旧版单密钥迁移到多密钥表
+            old_id = str(lic.get("game_id") or "").strip()
+            old_key = str(lic.get("key") or "").strip()
+            if old_id and old_key and not is_super_key(old_key):
+                keys.setdefault(old_id, old_key)
+            super_key = str(lic.get("super_key") or "").strip()
+            if is_super_key(key):
+                super_key = key
+            else:
+                keys[game_id] = key
             self.config["license"] = {
                 "unlocked": True,
                 "key": key,
                 "game_id": "" if is_super_key(key) else game_id,
+                "super_key": super_key,
+                "keys": keys,
             }
             save_config(self.config)
         except Exception:  # noqa: BLE001
             pass
-        self._license_status_var.set("已解锁")
+        self._license_status_var.set(
+            "已解锁（超级密钥）" if is_super_key(key) else "已绑定此账号"
+        )
         pending = getattr(self, "_license_pending", None)
         self._license_pending = None
         retry = pending[1] if pending else None
