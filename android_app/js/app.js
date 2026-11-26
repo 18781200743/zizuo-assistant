@@ -1950,9 +1950,9 @@
     var qqEl = $("homeQQ");
     if (qqEl) {
       qqEl.onclick = function () {
-        if (!copyText("1125675701")) return;
-        qqEl.textContent = "QQ群：1125675701（已复制）";
-        setTimeout(function () { qqEl.textContent = "QQ群：1125675701（点击复制）"; }, 1500);
+        if (!copyText("1090324996")) return;
+        qqEl.textContent = "QQ群：1090324996（已复制）";
+        setTimeout(function () { qqEl.textContent = "QQ群：1090324996（点击复制）"; }, 1500);
       };
     }
     $("btnBackHome").onclick = function () {

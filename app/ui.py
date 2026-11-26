@@ -1485,18 +1485,18 @@ class AppUI:
             fill="#f97316", font=(ui_font, 10),
         )
         qq_item = c.create_text(
-            w / 2, sy(1952), text="QQ群：1125675701（点击复制）",
+            w / 2, sy(1952), text="QQ群：1090324996（点击复制）",
             fill="#9fd0ff", font=(ui_font, 10), tags=("home_qq",),
         )
 
         def copy_qq(_event=None) -> None:
             try:
                 self.root.clipboard_clear()
-                self.root.clipboard_append("1125675701")
-                c.itemconfigure(qq_item, text="QQ群：1125675701（已复制）")
+                self.root.clipboard_append("1090324996")
+                c.itemconfigure(qq_item, text="QQ群：1090324996（已复制）")
                 self.root.after(
                     1500,
-                    lambda: c.itemconfigure(qq_item, text="QQ群：1125675701（点击复制）"),
+                    lambda: c.itemconfigure(qq_item, text="QQ群：1090324996（点击复制）"),
                 )
             except tk.TclError:
                 pass
