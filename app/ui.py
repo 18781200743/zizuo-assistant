@@ -242,7 +242,7 @@ class _AutoChestAdapter:
 class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("百炼英雄 · 助手")
+        self.root.title("小太阳脚本")
         _w, _h = 480, 760
         try:
             _sw = self.root.winfo_screenwidth()
@@ -561,7 +561,7 @@ class AppUI:
         # head 不再显示（首页自己画标题）
         tk.Label(
             head,
-            text="百炼英雄 · 助手",
+            text="小太阳脚本",
             bg=c["page"],
             fg=c["text"],
             font=("Microsoft YaHei UI", 15, "bold"),
@@ -1300,11 +1300,11 @@ class AppUI:
 
         # ---------- 标题 ----------
         c.create_text(
-            sx(52), sy(243), anchor="w", text="百炼英雄 · 助手",
+            sx(52), sy(243), anchor="w", text="小太阳脚本",
             fill="#ffffff", font=(ui_font, 19, "bold"),
         )
         c.create_text(
-            sx(52), sy(332), anchor="w", text="百炼英雄 · 电脑版",
+            sx(52), sy(332), anchor="w", text="小太阳脚本 · 电脑版",
             fill="#dbe3f5", font=(ui_font, 9),
         )
 
@@ -1503,7 +1503,7 @@ class AppUI:
     def _show_about(self) -> None:
         messagebox.showinfo(
             "关于",
-            "百炼助手\n\n"
+            "小太阳脚本\n\n"
             "脚本版本：%s\n"
             "游戏辅助工具（安卓 / 电脑同一套运行时）\n"
             "功能：红包、复活、地图刷新、闪现、取坐标、运行命令\n\n"
