@@ -2169,6 +2169,78 @@ class AppUI:
         except Exception:  # noqa: BLE001
             return False
 
+    def _ask_key_dialog(self, game_id: str):
+        """自定义密钥弹窗：游戏ID可复制，按钮中文。返回输入的密钥或 None。"""
+        win = tk.Toplevel(self.root)
+        win.title("密钥")
+        win.transient(self.root)
+        win.resizable(False, False)
+        win.configure(bg="#f5f6fa")
+
+        body = tk.Frame(win, bg="#f5f6fa", padx=16, pady=14)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        row1 = tk.Frame(body, bg="#f5f6fa")
+        row1.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(row1, text="游戏ID：", bg="#f5f6fa", fg="#333333",
+                 font=("Microsoft YaHei UI", 10)).pack(side=tk.LEFT)
+        id_var = tk.StringVar(value=str(game_id or ""))
+        id_entry = tk.Entry(row1, textvariable=id_var, state="readonly", width=22,
+                            readonlybackground="#ffffff", fg="#1a4d8f",
+                            font=("Consolas", 10), relief=tk.SOLID, bd=1)
+        id_entry.pack(side=tk.LEFT, padx=(0, 6))
+
+        def copy_id():
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(id_var.get())
+            except tk.TclError:
+                pass
+
+        ttk.Button(row1, text="复制", width=6, command=copy_id).pack(side=tk.LEFT)
+
+        row2 = tk.Frame(body, bg="#f5f6fa")
+        row2.pack(fill=tk.X, pady=(0, 14))
+        tk.Label(row2, text="密钥：", bg="#f5f6fa", fg="#333333",
+                 font=("Microsoft YaHei UI", 10)).pack(side=tk.LEFT)
+        key_var = tk.StringVar()
+        key_entry = tk.Entry(row2, textvariable=key_var, width=24,
+                             font=("Consolas", 10), relief=tk.SOLID, bd=1)
+        key_entry.pack(side=tk.LEFT)
+
+        result = {"value": None}
+        btns = tk.Frame(body, bg="#f5f6fa")
+        btns.pack(fill=tk.X)
+        ok = ttk.Button(btns, text="确认", width=10, style="Accent.TButton")
+        ok.pack(side=tk.RIGHT, padx=(8, 0))
+        cancel = ttk.Button(btns, text="取消", width=10)
+        cancel.pack(side=tk.RIGHT)
+
+        def submit(_e=None):
+            result["value"] = key_var.get().strip()
+            win.destroy()
+
+        def close(_e=None):
+            result["value"] = None
+            win.destroy()
+
+        ok.configure(command=submit)
+        cancel.configure(command=close)
+        win.bind("<Return>", submit)
+        win.bind("<Escape>", close)
+        key_entry.focus_set()
+
+        win.update_idletasks()
+        try:
+            px = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_width()) // 2
+            py = self.root.winfo_rooty() + (self.root.winfo_height() - win.winfo_height()) // 2
+            win.geometry("+%d+%d" % (max(0, px), max(0, py)))
+        except tk.TclError:
+            pass
+        win.grab_set()
+        self.root.wait_window(win)
+        return result["value"]
+
     def _license_click(self) -> None:
         """首页「密钥」按钮：查看状态 / 输入密钥。"""
         if self._license_ok():
@@ -2188,11 +2260,7 @@ class AppUI:
                 "需要密钥", "请先打开游戏窗口并登录角色，\n密钥要和游戏角色 ID 绑定。",
             )
             return False
-        key = simpledialog.askstring(
-            "密钥",
-            "游戏ID：%s" % game_id,
-            parent=self.root,
-        )
+        key = self._ask_key_dialog(game_id)
         if key is None:
             return False
         if not is_valid_key(key, game_id):
