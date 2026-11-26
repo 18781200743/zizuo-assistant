@@ -1608,25 +1608,41 @@
       $("gStatus").textContent = "请先点「全部导出」";
       return;
     }
-    var files = [];
-    if (guildExportFile.path) files.push(guildExportFile.path);
-    if (!files.length && guildExportFile.url) files.push(guildExportFile.url);
+    var url = guildExportFile.url || "";
+    var path = guildExportFile.path || "";
+
+    // Android 原生分享：用 content:// 带上 CSV 文件本体
+    if (window.plus && plus.android && url.indexOf("content://") === 0) {
+      try {
+        var Intent = plus.android.importClass("android.content.Intent");
+        var Uri = plus.android.importClass("android.net.Uri");
+        var intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/csv");
+        intent.putExtra(Intent.EXTRA_STREAM, Uri.parse(url));
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        var chooser = Intent.createChooser(intent, "分享公会战情报");
+        plus.android.runtimeMainActivity().startActivity(chooser);
+        $("gStatus").textContent = "已打开分享";
+        return;
+      } catch (e) { /* 继续尝试 5+ 分享 */ }
+    }
+
     try {
       if (window.plus && plus.share && plus.share.sendWithSystem) {
         plus.share.sendWithSystem({
           type: "file",
           content: "公会战情报",
-          files: files
+          files: [path || url]
         }, function () {
           $("gStatus").textContent = "已打开分享";
         }, function () {
-          copyText(guildExportFile.path || guildExportFile.url);
+          copyText(path || url);
           $("gStatus").textContent = "分享不可用，已复制文件路径";
         });
         return;
       }
     } catch (e) { /* ignore */ }
-    copyText(guildExportFile.path || guildExportFile.url);
+    copyText(path || url);
     $("gStatus").textContent = "已复制文件路径";
   }
 
