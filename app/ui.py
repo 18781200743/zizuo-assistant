@@ -641,6 +641,7 @@ class AppUI:
         self._page_commands = ttk.Frame(self._content, padding=4)
         self._page_play = ttk.Frame(self._content, padding=4)
         self._page_home = tk.Frame(self._content, bg="#f3f5f9")
+        self._page_license = tk.Frame(self._content, bg="#f5f6fa")
         self._scroll_canvases: Dict[str, tk.Canvas] = {}
         # 存档脚本功能暂时隐藏（后续重写），页面仍构建但默认不显示
         self._build_gacha_tab(self._make_scroll(self._page_gacha, "gacha"))
@@ -653,6 +654,7 @@ class AppUI:
         self._build_commands_tab(self._page_commands)
         self._build_play_tab(self._page_play)
         self._build_home_tab(self._page_home)
+        self._build_license_tab(self._page_license)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self._switch_mode("home")
 
@@ -669,6 +671,7 @@ class AppUI:
             "assist": self._page_assist,
             "commands": self._page_commands,
             "play": self._page_play,
+            "license": self._page_license,
         }
         buttons = {
             "home": self._mode_btn_home,
@@ -2169,131 +2172,181 @@ class AppUI:
         except Exception:  # noqa: BLE001
             return False
 
-    def _ask_key_dialog(self, game_id: str):
-        """自定义密钥弹窗：游戏ID可复制，按钮中文。返回输入的密钥或 None。"""
-        win = tk.Toplevel(self.root)
-        win.title("密钥")
-        win.transient(self.root)
-        win.resizable(False, False)
-        win.configure(bg="#f5f6fa")
+    def _build_license_tab(self, parent: tk.Frame) -> None:
+        """密钥页：直接替换首页显示，不再弹新窗口。"""
+        parent.configure(bg="#f5f6fa")
 
-        body = tk.Frame(win, bg="#f5f6fa", padx=16, pady=14)
-        body.pack(fill=tk.BOTH, expand=True)
+        top = tk.Frame(parent, bg="#f5f6fa")
+        top.pack(fill=tk.X, padx=16, pady=(12, 0))
+        tk.Button(
+            top, text="← 返回", relief=tk.FLAT, bd=0, padx=12, pady=4,
+            bg="#e8eef9", fg="#1c4f9c", activebackground="#dbe6f7",
+            font=("Microsoft YaHei UI", 10, "bold"), command=self._license_back,
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            top, text="密钥", bg="#f5f6fa", fg="#1f2937",
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).pack(side=tk.LEFT, padx=14)
 
-        # 购买二维码：放在密钥输入上方
+        card = tk.Frame(
+            parent, bg="#ffffff", highlightthickness=1, highlightbackground="#e2e8f4"
+        )
+        card.pack(pady=18)
+
+        # 购买二维码
         photo = None
         try:
             from PIL import Image, ImageTk
 
-            path = os.path.join(self.ASSET_DIR, "pay_qr.png")
-            if os.path.exists(path):
-                im = Image.open(path).convert("RGB")
+            qr_path = os.path.join(self.ASSET_DIR, "pay_qr.png")
+            if os.path.exists(qr_path):
+                im = Image.open(qr_path).convert("RGB")
                 im.thumbnail((190, 210), Image.LANCZOS)
                 photo = ImageTk.PhotoImage(im)
         except Exception:  # noqa: BLE001
             photo = None
         if photo is not None:
-            qr = tk.Label(body, image=photo, bg="#ffffff", bd=0)
+            qr = tk.Label(card, image=photo, bg="#ffffff", bd=0)
             qr.image = photo  # type: ignore[attr-defined]  # 防止被回收
-            qr.pack(pady=(0, 10))
+            qr.pack(padx=22, pady=(18, 10))
+        else:
+            tk.Frame(card, bg="#ffffff", height=12).pack()
 
-        row1 = tk.Frame(body, bg="#f5f6fa")
-        row1.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(row1, text="游戏ID：", bg="#f5f6fa", fg="#333333",
-                 font=("Microsoft YaHei UI", 10)).pack(side=tk.LEFT)
-        id_var = tk.StringVar(value=str(game_id or ""))
-        id_entry = tk.Entry(row1, textvariable=id_var, state="readonly", width=22,
-                            readonlybackground="#ffffff", fg="#1a4d8f",
-                            font=("Consolas", 10), relief=tk.SOLID, bd=1)
-        id_entry.pack(side=tk.LEFT, padx=(0, 6))
+        self._license_id_var = tk.StringVar()
+        self._license_key_var = tk.StringVar()
+        self._license_status_var = tk.StringVar()
 
-        def copy_id():
-            try:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(id_var.get())
-            except tk.TclError:
-                pass
+        row1 = tk.Frame(card, bg="#ffffff")
+        row1.pack(fill=tk.X, padx=22)
+        tk.Label(
+            row1, text="游戏ID：", bg="#ffffff", fg="#333333",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(side=tk.LEFT)
+        tk.Entry(
+            row1, textvariable=self._license_id_var, state="readonly", width=22,
+            readonlybackground="#f7f9fd", fg="#1a4d8f", font=("Consolas", 10),
+            relief=tk.SOLID, bd=1,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(
+            row1, text="复制", width=6, relief=tk.FLAT, bd=0,
+            bg="#eef2ff", fg="#1e3a8a", activebackground="#dbeafe",
+            font=("Microsoft YaHei UI", 9), command=self._license_copy_id,
+        ).pack(side=tk.LEFT)
 
-        ttk.Button(row1, text="复制", width=6, command=copy_id).pack(side=tk.LEFT)
+        row2 = tk.Frame(card, bg="#ffffff")
+        row2.pack(fill=tk.X, padx=22, pady=(10, 0))
+        tk.Label(
+            row2, text="密钥：", bg="#ffffff", fg="#333333",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(side=tk.LEFT)
+        self._license_key_entry = tk.Entry(
+            row2, textvariable=self._license_key_var, width=24,
+            font=("Consolas", 10), relief=tk.SOLID, bd=1,
+        )
+        self._license_key_entry.pack(side=tk.LEFT)
+        self._license_key_entry.bind("<Return>", lambda _e: self._license_submit())
 
-        row2 = tk.Frame(body, bg="#f5f6fa")
-        row2.pack(fill=tk.X, pady=(0, 14))
-        tk.Label(row2, text="密钥：", bg="#f5f6fa", fg="#333333",
-                 font=("Microsoft YaHei UI", 10)).pack(side=tk.LEFT)
-        key_var = tk.StringVar()
-        key_entry = tk.Entry(row2, textvariable=key_var, width=24,
-                             font=("Consolas", 10), relief=tk.SOLID, bd=1)
-        key_entry.pack(side=tk.LEFT)
+        tk.Label(
+            card, textvariable=self._license_status_var, bg="#ffffff",
+            fg="#0f9d58", font=("Microsoft YaHei UI", 9),
+        ).pack(pady=(8, 0))
 
-        result = {"value": None}
-        btns = tk.Frame(body, bg="#f5f6fa")
-        btns.pack(fill=tk.X)
-        ok = ttk.Button(btns, text="确认", width=10, style="Accent.TButton")
-        ok.pack(side=tk.RIGHT, padx=(8, 0))
-        cancel = ttk.Button(btns, text="取消", width=10)
-        cancel.pack(side=tk.RIGHT)
+        btns = tk.Frame(card, bg="#ffffff")
+        btns.pack(pady=(10, 16))
+        ttk.Button(
+            btns, text="确认", width=12, style="Accent.TButton",
+            command=self._license_submit,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(
+            btns, text="取消", width=12, command=self._license_back,
+        ).pack(side=tk.LEFT)
 
-        def submit(_e=None):
-            result["value"] = key_var.get().strip()
-            win.destroy()
-
-        def close(_e=None):
-            result["value"] = None
-            win.destroy()
-
-        ok.configure(command=submit)
-        cancel.configure(command=close)
-        win.bind("<Return>", submit)
-        win.bind("<Escape>", close)
-        key_entry.focus_set()
-
-        win.update_idletasks()
+    def _open_license_page(self) -> None:
         try:
-            px = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_width()) // 2
-            py = self.root.winfo_rooty() + (self.root.winfo_height() - win.winfo_height()) // 2
-            win.geometry("+%d+%d" % (max(0, px), max(0, py)))
+            self._license_id_var.set(str(self._game_role_id() or ""))
+        except Exception:  # noqa: BLE001
+            self._license_id_var.set("")
+        self._license_key_var.set("")
+        try:
+            self._license_status_var.set("已解锁" if self._license_ok() else "")
+        except Exception:  # noqa: BLE001
+            self._license_status_var.set("")
+        self._switch_mode("license")
+        self.root.after(80, self._license_focus)
+
+    def _license_focus(self) -> None:
+        try:
+            self._license_key_entry.focus_set()
         except tk.TclError:
             pass
-        win.grab_set()
-        self.root.wait_window(win)
-        return result["value"]
 
-    def _license_click(self) -> None:
-        """首页「密钥」按钮：查看状态 / 输入密钥。"""
-        if self._license_ok():
-            game_id = self._game_role_id() or "（未打开游戏）"
-            if not messagebox.askyesno(
-                "密钥", "当前已解锁。\n游戏ID：%s\n\n要重新输入密钥吗？" % game_id,
-            ):
-                return
-        self._ask_license("全部功能")
+    def _license_copy_id(self) -> None:
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self._license_id_var.get())
+            self._license_status_var.set("游戏ID已复制")
+        except tk.TclError:
+            pass
 
-    def _ask_license(self, name: str) -> bool:
-        if self._license_ok():
-            return True
-        game_id = self._game_role_id()
-        if not game_id:
-            messagebox.showwarning(
-                "需要密钥", "请先打开游戏窗口并登录角色，\n密钥要和游戏角色 ID 绑定。",
-            )
-            return False
-        key = self._ask_key_dialog(game_id)
-        if key is None:
-            return False
+    def _license_back(self) -> None:
+        self._license_pending = None
+        self._switch_mode(getattr(self, "_license_return_mode", "home") or "home")
+
+    def _license_submit(self) -> None:
+        key = self._license_key_var.get().strip()
+        if not key:
+            self._license_status_var.set("请输入密钥")
+            return
+        try:
+            game_id = str(self._game_role_id() or "")
+        except Exception:  # noqa: BLE001
+            game_id = ""
         if not is_valid_key(key, game_id):
-            messagebox.showerror("密钥无效", "密钥不对，或不是这个游戏ID的密钥。")
-            return False
+            self._license_status_var.set("密钥无效")
+            return
         try:
             self.config["license"] = {
                 "unlocked": True,
-                "key": str(key).strip(),
+                "key": key,
                 "game_id": "" if is_super_key(key) else game_id,
             }
             save_config(self.config)
         except Exception:  # noqa: BLE001
             pass
-        messagebox.showinfo("已解锁", "「%s」已解锁（游戏ID %s）。" % (name, game_id))
-        return True
+        self._license_status_var.set("已解锁")
+        pending = getattr(self, "_license_pending", None)
+        self._license_pending = None
+        retry = pending[1] if pending else None
+        self.root.after(350, lambda: self._after_license(retry))
+
+    def _after_license(self, retry=None) -> None:
+        self._switch_mode(getattr(self, "_license_return_mode", "home") or "home")
+        if callable(retry):
+            try:
+                retry()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _license_click(self) -> None:
+        """首页「密钥」按钮：进入密钥页（替换首页）。"""
+        self._license_pending = None
+        self._license_return_mode = "home"
+        self._open_license_page()
+
+    def _ask_license(self, name: str, retry=None) -> bool:
+        if self._license_ok():
+            return True
+        mode = ""
+        try:
+            mode = str(self.mode_var.get())
+        except Exception:  # noqa: BLE001
+            mode = ""
+        self._license_return_mode = (
+            mode if mode in ("home", "play", "assist", "gacha", "commands") else "home"
+        )
+        self._license_pending = (name, retry)
+        self._open_license_page()
+        return False
 
     def _show_tool(self, key: str) -> None:
         """点分类：只显示这一个功能；再点一次收起。"""
@@ -2301,7 +2354,9 @@ class AppUI:
             self._switch_mode(key)
             return
         if key in self.PROTECTED_TOOLS:
-            if not self._ask_license(self.PROTECTED_TOOLS[key]):
+            if not self._ask_license(
+                self.PROTECTED_TOOLS[key], retry=lambda: self._show_tool(key)
+            ):
                 return
         sections = getattr(self, "_tool_sections", {}) or {}
         for widget in sections.values():
@@ -2804,7 +2859,9 @@ class AppUI:
 
     def _play_select(self, key: str) -> None:
         """点功能按钮：只显示选中功能的下面内容，并高亮按钮。"""
-        if key in self.PROTECTED_PLAY and not self._ask_license(self.PROTECTED_PLAY[key]):
+        if key in self.PROTECTED_PLAY and not self._ask_license(
+            self.PROTECTED_PLAY[key], retry=lambda: self._play_select(key)
+        ):
             return
         panel = self._play_panels.get(key)
         if panel is None:
