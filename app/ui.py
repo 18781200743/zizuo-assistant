@@ -48,7 +48,7 @@ from .instruction_library import (
     load_sync_presets,
     script_title,
 )
-from .license import is_valid_key
+from .license import is_super_key, is_valid_key, make_super_key
 from .instruction_runner import InstructionRunner
 from .chest_4758a import run_chest_4758a
 from .commands_store import SLOT_COUNT, load_slots, save_slots, set_slot, slot_label
@@ -2127,7 +2127,11 @@ class AppUI:
             lic = self.config.get("license") or {}
             key = str(lic.get("key") or "")
             saved_id = str(lic.get("game_id") or "").strip()
-            if not lic.get("unlocked") or not saved_id:
+            if not lic.get("unlocked"):
+                return False
+            if is_super_key(key):
+                return True
+            if not saved_id:
                 return False
             current = self._game_role_id()
             if current and saved_id != current:
@@ -2159,7 +2163,7 @@ class AppUI:
             self.config["license"] = {
                 "unlocked": True,
                 "key": str(key).strip(),
-                "game_id": game_id,
+                "game_id": "" if is_super_key(key) else game_id,
             }
             save_config(self.config)
         except Exception:  # noqa: BLE001

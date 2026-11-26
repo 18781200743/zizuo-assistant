@@ -12,6 +12,9 @@ import re
 # 想换密钥就改这里，然后重新生成
 SECRET = "xiaotaiyang-2026-11-26-v1"
 
+# 超级密钥：不绑定游戏 ID
+SUPER_SECRET = "xiaotaiyang-super-2026-11-26-v1"
+
 
 def _normalize(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", str(text or "")).upper()
@@ -24,7 +27,21 @@ def make_key(game_id: str, secret: str = SECRET) -> str:
     return "XS-%s-%s-%s" % (digest[:4], digest[4:8], digest[8:12])
 
 
+def make_super_key(secret: str = SUPER_SECRET) -> str:
+    """生成不绑定游戏 ID 的超级密钥。"""
+    digest = hashlib.sha256(("xiaotaiyang-super:" + str(secret)).encode("utf-8")).hexdigest().upper()
+    return "SS-%s-%s-%s" % (digest[:4], digest[4:8], digest[8:12])
+
+
+def is_super_key(text: str) -> bool:
+    return bool(text) and _normalize(text) == _normalize(make_super_key())
+
+
 def is_valid_key(text: str, game_id: str) -> bool:
-    if not text or not str(game_id or "").strip():
+    if not text:
+        return False
+    if is_super_key(text):
+        return True
+    if not str(game_id or "").strip():
         return False
     return _normalize(text) == _normalize(make_key(game_id))

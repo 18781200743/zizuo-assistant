@@ -63,6 +63,13 @@
       <button id="clear">清空</button>
     </div>
 
+    <label style="margin-top:22px">超级密钥（不绑定游戏 ID）</label>
+    <div class="result" id="superOut" style="color:#ffd479">—</div>
+    <div class="row">
+      <button id="genSuper">生成超级密钥</button>
+      <button id="copySuper">复制</button>
+    </div>
+
     <div class="hint">
       密钥规则：SHA-256(SECRET + ":" + 游戏ID)，取前 12 位十六进制。<br>
       SECRET 必须和 <b>app/license.py</b> 里的保持一致，否则生成的密钥无效。<br>
@@ -131,6 +138,8 @@ function sha256Hex(ascii) {
 
 /* 必须和 app/license.py 的 SECRET 一致 */
 var SECRET = "xiaotaiyang-2026-11-26-v1";
+/* 超级密钥：不绑定游戏 ID，必须和 app/license.py 的 SUPER_SECRET 一致 */
+var SUPER_SECRET = "xiaotaiyang-super-2026-11-26-v1";
 
 function makeKey(gameId) {
   var id = String(gameId || '').replace(/\s+/g, '');
@@ -138,6 +147,12 @@ function makeKey(gameId) {
   var digest = sha256Hex(SECRET + ":" + id);
   if (!digest) return '';
   return "XS-" + digest.slice(0, 4) + "-" + digest.slice(4, 8) + "-" + digest.slice(8, 12);
+}
+
+function makeSuperKey() {
+  var digest = sha256Hex("xiaotaiyang-super:" + SUPER_SECRET);
+  if (!digest) return '';
+  return "SS-" + digest.slice(0, 4) + "-" + digest.slice(4, 8) + "-" + digest.slice(8, 12);
 }
 
 /* ---- 页面逻辑 ---- */
@@ -172,6 +187,25 @@ function makeKey(gameId) {
   });
   document.getElementById('clear').addEventListener('click', function () {
     gid.value = ''; out.textContent = '—'; gid.focus();
+  });
+
+  var superOut = document.getElementById('superOut');
+  function renderSuper() {
+    var key = makeSuperKey();
+    superOut.textContent = key || '—';
+  }
+  document.getElementById('genSuper').addEventListener('click', renderSuper);
+  document.getElementById('copySuper').addEventListener('click', function () {
+    var text = superOut.textContent || '';
+    if (!text || text === '—') return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {});
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
   });
 })();
 </script>
