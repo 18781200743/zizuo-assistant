@@ -151,7 +151,7 @@ RUNTIME_JS = r"""
     // 公会情报：查询我方/敌方据点驻守成员与三队总战力。
     guildIntel: { running: false, rows: [], error: '', done: 0, total: 0, camp: 0 },
     // 公会迷宫首领：保存最近一次查询到的首领快照。
-    maze: { last: null },
+    maze: { last: null, context: null },
     // 快速复活：全灭面板出现后自动复活（道具 / 广告 / 回营地），延迟可配
     revive: {
       enabled: false,
@@ -4988,6 +4988,49 @@ RUNTIME_JS = r"""
     return result;
   }
 
+  /** 读取公会迷宫主界面的难度/层数（不需要进首领战斗）。 */
+  function mazeContext() {
+    try {
+      const cc = window.cc;
+      const scene = cc && cc.director && cc.director.getScene();
+      if (!scene) return { ok: false, error: '游戏还没加载', cached: state.maze.context };
+      function find(node, name, depth) {
+        if (!node || depth > 10) return null;
+        try { if (String(node.name) === name) return node; } catch (_) { /* ignore */ }
+        const children = node.children || [];
+        for (const child of children) {
+          const hit = find(child, name, depth + 1);
+          if (hit) return hit;
+        }
+        return null;
+      }
+      const view = find(scene, 'GuildMazeMainView', 0);
+      if (!view) return { ok: false, error: '当前不在公会迷宫界面', cached: state.maze.context };
+      let text = '';
+      try {
+        const labels = view.getComponentsInChildren(cc.Label) || [];
+        for (const label of labels) {
+          const value = String(label.string || '');
+          if (value.indexOf('难度') >= 0 && value.indexOf('第') >= 0) { text = value; break; }
+        }
+      } catch (_) { text = ''; }
+      if (!text) return { ok: false, error: '没找到难度文字', cached: state.maze.context };
+      const match = text.match(/难度\s*(\d+)\s*[：:]\s*第\s*(\d+)\s*\/\s*(\d+)\s*层/);
+      if (!match) return { ok: false, error: '难度格式变了：' + text, raw: text, cached: state.maze.context };
+      const context = {
+        difficulty: Number(match[1]) || null,
+        floor: Number(match[2]) || null,
+        floors: Number(match[3]) || null,
+        raw: text,
+      };
+      state.maze.context = context;
+      return { ok: true, difficulty: context.difficulty, floor: context.floor,
+        floors: context.floors, raw: text };
+    } catch (cause) {
+      return { ok: false, error: msgOf(cause), cached: state.maze.context };
+    }
+  }
+
   /**
    * 查询公会迷宫当前首领（只读）。必须在首领战斗里执行；
    * 不在战斗时返回上次查到的快照，方便对照。
@@ -4996,6 +5039,8 @@ RUNTIME_JS = r"""
     const cfg = mazeConfig();
     if (!cfg) return { ok: false, error: '当前游戏版本没有公会迷宫映射', cached: null };
     const cached = state.maze.last || null;
+    const ctx = mazeContext();
+    const ctxData = ctx && ctx.ok ? ctx : (state.maze.context || {});
     try {
       const holder = window[cfg.holder];
       const scene = holder && holder[cfg.scene];
@@ -5028,15 +5073,18 @@ RUNTIME_JS = r"""
         const model = maze && maze[cfg.model];
         if (model) difficulty = Number(model[cfg.difficulty]) || null;
       } catch (_) { difficulty = null; }
+      if (!difficulty) difficulty = Number(ctxData.difficulty) || null;
       try {
         const challenge = holder[cfg.challengeService];
         const model = challenge && challenge[cfg.model];
         if (model && typeof model[cfg.floor] === 'function') floor = Number(model[cfg.floor]()) || null;
       } catch (_) { floor = null; }
+      if (!floor) floor = Number(ctxData.floor) || null;
 
       const snapshot = {
         difficulty: difficulty,
         floor: floor,
+        floors: Number(ctxData.floors) || null,
         bossId: String(bossId),
         maxHp: stats.maxHp,
         antiCrit: stats.antiCrit,
@@ -8262,6 +8310,7 @@ RUNTIME_JS = r"""
     guildTeamsStart,
     guildTeamsState,
     mazeQuery,
+    mazeContext,
     set,
     diagnose,
     seedDaily: seedRedDay,

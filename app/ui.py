@@ -4941,9 +4941,9 @@ class AppUI:
         note = tk.Label(
             parent,
             text=(
-                "说明：只读取当前公会迷宫首领的血量、抗暴击、抗暴伤、命中和全部属性，"
-                "不会发起挑战或修改游戏数据。\n"
-                "请在「公会迷宫首领战斗」中点查询；离开战斗后仍会保留本次结果，刷新页面后清空。"
+                "说明：自动读取当前迷宫难度/层数；进入「公会迷宫首领战斗」后点「查询首领」，"
+                "读取首领血量、抗暴击、抗暴伤、命中和全部属性。\n"
+                "不会发起挑战或修改游戏数据；离开战斗后仍会保留本次结果，刷新页面后清空。"
             ),
             foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=700, padx=10, pady=6,
@@ -4961,6 +4961,12 @@ class AppUI:
         ttk.Label(
             parent, textvariable=self._maze_status, foreground="#1a4d8f",
             wraplength=700, justify=tk.LEFT,
+        ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
+
+        self._maze_context_var = tk.StringVar(value="当前迷宫：未进入公会迷宫")
+        ttk.Label(
+            parent, textvariable=self._maze_context_var, foreground="#0f766e",
+            font=("Microsoft YaHei UI", 9, "bold"),
         ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
 
         self._maze_summary = tk.StringVar(value="尚未查询")
@@ -4984,11 +4990,43 @@ class AppUI:
         body.rowconfigure(0, weight=1)
         self._maze_tree = tree
 
+    def _maze_refresh_context(self) -> None:
+        """读取当前迷宫难度/层数，不要求进首领战斗。"""
+        try:
+            ctx = self.assist.maze_context()
+        except Exception:  # noqa: BLE001
+            ctx = {}
+        if ctx.get("ok"):
+            floors = ctx.get("floors")
+            self._maze_context_var.set(
+                "当前迷宫：难度 %s · 第 %s/%s 层"
+                % (
+                    ctx.get("difficulty") or "-",
+                    ctx.get("floor") or "-",
+                    floors if floors not in (None, 0) else "-",
+                )
+            )
+            return
+        cached = ctx.get("cached") or {}
+        if cached:
+            floors = cached.get("floors")
+            self._maze_context_var.set(
+                "当前迷宫：难度 %s · 第 %s/%s 层（上次）"
+                % (
+                    cached.get("difficulty") or "-",
+                    cached.get("floor") or "-",
+                    floors if floors not in (None, 0) else "-",
+                )
+            )
+        else:
+            self._maze_context_var.set("当前迷宫：未进入公会迷宫")
+
     def _maze_auto_poll(self) -> None:
         """选中「公会迷宫」时自动观察，进入首领战斗后自动记录一次。"""
         if not getattr(self, "_maze_auto", False) or getattr(self, "_play_current", None) != "maze":
             self._maze_auto = False
             return
+        self._maze_refresh_context()
         try:
             result = self.assist.maze_query()
             snapshot = result.get("snapshot")
@@ -5008,6 +5046,7 @@ class AppUI:
             self.root.after(2000, self._maze_auto_poll)
 
     def _maze_query(self) -> None:
+        self._maze_refresh_context()
         if not self.assist.running:
             try:
                 self.start_assist()
@@ -5074,7 +5113,11 @@ class AppUI:
         tree = getattr(self, "_maze_tree", None)
         if summary is None or tree is None:
             return
-        lines = [summary.get()]
+        lines = []
+        context = getattr(self, "_maze_context_var", None)
+        if context is not None and context.get():
+            lines.append(context.get())
+        lines.append(summary.get())
         for item in tree.get_children():
             values = tree.item(item, "values")
             if len(values) >= 2:

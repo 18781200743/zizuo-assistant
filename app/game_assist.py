@@ -860,6 +860,17 @@ class GameAssist:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 
+    def maze_context(self) -> dict:
+        """读取公会迷宫主界面的当前难度/层数（不需要进首领战斗）。"""
+        try:
+            raw = self.bridge.eval_js(
+                "JSON.stringify(window.__zzAssist && window.__zzAssist.mazeContext "
+                "? window.__zzAssist.mazeContext() : null)"
+            )
+            return json.loads(raw or "null") or {}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
     def reload_map_now(self) -> bool:
         """立刻重进当前地图（刷怪）。"""
         try:
