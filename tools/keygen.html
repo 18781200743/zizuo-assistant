@@ -149,10 +149,24 @@ function makeKey(gameId) {
   return "XS-" + digest.slice(0, 4) + "-" + digest.slice(4, 8) + "-" + digest.slice(8, 12);
 }
 
-function makeSuperKey() {
-  var digest = sha256Hex("xiaotaiyang-super:" + SUPER_SECRET);
-  if (!digest) return '';
-  return "SS-" + digest.slice(0, 4) + "-" + digest.slice(4, 8) + "-" + digest.slice(8, 12);
+function randomHex8() {
+  var out = '';
+  var c = (typeof crypto !== 'undefined') ? crypto : null;
+  if (c && c.getRandomValues) {
+    var buf = new Uint8Array(4);
+    c.getRandomValues(buf);
+    for (var i = 0; i < buf.length; i++) out += ('0' + buf[i].toString(16)).slice(-2);
+  } else {
+    for (var j = 0; j < 8; j++) out += '0123456789ABCDEF'.charAt(Math.floor(Math.random() * 16));
+  }
+  return out.toUpperCase();
+}
+
+function makeSuperKey(nonce) {
+  var raw = String(nonce || '').toUpperCase();
+  if (!/^[0-9A-F]{8}$/.test(raw)) raw = randomHex8();
+  var sig = sha256Hex("xiaotaiyang-super:" + SUPER_SECRET + ":" + raw).slice(0, 4);
+  return "SS-" + raw.slice(0, 4) + "-" + raw.slice(4, 8) + "-" + sig;
 }
 
 /* ---- 页面逻辑 ---- */
