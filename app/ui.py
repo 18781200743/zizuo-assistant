@@ -2137,7 +2137,7 @@ class AppUI:
                        "revive": "复活 / 闪现", "blink": "复活 / 闪现"}
     PROTECTED_PLAY = {"plank": "跳一跳", "guild": "公会情报"}
     # 测试完成前先从「功能玩法」隐藏，代码保留；清空这个集合即可恢复
-    HIDDEN_PLAY = {"daily", "talisman", "maze", "rogue"}
+    HIDDEN_PLAY = {"daily", "talisman", "maze", "arena", "rogue"}
 
     def _game_role_id(self) -> str:
         """从游戏里读当前角色 ID（模型 GZZR）。"""
