@@ -2136,6 +2136,8 @@ class AppUI:
     PROTECTED_TOOLS = {"map": "地图 / 红包", "red": "地图 / 红包",
                        "revive": "复活 / 闪现", "blink": "复活 / 闪现"}
     PROTECTED_PLAY = {"plank": "跳一跳", "guild": "公会情报"}
+    # 测试完成前先从「功能玩法」隐藏，代码保留；清空这个集合即可恢复
+    HIDDEN_PLAY = {"daily", "talisman", "maze"}
 
     def _game_role_id(self) -> str:
         """从游戏里读当前角色 ID（模型 GZZR）。"""
@@ -2666,7 +2668,7 @@ class AppUI:
         chooser.pack(fill=tk.X, pady=(0, 8))
         for col in range(2):
             chooser.columnconfigure(col, weight=1)
-        for index, (key, text) in enumerate((
+        play_items = [
             ("daily", "日常任务"),
             ("arena", "荣耀竞技场"),
             ("rogue", "杀戮尖塔"),
@@ -2675,8 +2677,11 @@ class AppUI:
             ("talisman", "护符升级"),
             ("guild", "公会情报"),
             ("maze", "公会迷宫"),
-        )):
+        ]
+        play_items = [item for item in play_items if item[0] not in self.HIDDEN_PLAY]
+        for index, (key, text) in enumerate(play_items):
             row, col = divmod(index, 2)
+            span = 2 if index == len(play_items) - 1 and len(play_items) % 2 else 1
             button = tk.Button(
                 chooser, text=text, command=lambda k=key: self._play_select(k),
                 relief=tk.FLAT, bd=0, padx=10, pady=8, cursor="hand2",
@@ -2685,7 +2690,7 @@ class AppUI:
                 font=("Microsoft YaHei UI", 10, "bold"),
             )
             button.grid(
-                row=row, column=col, sticky="ew",
+                row=row, column=col, columnspan=span, sticky="ew",
                 padx=(0 if col == 0 else 6, 0), pady=(0, 6),
             )
             self._play_buttons[key] = button
