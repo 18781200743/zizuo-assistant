@@ -429,7 +429,6 @@
     .feature-grid .btn.feature-btn:last-child { grid-column: 1 / -1; }
 
     /* 运行命令和功能玩法固定同一排 */
-    .cat-pair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
     /* 闪现寻怪内嵌列表 */
     .monster-list { max-height: 280px; overflow-y: auto; margin-top: 8px; }
@@ -556,10 +555,8 @@
       <button class="btn cat" id="catMap">地图 / 红包</button>
       <button class="btn cat warn" id="catRevive">复活 / 闪现</button>
       <button class="btn cat" id="catGacha">抽卡</button>
-      <div class="cat-pair">
-        <button class="btn cat" id="catCmd">运行命令</button>
-        <button class="btn cat" id="catPlay">功能玩法</button>
-      </div>
+      <button class="btn cat" id="catPlay">功能玩法</button>
+      <button class="btn cat full" id="catCmd">运行命令</button>
     </div>
 
     <div class="sec" id="secMap">
