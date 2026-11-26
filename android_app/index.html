@@ -78,6 +78,44 @@
       padding: 12px; background: #2f7fe8; color: #fff; font-size: 15px; font-weight: 700;
     }
 
+    /* 密钥弹层 */
+    .theme-btn.ok { color: #86efac; border-color: rgba(134, 239, 172, .6); }
+    body.day .theme-btn.ok { color: #15803d; border-color: #9ed8b4; background: #eefaf3; }
+    .lic-mask {
+      position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 80;
+      display: none; align-items: center; justify-content: center; padding: 18px;
+      background: rgba(4, 8, 18, .78);
+    }
+    .lic-mask.active { display: flex; }
+    .lic-box {
+      width: 100%; max-width: 340px; max-height: 92vh; overflow-y: auto;
+      background: #ffffff; color: #1f2937; border-radius: 18px;
+      padding: 14px 16px 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+    }
+    .lic-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .lic-top button {
+      border: 0; background: #eef2f9; color: #1c4f9c; border-radius: 10px;
+      padding: 7px 10px; font-size: 14px; font-weight: 700;
+    }
+    .lic-top b { font-size: 17px; }
+    .lic-qr { display: block; width: 170px; max-width: 60%; margin: 6px auto 8px; border-radius: 8px; }
+    .lic-note { text-align: center; color: #8a94a6; font-size: 12px; line-height: 1.6; margin-bottom: 10px; }
+    .lic-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 14px; }
+    .lic-row span { flex: 0 0 52px; color: #4b5768; }
+    .lic-row input {
+      flex: 1; min-width: 0; border: 1px solid #cfd9ea; border-radius: 9px;
+      padding: 9px 10px; font-size: 14px; color: #1a4d8f; background: #f7f9fd;
+    }
+    .lic-row input#licKey { color: #1f2937; background: #ffffff; font-family: Consolas, monospace; }
+    .lic-row button {
+      border: 0; background: #eef2ff; color: #1e3a8a; border-radius: 9px;
+      padding: 8px 10px; font-size: 13px; font-weight: 700;
+    }
+    .lic-status { min-height: 18px; margin: 6px 0 2px; color: #b45309; font-size: 12px; text-align: center; }
+    .lic-status.ok { color: #15803d; }
+    .lic-btns { display: flex; gap: 10px; margin-top: 8px; }
+    .lic-btns .btn { flex: 1; }
+
     .card {
       background: var(--card); border: 1px solid var(--card-line);
       border-radius: 16px; padding: 16px; box-shadow: var(--shadow);
@@ -423,6 +461,7 @@
         <div class="home-sub">小太阳脚本 · 安卓版</div>
       </div>
       <div class="head-btns">
+        <button class="theme-btn" id="btnLicense">密钥</button>
         <button class="theme-btn" id="btnSponsor">赞助</button>
         <button class="theme-btn" id="btnTheme">☾ 夜间</button>
       </div>
@@ -464,6 +503,32 @@
       <img src="img/sponsor_qr.png" alt="微信收款二维码">
       <p class="fine">赞助完全自愿，不影响任何功能</p>
       <button id="sponsorClose">关闭</button>
+    </div>
+  </div>
+
+  <!-- 密钥 -->
+  <div class="lic-mask" id="licMask">
+    <div class="lic-box">
+      <div class="lic-top">
+        <button id="licClose">‹ 返回</button>
+        <b>密钥</b>
+      </div>
+      <img class="lic-qr" src="img/pay_qr.png" alt="购买密钥">
+      <div class="lic-note">先进入游戏再获取ID<br>一个ID一个账户</div>
+      <div class="lic-row">
+        <span>游戏ID</span>
+        <input id="licId" readonly>
+        <button id="licCopy">复制</button>
+      </div>
+      <div class="lic-row">
+        <span>密钥</span>
+        <input id="licKey" autocomplete="off" placeholder="XS-XXXX-XXXX-XXXX">
+      </div>
+      <div class="lic-status" id="licStatus"></div>
+      <div class="lic-btns">
+        <button class="btn primary" id="licOk">确认</button>
+        <button class="btn dark" id="licCancel">取消</button>
+      </div>
     </div>
   </div>
 
@@ -705,6 +770,7 @@
   <script src="js/instructions.js"></script>
   <script src="js/sync_presets.js"></script>
   <script src="js/gacha.js"></script>
+  <script src="js/license.js"></script>
   <script src="js/app.js"></script>
   <script>
     (function () {

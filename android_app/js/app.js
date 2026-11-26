@@ -88,6 +88,9 @@
       var el = $(p);
       if (el) el.classList.toggle("active", p === id);
     });
+    if (window.ZZLicense && window.ZZLicense.refreshHome) {
+      try { window.ZZLicense.refreshHome(); } catch (e) { /* ignore */ }
+    }
   }
 
   function evalGame(code) {
@@ -98,6 +101,14 @@
     } catch (e) {
       return "";
     }
+  }
+
+  function needLicense(name, next) {
+    if (window.ZZLicense && window.ZZLicense.ensure) {
+      window.ZZLicense.ensure(name, next);
+      return;
+    }
+    next();
   }
 
   function unquote(s) {
@@ -1948,54 +1959,80 @@
       if (backToGame()) return;
       showPage("pageHome");
     };
-    $("fRed").onclick = function () { toggle("redPacket"); };
+    $("fRed").onclick = function () {
+      needLicense("地图 / 红包", function () { toggle("redPacket"); });
+    };
     $("fRevive").onclick = function () {
-      var on = !!(state && state.revive && state.revive.enabled);
-      revivePendingUntil = Date.now() + 1500;
-      send("revive", on ? 0 : { mode: "tp", delay: 0 });
-      var btn = $("fRevive");
-      if (btn) {
-        btn.classList.toggle("on", !on);
-        btn.textContent = on ? "快速复活" : "关闭";
-      }
-      flashRevive(on ? "关闭成功" : "开启成功");
+      needLicense("复活 / 闪现", function () {
+        var on = !!(state && state.revive && state.revive.enabled);
+        revivePendingUntil = Date.now() + 1500;
+        send("revive", on ? 0 : { mode: "tp", delay: 0 });
+        var btn = $("fRevive");
+        if (btn) {
+          btn.classList.toggle("on", !on);
+          btn.textContent = on ? "快速复活" : "关闭";
+        }
+        flashRevive(on ? "关闭成功" : "开启成功");
+      });
     };
     $("fReviveNow").onclick = function () {
-      send("reviveNow", 1);
-      flashRevive("手动复活成功");
+      needLicense("复活 / 闪现", function () {
+        send("reviveNow", 1);
+        flashRevive("手动复活成功");
+      });
     };
     $("fMob").onclick = function () { toggle("mob"); };
     $("fBoss").onclick = function () { toggle("boss"); };
     var refreshMonstersBtn = $("fRefreshMonsters");
-    if (refreshMonstersBtn) refreshMonstersBtn.onclick = refreshMonsterList;
+    if (refreshMonstersBtn) refreshMonstersBtn.onclick = function () {
+      needLicense("复活 / 闪现", refreshMonsterList);
+    };
     var blinkGoBtn = $("fBlinkGo");
-    if (blinkGoBtn) blinkGoBtn.onclick = blinkSelected;
+    if (blinkGoBtn) blinkGoBtn.onclick = function () {
+      needLicense("复活 / 闪现", blinkSelected);
+    };
     var blinkFilter = $("blinkFilter");
     if (blinkFilter) blinkFilter.onchange = refreshMonsterList;
     var clickTpCheck = $("blinkClickTp");
     if (clickTpCheck) clickTpCheck.onchange = function () { setClickTp(!!clickTpCheck.checked); };
     var autoChestBtn = $("fAutoChest");
-    if (autoChestBtn) autoChestBtn.onclick = toggleAutoChest;
+    if (autoChestBtn) autoChestBtn.onclick = function () {
+      needLicense("地图 / 红包", toggleAutoChest);
+    };
     var playDailyBtn = $("playDaily");
     if (playDailyBtn) playDailyBtn.onclick = function () { showFeature("daily"); };
     var playPlankBtn = $("playPlank");
-    if (playPlankBtn) playPlankBtn.onclick = function () { showFeature("plank"); };
+    if (playPlankBtn) playPlankBtn.onclick = function () {
+      needLicense("跳一跳", function () { showFeature("plank"); });
+    };
     var plankRunBtn = $("plankRun");
-    if (plankRunBtn) plankRunBtn.onclick = togglePlank;
+    if (plankRunBtn) plankRunBtn.onclick = function () {
+      needLicense("跳一跳", togglePlank);
+    };
     var playTalismanBtn = $("playTalisman");
     if (playTalismanBtn) playTalismanBtn.onclick = function () { showFeature("talisman"); };
     var playGuildBtn = $("playGuild");
-    if (playGuildBtn) playGuildBtn.onclick = function () { showFeature("guild"); };
+    if (playGuildBtn) playGuildBtn.onclick = function () {
+      needLicense("公会情报", function () { showFeature("guild"); });
+    };
     var playMazeBtn = $("playMaze");
     if (playMazeBtn) playMazeBtn.onclick = function () { showFeature("maze"); };
     var gQueryBtn = $("gQuery");
-    if (gQueryBtn) gQueryBtn.onclick = guildQuery;
+    if (gQueryBtn) gQueryBtn.onclick = function () {
+      needLicense("公会情报", guildQuery);
+    };
     var gCopyBtn = $("gCopy");
-    if (gCopyBtn) gCopyBtn.onclick = guildCopy;
+    if (gCopyBtn) gCopyBtn.onclick = function () {
+      needLicense("公会情报", guildCopy);
+    };
     var gTeamsBtn = $("gTeams");
-    if (gTeamsBtn) gTeamsBtn.onclick = function () { guildReadTeams(); };
+    if (gTeamsBtn) gTeamsBtn.onclick = function () {
+      needLicense("公会情报", function () { guildReadTeams(); });
+    };
     var gExportBtn = $("gExport");
-    if (gExportBtn) gExportBtn.onclick = guildExport;
+    if (gExportBtn) gExportBtn.onclick = function () {
+      needLicense("公会情报", guildExport);
+    };
     var playFarmBtn = $("playFarm");
     if (playFarmBtn) playFarmBtn.onclick = function () { showFeature("farm"); };
     var farmAutoBtn = $("farmAuto");
@@ -2018,15 +2055,21 @@
     }
 
     $("fMob").onclick = function () {
-      var on = !!(state && state.mob && state.mob.enabled);
-      send("mob", on ? 0 : numVal("mobSec", 1));
+      needLicense("地图 / 红包", function () {
+        var on = !!(state && state.mob && state.mob.enabled);
+        send("mob", on ? 0 : numVal("mobSec", 1));
+      });
     };
     $("fBoss").onclick = function () {
-      var on = !!(state && state.boss && state.boss.enabled);
-      send("boss", on ? 0 : numVal("bossSec", 3));
+      needLicense("地图 / 红包", function () {
+        var on = !!(state && state.boss && state.boss.enabled);
+        send("boss", on ? 0 : numVal("bossSec", 3));
+      });
     };
     var wishBtn = $("fWish");
-    if (wishBtn) wishBtn.onclick = function () { toggle("wish"); };
+    if (wishBtn) wishBtn.onclick = function () {
+      needLicense("地图 / 红包", function () { toggle("wish"); });
+    };
 
     var reBtn = $("btnReconnect");
     if (reBtn) reBtn.onclick = function () {
@@ -2467,25 +2510,32 @@
       var sec = $(pair[1]);
       if (!btn || !sec) return;
       btn.onclick = function () {
-        var willOpen = !sec.classList.contains("open");
-        cats.forEach(function (p2) {
-          var b2 = $(p2[0]);
-          var s2 = $(p2[1]);
-          if (s2) s2.classList.remove("open");
-          if (b2) b2.classList.remove("sel");
-        });
-        if (pair[0] !== "catPlay") {
-          if (guildTimer) { clearInterval(guildTimer); guildTimer = null; }
-          if (mazeTimer) { clearInterval(mazeTimer); mazeTimer = null; }
-        }
-        if (willOpen) {
-          sec.classList.add("open");
-          btn.classList.add("sel");
-          if (pair[0] === "catGacha") gachaStats();
-        }
+        var run = function () {
+          var willOpen = !sec.classList.contains("open");
+          cats.forEach(function (p2) {
+            var b2 = $(p2[0]);
+            var s2 = $(p2[1]);
+            if (s2) s2.classList.remove("open");
+            if (b2) b2.classList.remove("sel");
+          });
+          if (pair[0] !== "catPlay") {
+            if (guildTimer) { clearInterval(guildTimer); guildTimer = null; }
+            if (mazeTimer) { clearInterval(mazeTimer); mazeTimer = null; }
+          }
+          if (willOpen) {
+            sec.classList.add("open");
+            btn.classList.add("sel");
+            if (pair[0] === "catGacha") gachaStats();
+          }
+        };
+        if (pair[0] === "catMap") needLicense("地图 / 红包", run);
+        else if (pair[0] === "catRevive") needLicense("复活 / 闪现", run);
+        else run();
       };
     });
-    $("fClear").onclick = function () { send("clearStuck", 1); flashRevive("清除成功"); };
+    $("fClear").onclick = function () {
+      needLicense("复活 / 闪现", function () { send("clearStuck", 1); flashRevive("清除成功"); });
+    };
     $("btnListBack").onclick = function () { showPage("pageFunc"); };
     var listRefreshBtn = $("btnListRefresh");
     if (listRefreshBtn) listRefreshBtn.onclick = refreshMonsterList;
@@ -2510,6 +2560,9 @@
     }, false);
     cleanupStaleWebviews();
     loadRunnerSource();
+    if (window.ZZLicense) {
+      window.ZZLicense.init({ evalGame: evalGame, copyText: copyText });
+    }
     bind();
     showPage("pageHome");
   }
