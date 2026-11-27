@@ -13,6 +13,8 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     # 小怪 / BOSS 死亡后各等多少秒再重进地图
     "mob_seconds": 1,
     "boss_seconds": 3,
+    # 竞技场默认打列表第几个：0=自动（免费优先），1=最上面，3=第三个
+    "arena_target": 3,
     # 红包扫描间隔（毫秒，10-1000）：越小越快，注意风控
     "red_interval_ms": 20,
     # 开关状态：重启工具后自动恢复（以前重启就变「已关闭」）
@@ -140,6 +142,11 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
             elif key == "names":
                 if isinstance(item, dict):
                     data[key] = {str(k): str(v) for k, v in item.items() if isinstance(v, str)}
+            elif key == "arena_target":
+                try:
+                    data[key] = max(0, min(6, int(item)))
+                except (TypeError, ValueError):
+                    continue
             elif key == "red_interval_ms":
                 try:
                     data[key] = max(10, min(1000, int(item)))

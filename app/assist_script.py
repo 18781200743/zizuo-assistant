@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 201
+RUNTIME_VERSION = 202
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 201
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 201;
+  const VERSION = 202;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4614,7 +4614,7 @@ RUNTIME_JS = r"""
     return !!arenaView();
   }
 
-  async function arenaRun(count, takeFirst, token) {
+  async function arenaRun(count, takeFirst, targetIndex, token) {
     const alive = function () { return arenaAuto.running && arenaAuto.token === token; };
     arenaAuto.running = true;
     arenaAuto.error = '';
@@ -4639,10 +4639,14 @@ RUNTIME_JS = r"""
           arenaLog('没有可挑战的对手');
           break;
         }
-        // 抢第一：优先打列表第一个（排名最高的对手）
+        // targetIndex > 0：固定打列表第 N 个（1 = 最上面）
+        // targetIndex = 0：抢第一优先第一个，否则优先免费对手
+        const target = Math.max(0, Math.floor(Number(targetIndex) || 0));
         let pick = items[0];
-        if (!takeFirst) {
-          pick = items.find(function (it) { return !!arenaChild(it, 'freeBtn'); }) || items[0];
+        if (target > 0) {
+          pick = items[Math.min(target, items.length) - 1] || items[0];
+        } else if (!takeFirst) {
+          pick = items.find(function (it) { return !!it && !!arenaChild(it, 'freeBtn'); }) || items[0];
         }
         arenaAuto.step = '第 ' + (arenaAuto.done + 1) + ' 场';
         const name = arenaText(pick, 'userName') || '对手';
@@ -4674,7 +4678,12 @@ RUNTIME_JS = r"""
     if (arenaAuto.running) return { ok: true, message: '正在挑战中' };
     arenaAuto.token += 1;
     const token = arenaAuto.token;
-    void arenaRun(opts && opts.count, !!(opts && opts.takeFirst), token);
+    void arenaRun(
+      opts && opts.count,
+      !!(opts && opts.takeFirst),
+      opts && opts.targetIndex,
+      token
+    );
     return { ok: true, message: '开始竞技场挑战' };
   }
 

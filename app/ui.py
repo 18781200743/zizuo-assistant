@@ -2798,7 +2798,8 @@ class AppUI:
         tk.Label(
             arena,
             text="先打开游戏里的荣耀竞技场，再点开始。\n"
-                 "次数填 0 = 一直打到没次数；勾「抢第一」会一直打列表最上面的对手。",
+                 "次数填 0 = 一直打到没次数；打第几个填 0 = 自动优先免费，"
+                 "填 1/2/3 就固定打列表对应位置的对手。",
             foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=440, padx=8, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
@@ -2809,7 +2810,13 @@ class AppUI:
         self.arena_count_var = tk.StringVar(value="0")
         ttk.Spinbox(
             arena_row, from_=0, to=99, width=5, textvariable=self.arena_count_var,
-        ).pack(side=tk.LEFT, padx=(6, 12))
+        ).pack(side=tk.LEFT, padx=(6, 10))
+        ttk.Label(arena_row, text="打第几个").pack(side=tk.LEFT)
+        arena_cfg = normalize_assist(self.config.get("assist"))
+        self.arena_target_var = tk.StringVar(value=str(arena_cfg.get("arena_target", 3)))
+        ttk.Spinbox(
+            arena_row, from_=0, to=6, width=4, textvariable=self.arena_target_var,
+        ).pack(side=tk.LEFT, padx=(6, 10))
         self.arena_first_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(arena_row, text="抢第一", variable=self.arena_first_var).pack(side=tk.LEFT)
         arena_btns = ttk.Frame(arena)
@@ -3144,7 +3151,23 @@ class AppUI:
             count = int(float(self.arena_count_var.get() or 0))
         except (TypeError, ValueError):
             count = 0
-        payload = json.dumps({"count": max(0, min(99, count)), "takeFirst": bool(self.arena_first_var.get())})
+        try:
+            target = int(float(self.arena_target_var.get() or 0))
+        except (TypeError, ValueError):
+            target = 0
+        target = max(0, min(6, target))
+        try:
+            assist_cfg = normalize_assist(self.config.get("assist"))
+            assist_cfg["arena_target"] = target
+            self.config["assist"] = assist_cfg
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        payload = json.dumps({
+            "count": max(0, min(99, count)),
+            "takeFirst": bool(self.arena_first_var.get()),
+            "targetIndex": target,
+        })
         try:
             raw = self._plank_eval(
                 "(function(){try{var a=window.__zzAssist;"
@@ -4191,6 +4214,14 @@ class AppUI:
             try:
                 assist["revive_delay"] = max(0.0, min(10.0, float(revive_delay_var.get().strip())))
             except (ValueError, AttributeError, TypeError):
+                pass
+        arena_target_var = getattr(self, "arena_target_var", None)
+        if arena_target_var is not None:
+            try:
+                assist["arena_target"] = max(
+                    0, min(6, int(float(arena_target_var.get().strip() or "0")))
+                )
+            except (ValueError, AttributeError):
                 pass
         red_ms_var = getattr(self, "assist_red_ms_var", None)
         if red_ms_var is not None:
