@@ -2010,7 +2010,6 @@ class AppUI:
         self.assist_red_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("redPacket"))
         self.assist_red_btn.grid(row=0, column=3, padx=(6, 4))
         self.assist_red_status = tk.StringVar(value="尚未开启")
-        ttk.Label(free, textvariable=self.assist_red_status, foreground="#9fb0c9").grid(row=0, column=4, sticky=tk.W)
 
         ttk.Label(free, text="红包间隔").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_red_ms_var = tk.StringVar(value=str(assist.get("red_interval_ms", 20)))
@@ -2025,7 +2024,15 @@ class AppUI:
         self.assist_wish_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("wish"))
         self.assist_wish_btn.grid(row=1, column=3, padx=(6, 4), pady=(6, 0))
         self.assist_wish_status = tk.StringVar(value="未检查")
-        ttk.Label(free, textvariable=self.assist_wish_status, foreground="#9fb0c9").grid(row=1, column=4, sticky=tk.W, pady=(6, 0))
+        # 状态单独占一行，避免和按钮挤在一起被截断
+        ttk.Label(
+            free, textvariable=self.assist_red_status, foreground="#9fb0c9",
+            wraplength=430, justify=tk.LEFT,
+        ).grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
+        ttk.Label(
+            free, textvariable=self.assist_wish_status, foreground="#9fb0c9",
+            wraplength=430, justify=tk.LEFT,
+        ).grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
 
         # ---------- 快速复活 ----------
         revive = ttk.LabelFrame(parent, text="快速复活", padding=6)
