@@ -2800,7 +2800,7 @@ class AppUI:
             text="先打开游戏里的荣耀竞技场，再点开始。\n"
                  "次数填 0 = 一直打到没次数；打第几个填 0 = 自动优先免费，"
                  "填 1/2/3 就固定打列表对应位置的对手。\n"
-                 "默认用游戏自带自动挑战控制节奏；免费次数用完后每场消耗 10 绿钻。",
+                 "默认逐场挑战并等待游戏过场结束；免费次数用完后每场消耗 10 绿钻。",
             foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=440, padx=8, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
@@ -2823,7 +2823,7 @@ class AppUI:
         arena_row2 = ttk.Frame(arena)
         arena_row2.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(arena_row2, text="每场间隔(秒)").pack(side=tk.LEFT)
-        self.arena_gap_var = tk.StringVar(value=str(arena_cfg.get("arena_gap", 8)))
+        self.arena_gap_var = tk.StringVar(value=str(arena_cfg.get("arena_gap", 12)))
         ttk.Spinbox(
             arena_row2, from_=2, to=60, width=4, textvariable=self.arena_gap_var,
         ).pack(side=tk.LEFT, padx=(6, 8))
@@ -2833,12 +2833,12 @@ class AppUI:
         ).pack(side=tk.LEFT)
         arena_row3 = ttk.Frame(arena)
         arena_row3.pack(fill=tk.X, pady=(0, 6))
-        self.arena_native_var = tk.BooleanVar(value=bool(arena_cfg.get("arena_native", True)))
+        self.arena_native_var = tk.BooleanVar(value=bool(arena_cfg.get("arena_native", False)))
         ttk.Checkbutton(
-            arena_row3, text="用游戏自带自动挑战（推荐）", variable=self.arena_native_var,
+            arena_row3, text="用游戏自带自动挑战", variable=self.arena_native_var,
         ).pack(side=tk.LEFT)
         ttk.Label(
-            arena_row3, text="取消勾选则按上面的间隔逐场点",
+            arena_row3, text="推荐不勾：逐场点并等待游戏过场结束，最稳",
             foreground="#7a5b00",
         ).pack(side=tk.LEFT)
         arena_btns = ttk.Frame(arena)
@@ -3181,7 +3181,7 @@ class AppUI:
         try:
             gap = int(float(self.arena_gap_var.get() or 0))
         except (TypeError, ValueError):
-            gap = 8
+            gap = 12
         gap = max(2, min(60, gap))
         native = bool(self.arena_native_var.get())
         try:
@@ -3256,24 +3256,8 @@ class AppUI:
         except Exception:  # noqa: BLE001
             st = None
         if isinstance(st, dict):
-            point = st.get("resultAt") or {}
-            try:
-                px = float(point.get("x"))
-                py = float(point.get("y"))
-            except (TypeError, ValueError):
-                px = py = 0.0
-            if px > 0 and py > 0 and (time.monotonic() - getattr(self, "_arena_click_at", 0.0)) > 1.5:
-                self._arena_click_at = time.monotonic()
-                try:
-                    call = getattr(self.assist.bridge, "_call", None)
-                    if call is not None:
-                        call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": px, "y": py, "button": "none", "buttons": 0})
-                        time.sleep(0.03)
-                        call("Input.dispatchMouseEvent", {"type": "mousePressed", "x": px, "y": py, "button": "left", "buttons": 1, "clickCount": 1})
-                        time.sleep(0.03)
-                        call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": px, "y": py, "button": "left", "buttons": 0, "clickCount": 1})
-                except Exception:  # noqa: BLE001
-                    pass
+            # 竞技场结算由运行时调用游戏原生 QTEF/KNIJ 关闭；
+            # 这里不再发真实鼠标点击，避免与运行时的关闭操作重叠。
             text = "竞技场：%s · 已打 %d 场" % (st.get("step") or "", int(st.get("done") or 0))
             if st.get("rank"):
                 text += " · " + str(st.get("rank"))

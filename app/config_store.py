@@ -16,9 +16,9 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     # 竞技场默认打列表第几个：0=自动（免费优先），1=最上面，3=第三个
     "arena_target": 3,
     # 竞技场两场之间的间隔（秒），太小会被服务器提示“操作频率过快”
-    "arena_gap": 8,
-    # 竞技场用游戏自带的自动挑战：由游戏控制挑战节奏，避免手动连点被限频
-    "arena_native": True,
+    "arena_gap": 12,
+    # 竞技场用游戏自带的自动挑战：默认关闭，逐场挑战并等待游戏过场结束
+    "arena_native": False,
     # 红包扫描间隔（毫秒，10-1000）：越小越快，注意风控
     "red_interval_ms": 20,
     # 开关状态：重启工具后自动恢复（以前重启就变「已关闭」）
@@ -208,6 +208,13 @@ def load_config() -> Dict[str, Any]:
         "Zizuo游戏窗", "Zizuo游戏窗口",
     ):
         merged["target_window_title"] = "小太阳"
+    # 旧版竞技场默认是「游戏自动挑战 + 8 秒」，会被服务器限频；
+    # 迁移成逐场挑战 + 12 秒，避免升级后还跑旧节奏。
+    assist_cfg = merged.get("assist")
+    if isinstance(assist_cfg, dict):
+        if assist_cfg.get("arena_native") is True and assist_cfg.get("arena_gap") in (8, None):
+            assist_cfg["arena_native"] = False
+            assist_cfg["arena_gap"] = 12
     if not isinstance(merged.get("tasks"), list):
         merged["tasks"] = []
     try:

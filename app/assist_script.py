@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 204
+RUNTIME_VERSION = 205
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 204
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 204;
+  const VERSION = 205;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4424,7 +4424,7 @@ RUNTIME_JS = r"""
     rank: '',
     token: 0,
     log: [],
-    gapMs: 8000,
+    gapMs: 12000,
     lastChallengeAt: 0,
     retries: 0,
     native: false,
@@ -4663,13 +4663,56 @@ RUNTIME_JS = r"""
     }
   }
 
+  /** 荣耀竞技场结算页组件：带原生 QTEF/KNIJ 的返回/关闭方法。 */
+  function arenaResultComp() {
+    const names = ['ArenaBattleResultView', 'Modal_ArenaBattleResultView'];
+    for (let i = 0; i < names.length; i += 1) {
+      const node = dailyActiveNode(names[i]);
+      if (!node) continue;
+      let comp = null;
+      (function walk(n) {
+        if (comp || !n) return;
+        (n.components || n._components || []).forEach(function (c) {
+          if (comp) return;
+          try {
+            if (typeof c.QTEF === 'function' && typeof c.KNIJ === 'function') comp = c;
+          } catch (_) { /* ignore */ }
+        });
+        (n.children || []).forEach(walk);
+      })(node);
+      if (comp) return comp;
+    }
+    return null;
+  }
+
+  /** MapTransitionView 是游戏切图/战斗过场；过场中发挑战会被服务器判“操作频率过快”。 */
+  async function arenaWaitTransition(timeoutMs) {
+    const deadline = Date.now() + (Number(timeoutMs) || 20000);
+    while (arenaAuto.running) {
+      if (!dailyActiveNode('MapTransitionView')) return true;
+      if (Date.now() >= deadline) return false;
+      await dailySleep(200);
+    }
+    return false;
+  }
+
   async function arenaFight(item) {
     const free = arenaChild(item, 'freeBtn');
     const attack = arenaChild(item, 'attackBtn');
     const btn = free || attack;
     if (!btn) return { status: 'no-button' };
 
-    // 两场之间留够间隔：服务器对挑战请求有频率限制
+    // 过场没结束就点挑战，服务器会直接回“操作频率过快”
+    if (!await arenaWaitTransition(20000)) return { status: 'stuck' };
+
+    let resultComp = arenaResultComp();
+    if (resultComp) {
+      try { resultComp.QTEF(); resultComp.KNIJ(); } catch (_) { /* ignore */ }
+      await dailySleep(900);
+      if (!await arenaWaitTransition(20000)) return { status: 'stuck' };
+    }
+    if (!arenaView()) return { status: 'already' };
+
     const gap = Math.max(0, Number(arenaAuto.gapMs) || 0);
     const remain = arenaAuto.lastChallengeAt + gap - Date.now();
     if (remain > 0) {
@@ -4677,50 +4720,59 @@ RUNTIME_JS = r"""
       await dailySleep(remain);
     }
     if (!arenaAuto.running) return { status: 'stopped' };
+    if (!await arenaWaitTransition(20000)) return { status: 'stuck' };
     if (!arenaView()) return { status: 'already' };
     const before = arenaToastText();
     if (before && arenaRateTip(before)) return { status: 'rate', toast: before };
 
     arenaAuto.step = '点击挑战';
-    if (!arenaAuto.running) return { status: 'stopped' };
     if (!dailyClickNode(btn)) return { status: 'no-button' };
     arenaAuto.lastChallengeAt = Date.now();
 
-    // 等战斗真正开始（竞技场界面消失 / 出现 VS 或结算）
+    // 等战斗真正开始：过场出现、竞技场消失或结算页出现
     let started = false;
     let toast = '';
-    let confirmAt = 0;
-    for (let i = 0; i < 24; i += 1) {
-      await dailySleep(250);
+    for (let i = 0; i < 75; i += 1) {
+      await dailySleep(200);
       if (!arenaAuto.running) return { status: 'stopped' };
       const tip = arenaToastText();
       if (tip) {
         toast = tip;
         if (arenaRateTip(tip)) return { status: 'rate', toast: tip };
       }
-      if (!arenaView() || arenaBattleNode()) { started = true; break; }
-      if (arenaActiveModal() && Date.now() - confirmAt > 1200) {
-        confirmAt = Date.now();
-        dailyClickTexts(['确定', '确认', '使用'], 1);
+      if (dailyActiveNode('MapTransitionView') || arenaBattleNode() || !arenaView() || arenaResultComp()) {
+        started = true;
+        break;
       }
     }
     if (!started) return { status: 'no-start', toast: toast };
 
-    // 战斗/结算：回到竞技场算完成
-    for (let i = 0; i < 140; i += 1) {
+    // 只认结算页，避免把竞技场列表误判成战斗结束
+    let done = false;
+    for (let i = 0; i < 600; i += 1) {
       await dailySleep(500);
       if (!arenaAuto.running) return { status: 'stopped' };
-      if (arenaView()) return { status: 'done' };
       const tip = arenaToastText();
       if (tip && arenaRateTip(tip)) return { status: 'rate', toast: tip };
-      if (arenaCloseResult()) {
-        await dailySleep(1200);
-        if (arenaView()) return { status: 'done' };
-        continue;
+      resultComp = arenaResultComp();
+      if (resultComp) {
+        try { resultComp.QTEF(); resultComp.KNIJ(); } catch (_) { /* ignore */ }
+        done = true;
+        break;
       }
-      if (i % 4 === 0) dailyClickTexts(['跳过'], 1);
+      const resultNode = dailyActiveNode('ArenaBattleResultView') || dailyActiveNode('Modal_ArenaBattleResultView');
+      if (resultNode) {
+        arenaCloseResult();
+        done = true;
+        break;
+      }
+      if (i % 8 === 0) dailyClickTexts(['跳过'], 1);
     }
-    return { status: 'stuck' };
+    if (!done) return { status: 'stuck' };
+
+    if (!await arenaWaitTransition(30000)) return { status: 'stuck' };
+    await dailySleep(1200);
+    return { status: 'done' };
   }
 
   /** 竞技场主界面的控制组件（带 FDBS + YTQU）。名字被混淆过，按结构找。 */
@@ -4774,6 +4826,7 @@ RUNTIME_JS = r"""
     try { if (typeof ctl.PCIC === 'function') ctl.PCIC(target); else ctl.SAJJ = target; } catch (_) { /* ignore */ }
     try { if (typeof ctl.BTYB === 'function') ctl.BTYB(limit); else ctl.WWBP = limit; } catch (_) { /* ignore */ }
     try { if (typeof ctl.CPAE === 'function') ctl.CPAE(true); else ctl.LRRX = true; } catch (_) { /* ignore */ }
+    if (!await arenaWaitTransition(20000)) return 'done';
     arenaAuto.native = true;
     arenaAuto.done = 0;
     arenaAuto.step = '游戏自动挑战';
@@ -4916,9 +4969,9 @@ RUNTIME_JS = r"""
           arenaAuto.error = res.toast || '操作频率过快';
           arenaAuto.step = '操作太快，等 ' + Math.ceil(wait / 1000) + ' 秒重试';
           arenaLog('操作太快：' + (res.toast || '') + '，等 ' + Math.ceil(wait / 1000) + ' 秒重试');
-          if (arenaAuto.retries > 2) {
-            arenaAuto.error = '服务器限频，请重启游戏窗口或等几分钟再试';
-            arenaLog('服务器一直提示操作频率过快，建议重启游戏后再试');
+          if (arenaAuto.retries > 0) {
+            arenaAuto.error = '服务器限频，请重启游戏窗口后再试';
+            arenaLog('服务器提示操作频率过快，已停止；请重启游戏窗口后再试');
             break;
           }
           await dailySleep(wait);
