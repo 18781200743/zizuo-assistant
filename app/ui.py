@@ -792,6 +792,7 @@ class AppUI:
         # 固定「有目标就用最大倍率抽」「抽中也放弃，一直抽」
         self.gacha_cdp_maxbet_var = tk.BooleanVar(value=True)
         self.gacha_cdp_abandon_var = tk.BooleanVar(value=True)
+        self.gacha_turbo_var = tk.BooleanVar(value=bool(gacha.get("cdp_turbo")))
         self.gacha_pool_var = tk.StringVar(value="当前候选：未读取（打开招募面板后开始抽卡会自动读取）")
         self.gacha_records_var = tk.StringVar(value="抽中：尚未出货")
         self.gacha_cdp_status = tk.StringVar(value="打开酒馆/招募界面，再点「开始招募」")
@@ -875,6 +876,13 @@ class AppUI:
             bg="#e9edf2", fg="#374151", activebackground="#dfe4ea",
             font=("Microsoft YaHei UI", 10), padx=14, pady=9, cursor="hand2",
         ).pack(side=tk.LEFT)
+        self.gacha_turbo_btn = tk.Button(
+            btns, text="极速模式", command=self.toggle_gacha_turbo, relief=tk.FLAT, bd=0,
+            bg="#fff3e0", fg="#b45309", activebackground="#ffe8c7",
+            font=("Microsoft YaHei UI", 10, "bold"), padx=12, pady=9, cursor="hand2",
+        )
+        self.gacha_turbo_btn.pack(side=tk.LEFT, padx=(8, 0))
+        self._sync_gacha_turbo_btn()
         self.gacha_cdp_btn = tk.Button(
             btns, text="开始招募", command=self.toggle_gacha_cdp, relief=tk.FLAT, bd=0,
             bg="#2f9e5f", fg="#ffffff", activebackground="#26864f", activeforeground="#ffffff",
@@ -6067,9 +6075,10 @@ class AppUI:
             except tk.TclError:
                 pass
         keep_quality = 6 if self.gacha_cdp_red_var.get() else 0
+        turbo = bool(getattr(self, "gacha_turbo_var", None) and self.gacha_turbo_var.get())
         try:
             max_draws = int(self.gacha_cdp_max_var.get().strip() or "0")
-            delay_ms = int(self.gacha_cdp_delay_var.get().strip() or "1200")
+            delay_ms = 50 if turbo else int(self.gacha_cdp_delay_var.get().strip() or "1200")
             max_green = int(self.gacha_cdp_green_var.get().strip() or "0")
         except ValueError:
             messagebox.showerror("参数错误", "抽卡参数格式不对")
@@ -6083,6 +6092,7 @@ class AppUI:
             self._read_form_into_config()
             try:
                 self.config["gacha"]["cdp_always_abandon"] = bool(self.gacha_cdp_abandon_var.get())
+                self.config["gacha"]["cdp_turbo"] = bool(turbo)
             except Exception:  # noqa: BLE001
                 pass
             save_config(self.config)
@@ -6104,6 +6114,7 @@ class AppUI:
             max_green=max_green,
             max_bet=bool(self.gacha_cdp_maxbet_var.get()),
             always_abandon=bool(self.gacha_cdp_abandon_var.get()),
+            turbo=turbo,
         )
         if not result.get("ok"):
             self.gacha_cdp_status.set("开始失败：" + str(result.get("message")))
@@ -6126,7 +6137,9 @@ class AppUI:
                 var.set(value)
             except tk.TclError:
                 pass
-        self.gacha_cdp_status.set("已开始，读取招募面板…")
+        self.gacha_cdp_status.set(
+            "已开始（极速 50ms/次），读取招募面板…" if turbo else "已开始，读取招募面板…"
+        )
         self.append_log("已开始直连抽卡")
         self.root.after(600, self._tick_gacha_cdp)
 
@@ -6142,6 +6155,40 @@ class AppUI:
             pass
         try:
             self.gacha_cdp_status.set("已停止")
+        except tk.TclError:
+            pass
+
+    def _sync_gacha_turbo_btn(self) -> None:
+        try:
+            on = bool(self.gacha_turbo_var.get())
+            if on:
+                self.gacha_turbo_btn.configure(
+                    text="极速：开", bg="#e67e22", fg="#ffffff",
+                    activebackground="#cf711f", activeforeground="#ffffff",
+                )
+            else:
+                self.gacha_turbo_btn.configure(
+                    text="极速模式", bg="#fff3e0", fg="#b45309",
+                    activebackground="#ffe8c7", activeforeground="#b45309",
+                )
+        except (tk.TclError, AttributeError):
+            pass
+
+    def toggle_gacha_turbo(self) -> None:
+        """开关极速模式：约 50ms 一步，下次「开始招募」生效。"""
+        on = not bool(self.gacha_turbo_var.get())
+        self.gacha_turbo_var.set(on)
+        self._sync_gacha_turbo_btn()
+        try:
+            self.config.setdefault("gacha", {})["cdp_turbo"] = on
+            save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if on:
+                self.gacha_cdp_status.set("极速模式已开：约 50ms/次，下次开始生效（注意风控）")
+            else:
+                self.gacha_cdp_status.set("极速模式已关闭")
         except tk.TclError:
             pass
 

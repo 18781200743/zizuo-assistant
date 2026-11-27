@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 # 运行时代码版本：改本文件行为时 +1
-GACHA_VERSION = 14
+GACHA_VERSION = 15
 
 GACHA_JS = r"""
 (() => {
@@ -39,9 +39,10 @@ GACHA_JS = r"""
     // 上一次看到的候选池指纹，用来判断候选池有没有换
     poolKey: '',
     opts: {
-      targets: [], keepQuality: 6, maxDraws: 0, delayMs: 1200,
+      targets: [], keepQuality: 6, maxDraws: 0, delayMs: 1200, turbo: false,
       refresh: false, maxGreen: 0, maxBet: true, alwaysAbandon: false,
     },
+    waitKey: '', waitUntil: 0,
     timer: 0,
     startedAt: 0,
   };
@@ -321,7 +322,7 @@ GACHA_JS = r"""
     state.timer = setTimeout(() => {
       state.timer = 0;
       tick();
-    }, Math.max(200, delay));
+    }, (state.opts && state.opts.turbo) ? Math.max(20, delay) : Math.max(200, delay));
   }
 
   async function step() {
@@ -347,6 +348,18 @@ GACHA_JS = r"""
 
     // 候选池每换一批，统计一次「目标英雄出现次数」
     const poolKey = contextId + ':' + candidates.map(c => c.heroId).join(',');
+
+    // 极速模式：放弃后等候选池真正换掉再继续，避免拿着旧列表重复放弃
+    if (state.waitKey) {
+      if (poolKey !== state.waitKey) {
+        state.waitKey = '';
+      } else if (now() < state.waitUntil) {
+        state.action = '等待候选刷新…';
+        return;
+      } else {
+        state.waitKey = '';
+      }
+    }
     if (poolKey !== state.poolKey) {
       state.poolKey = poolKey;
       for (const item of candidates) {
@@ -376,6 +389,10 @@ GACHA_JS = r"""
       if (code !== g.response.success) throw Error('放弃候选失败（回执 ' + (code === undefined ? '空' : code) + '）');
       state.stats.abandoned += 1;
       refreshView(view, g);
+      if (state.opts.turbo) {
+        state.waitKey = poolKey;
+        state.waitUntil = now() + 600;
+      }
       state.action = '放弃 ' + hero.name + '，继续抽';
       return;
     }
@@ -557,11 +574,15 @@ GACHA_JS = r"""
   function start(opts) {
     const g = cfg();
     const o = opts || {};
+    const turbo = !!o.turbo;
     state.opts = {
       targets: resolveTargets(o.targets || [], g),
       keepQuality: Number(o.keepQuality) || 0,
       maxDraws: Math.max(0, Number(o.maxDraws) || 0),
-      delayMs: Math.max(300, Number(o.delayMs) || 1200),
+      turbo: turbo,
+      delayMs: turbo
+        ? Math.max(20, Number(o.delayMs) || 50)
+        : Math.max(300, Number(o.delayMs) || 1200),
       refresh: !!o.refresh,
       maxGreen: Math.max(0, Number(o.maxGreen) || 0),
       maxBet: o.maxBet !== false,
@@ -576,6 +597,8 @@ GACHA_JS = r"""
     state.records = Object.create(null);
     state.counters = Object.create(null);
     state.poolKey = '';
+    state.waitKey = '';
+    state.waitUntil = 0;
     state.error = '';
     state.stopReason = '';
     state.action = '开始抽卡…';
