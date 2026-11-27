@@ -2799,7 +2799,8 @@ class AppUI:
             arena,
             text="先打开游戏里的荣耀竞技场，再点开始。\n"
                  "次数填 0 = 一直打到没次数；打第几个填 0 = 自动优先免费，"
-                 "填 1/2/3 就固定打列表对应位置的对手。",
+                 "填 1/2/3 就固定打列表对应位置的对手。\n"
+                 "每场间隔默认 8 秒，太快会被游戏提示「操作频率过快」。",
             foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=440, padx=8, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
@@ -2819,6 +2820,17 @@ class AppUI:
         ).pack(side=tk.LEFT, padx=(6, 10))
         self.arena_first_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(arena_row, text="抢第一", variable=self.arena_first_var).pack(side=tk.LEFT)
+        arena_row2 = ttk.Frame(arena)
+        arena_row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(arena_row2, text="每场间隔(秒)").pack(side=tk.LEFT)
+        self.arena_gap_var = tk.StringVar(value=str(arena_cfg.get("arena_gap", 8)))
+        ttk.Spinbox(
+            arena_row2, from_=2, to=60, width=4, textvariable=self.arena_gap_var,
+        ).pack(side=tk.LEFT, padx=(6, 8))
+        ttk.Label(
+            arena_row2, text="太快会提示操作频率过快",
+            foreground="#7a5b00",
+        ).pack(side=tk.LEFT)
         arena_btns = ttk.Frame(arena)
         arena_btns.pack(fill=tk.X, pady=(0, 6))
         self.arena_start_btn = ttk.Button(
@@ -3157,8 +3169,14 @@ class AppUI:
             target = 0
         target = max(0, min(6, target))
         try:
+            gap = int(float(self.arena_gap_var.get() or 0))
+        except (TypeError, ValueError):
+            gap = 8
+        gap = max(2, min(60, gap))
+        try:
             assist_cfg = normalize_assist(self.config.get("assist"))
             assist_cfg["arena_target"] = target
+            assist_cfg["arena_gap"] = gap
             self.config["assist"] = assist_cfg
             save_config(self.config)
         except Exception:  # noqa: BLE001
@@ -3167,6 +3185,7 @@ class AppUI:
             "count": max(0, min(99, count)),
             "takeFirst": bool(self.arena_first_var.get()),
             "targetIndex": target,
+            "gapMs": gap * 1000,
         })
         try:
             raw = self._plank_eval(
@@ -3247,6 +3266,8 @@ class AppUI:
                 text += " · " + str(st.get("rank"))
             if st.get("last"):
                 text += " · " + str(st.get("last"))
+            if st.get("toast"):
+                text += " · 提示：" + str(st.get("toast"))
             if st.get("error"):
                 text += " · " + str(st.get("error"))
             try:

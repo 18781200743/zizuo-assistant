@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 202
+RUNTIME_VERSION = 203
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 202
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 202;
+  const VERSION = 203;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4424,6 +4424,9 @@ RUNTIME_JS = r"""
     rank: '',
     token: 0,
     log: [],
+    gapMs: 8000,
+    lastChallengeAt: 0,
+    retries: 0,
   };
 
   function arenaLog(text) {
@@ -4464,6 +4467,69 @@ RUNTIME_JS = r"""
     return dailyNodeText(target, 2);
   }
 
+  /** 读取游戏顶部飘字（服务器报错会出现在这里，比如「操作频率过快」）。 */
+  function arenaToastText() {
+    try {
+      const scene = window.cc.director.getScene();
+      const parts = [];
+      (function walk(node) {
+        if (!node || !node.activeInHierarchy) return;
+        const name = String(node.name || '');
+        if (name === 'ToastPopup' || name === 'LabelToastItem' || name === 'Toast') {
+          (function collect(n) {
+            if (!n) return;
+            (n.components || n._components || []).forEach(function (comp) {
+              try {
+                if (comp instanceof window.cc.Label && comp.string) {
+                  const text = String(comp.string).trim();
+                  if (text) parts.push(text);
+                }
+              } catch (_) { /* ignore */ }
+            });
+            (n.children || []).forEach(collect);
+          })(node);
+          return;
+        }
+        (node.children || []).forEach(walk);
+      })(scene);
+      return parts.join(' ');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function arenaRateTip(text) {
+    return /频率|过快|太快|稍等|稍后|频繁|限流/.test(String(text || ''));
+  }
+
+  function arenaBattleNode() {
+    return dailyActiveNode('ArenaBattleResultView')
+      || dailyActiveNode('Modal_ArenaBattleResultView')
+      || dailyActiveNode('CommonBattleStartVSView')
+      || dailyActiveNode('CommonBattleStartCountDownView');
+  }
+
+  function arenaActiveModal() {
+    try {
+      const scene = window.cc.director.getScene();
+      let hit = null;
+      (function walk(node) {
+        if (hit || !node || !node.activeInHierarchy) return;
+        const name = String(node.name || '');
+        if (name.indexOf('Modal_') === 0
+            && name !== 'Modal_ArenaMainView'
+            && name !== 'Modal_ArenaBattleResultView') {
+          hit = node;
+          return;
+        }
+        (node.children || []).forEach(walk);
+      })(scene);
+      return hit;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function arenaState() {
     const root = arenaView();
     const rank = root ? arenaText(root, 'rankText') : '';
@@ -4477,6 +4543,8 @@ RUNTIME_JS = r"""
       rank: rank || arenaAuto.rank,
       log: arenaAuto.log.slice(-10),
       viewed: !!root,
+      toast: arenaToastText(),
+      retries: arenaAuto.retries,
       resultAt: arenaResultPoint(),
     };
   }
@@ -4512,7 +4580,7 @@ RUNTIME_JS = r"""
       if (btn && node.activeInHierarchy) {
         if (!anyButton) anyButton = { node: node, comp: btn };
         const text = dailyNodeText(node, 3);
-        if (!textButton && /确定|继续|关闭|领取/.test(text)) textButton = { node: node, comp: btn };
+        if (!textButton && /确定|关闭|返回|领取/.test(text)) textButton = { node: node, comp: btn };
       }
       (node.children || []).forEach(walk);
     })(root);
@@ -4535,7 +4603,7 @@ RUNTIME_JS = r"""
           try {
             if (comp instanceof window.cc.Label && comp.string) label = String(comp.string);
           } catch (_) { label = ''; }
-          if (!/确定|继续挑战|关闭/.test(label)) return;
+          if (!/确定|关闭|返回|领取/.test(label)) return;
           let parent = node;
           for (let depth = 0; depth < 4 && parent; depth += 1) {
             const comps = parent.components || parent._components || [];
@@ -4576,7 +4644,7 @@ RUNTIME_JS = r"""
           try {
             if (comp instanceof window.cc.Label && comp.string) text = String(comp.string).trim();
           } catch (_) { text = ''; }
-          if (!/确定|继续挑战|点击即可返回/.test(text)) return;
+          if (!/确定|关闭|返回|领取/.test(text)) return;
           const wp = node.getWorldPosition ? node.getWorldPosition() : null;
           if (!wp) return;
           point = {
@@ -4597,30 +4665,71 @@ RUNTIME_JS = r"""
     const free = arenaChild(item, 'freeBtn');
     const attack = arenaChild(item, 'attackBtn');
     const btn = free || attack;
-    if (!btn) return false;
-    if (!dailyClickNode(btn)) return false;
-    await dailySleep(2600);
-    // 战斗/结算界面：点确定、继续挑战，直到回到竞技场主界面
-    for (let i = 0; i < 30; i += 1) {
-      if (arenaView()) return true;
+    if (!btn) return { status: 'no-button' };
+
+    // 两场之间留够间隔：服务器对挑战请求有频率限制
+    const gap = Math.max(0, Number(arenaAuto.gapMs) || 0);
+    const remain = arenaAuto.lastChallengeAt + gap - Date.now();
+    if (remain > 0) {
+      arenaAuto.step = '等 ' + Math.ceil(remain / 1000) + ' 秒';
+      await dailySleep(remain);
+    }
+    if (!arenaAuto.running) return { status: 'stopped' };
+    if (!arenaView()) return { status: 'already' };
+    const before = arenaToastText();
+    if (before && arenaRateTip(before)) return { status: 'rate', toast: before };
+
+    arenaAuto.step = '点击挑战';
+    if (!arenaAuto.running) return { status: 'stopped' };
+    if (!dailyClickNode(btn)) return { status: 'no-button' };
+    arenaAuto.lastChallengeAt = Date.now();
+
+    // 等战斗真正开始（竞技场界面消失 / 出现 VS 或结算）
+    let started = false;
+    let toast = '';
+    let confirmAt = 0;
+    for (let i = 0; i < 24; i += 1) {
+      await dailySleep(250);
+      if (!arenaAuto.running) return { status: 'stopped' };
+      const tip = arenaToastText();
+      if (tip) {
+        toast = tip;
+        if (arenaRateTip(tip)) return { status: 'rate', toast: tip };
+      }
+      if (!arenaView() || arenaBattleNode()) { started = true; break; }
+      if (arenaActiveModal() && Date.now() - confirmAt > 1200) {
+        confirmAt = Date.now();
+        dailyClickTexts(['确定', '确认', '使用'], 1);
+      }
+    }
+    if (!started) return { status: 'no-start', toast: toast };
+
+    // 战斗/结算：回到竞技场算完成
+    for (let i = 0; i < 140; i += 1) {
+      await dailySleep(500);
+      if (!arenaAuto.running) return { status: 'stopped' };
+      if (arenaView()) return { status: 'done' };
+      const tip = arenaToastText();
+      if (tip && arenaRateTip(tip)) return { status: 'rate', toast: tip };
       if (arenaCloseResult()) {
         await dailySleep(1200);
-        if (arenaView()) return true;
+        if (arenaView()) return { status: 'done' };
         continue;
       }
-      dailyClickTexts(['跳过', '自动'], 3);
-      await dailySleep(1000);
+      if (i % 4 === 0) dailyClickTexts(['跳过'], 1);
     }
-    return !!arenaView();
+    return { status: 'stuck' };
   }
 
-  async function arenaRun(count, takeFirst, targetIndex, token) {
+  async function arenaRun(count, takeFirst, targetIndex, token, gapMs) {
     const alive = function () { return arenaAuto.running && arenaAuto.token === token; };
     arenaAuto.running = true;
     arenaAuto.error = '';
     arenaAuto.done = 0;
     arenaAuto.wins = 0;
     arenaAuto.log = [];
+    arenaAuto.retries = 0;
+    arenaAuto.gapMs = Math.max(0, Math.min(60000, Math.floor(Number(gapMs) || 0))) || 8000;
     arenaAuto.step = '检查界面';
     arenaLog('开始荣耀竞技场');
     try {
@@ -4632,8 +4741,21 @@ RUNTIME_JS = r"""
         return;
       }
       const limit = Math.max(0, Number(count) || 0) || 99;
+      let idle = 0;
       while (arenaAuto.done < limit) {
         if (!alive()) return;
+        if (!arenaView()) {
+          idle += 1;
+          if (idle > 120) {
+            arenaAuto.error = '长时间没有回到竞技场';
+            arenaLog('长时间没有回到竞技场');
+            break;
+          }
+          arenaAuto.step = '等待战斗结束';
+          await dailySleep(800);
+          continue;
+        }
+        idle = 0;
         const items = arenaOpponents();
         if (!items.length) {
           arenaLog('没有可挑战的对手');
@@ -4651,17 +4773,64 @@ RUNTIME_JS = r"""
         arenaAuto.step = '第 ' + (arenaAuto.done + 1) + ' 场';
         const name = arenaText(pick, 'userName') || '对手';
         arenaLog('挑战：' + name);
-        const ok = await arenaFight(pick);
-        arenaAuto.done += 1;
-        if (!ok) {
+        const res = await arenaFight(pick);
+        if (!alive()) return;
+        if (res.status === 'stopped') return;
+        if (res.status === 'rate') {
+          arenaAuto.retries += 1;
+          const wait = Math.min(30000, 8000 + arenaAuto.retries * 4000);
+          arenaAuto.error = res.toast || '操作频率过快';
+          arenaAuto.step = '操作太快，等 ' + Math.ceil(wait / 1000) + ' 秒重试';
+          arenaLog('操作太快：' + (res.toast || '') + '，等 ' + Math.ceil(wait / 1000) + ' 秒重试');
+          if (arenaAuto.retries > 6) {
+            arenaAuto.error = '服务器一直提示操作频率过快，请稍后再试';
+            arenaLog('服务器一直提示操作频率过快，已停止');
+            break;
+          }
+          await dailySleep(wait);
+          continue;
+        }
+        if (res.status === 'no-start') {
+          const tip = String(res.toast || '');
+          if (/不足|没有|无法|次数|刷新|购买|锁定/.test(tip)) {
+            arenaAuto.error = tip;
+            arenaLog('挑战失败：' + tip);
+            break;
+          }
+          arenaAuto.retries += 1;
+          if (arenaAuto.retries > 3) {
+            arenaAuto.error = tip || '点击挑战没有反应';
+            arenaLog('挑战失败：' + (tip || '点击挑战没有反应'));
+            break;
+          }
+          arenaAuto.step = '没开始，稍后重试';
+          arenaLog('点击后没开始' + (tip ? '：' + tip : '') + '，稍后重试');
+          await dailySleep(2500);
+          continue;
+        }
+        arenaAuto.retries = 0;
+        arenaAuto.error = '';
+        if (res.status === 'already') {
+          arenaAuto.step = '等待战斗结束';
+          arenaLog('已在战斗中，等待结束');
+          await dailySleep(1500);
+          continue;
+        }
+        if (res.status === 'stuck') {
           arenaAuto.error = '战斗没有返回竞技场';
           arenaLog('战斗没有返回竞技场');
           break;
         }
+        if (res.status === 'no-button') {
+          arenaAuto.error = '对手按钮不可用';
+          arenaLog('对手按钮不可用');
+          break;
+        }
+        arenaAuto.done += 1;
         const st = arenaState();
         arenaAuto.rank = st.rank || arenaAuto.rank;
         arenaLog('完成第 ' + arenaAuto.done + ' 场' + (arenaAuto.rank ? '（' + arenaAuto.rank + '）' : ''));
-        await dailySleep(1200);
+        await dailySleep(800);
       }
       arenaAuto.step = '完成';
       arenaLog('竞技场完成');
@@ -4682,7 +4851,8 @@ RUNTIME_JS = r"""
       opts && opts.count,
       !!(opts && opts.takeFirst),
       opts && opts.targetIndex,
-      token
+      token,
+      opts && opts.gapMs
     );
     return { ok: true, message: '开始竞技场挑战' };
   }
