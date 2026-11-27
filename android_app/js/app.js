@@ -2102,8 +2102,24 @@
       if (backToGame()) return;
       showPage("pageHome");
     };
+    var redMsEl = $("redMs");
+    if (redMsEl) {
+      try {
+        var savedRedMs = parseInt(localStorage.getItem("zz_red_ms") || "20", 10);
+        redMsEl.value = String(Math.max(10, Math.min(1000, savedRedMs || 20)));
+      } catch (e) { /* ignore */ }
+    }
     $("fRed").onclick = function () {
-      needLicense("地图 / 红包", function () { toggle("redPacket"); });
+      needLicense("地图 / 红包", function () {
+        var el = $("redMs");
+        var ms = 20;
+        try { ms = parseInt(el && el.value, 10) || 20; } catch (e) { ms = 20; }
+        ms = Math.max(10, Math.min(1000, ms));
+        if (el) el.value = String(ms);
+        try { localStorage.setItem("zz_red_ms", String(ms)); } catch (e) { /* ignore */ }
+        send("redConfig", { tickMs: ms, gapMs: 0 });
+        toggle("redPacket");
+      });
     };
     $("fRevive").onclick = function () {
       needLicense("复活 / 闪现", function () {
