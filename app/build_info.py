@@ -19,7 +19,7 @@ from typing import List, Optional
 _DEV_ENV_KEYS = ("ZIZUO_DEV", "ZIZUO_DEVMODE")
 
 # 脚本版本：发新版时改这里，首页底部会显示。
-APP_VERSION = "2026.11.24"
+APP_VERSION = "2026.11.27"
 
 
 def is_frozen() -> bool:

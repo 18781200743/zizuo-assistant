@@ -33,7 +33,10 @@ def main() -> None:
         encoding="utf-8",
     )
     renames = {
-        build: (data.get("runtimeNames") or {})
+        build: (
+            {} if build == "4758a"
+            else (data.get("runtimeNames") or {})
+        )
         for build, data in (mapping.get("builds") or {}).items()
     }
     (OUT / "renames.js").write_text(

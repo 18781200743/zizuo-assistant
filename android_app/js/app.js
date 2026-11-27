@@ -23,6 +23,7 @@
   var revivePendingUntil = 0;
   var reviveFlashTimer = null;
   var guildTimer = null;
+  var arenaTimer = null;
   var guildRows = [];
   var guildExportFile = null;
   var guildTeamsCache = {};
@@ -349,6 +350,9 @@
   }
 
   function translateRuntime(js, b) {
+    // runtime 206 起直接用当前版本(4758a)的内部名，不再套 201 的旧名对照表
+    var versionMatch = /const VERSION = (\d+);/.exec(js);
+    if (versionMatch && Number(versionMatch[1]) >= 206) return js;
     var table = (window.ZZ_RENAMES && window.ZZ_RENAMES[b]) || {};
     Object.keys(table).sort(function (a, c) { return c.length - a.length; }).forEach(function (oldName) {
       var newName = table[oldName];
@@ -459,12 +463,19 @@
     var ok = !!state.ready;
     setStatus(
       ok
-        ? "已连接 · " + (state.build || build) + " · 红包 " + ((state.redPacket && state.redPacket.today) || 0) + " 个"
+        ? "已连接 · " + (state.build || build) + " · 红包 " + ((state.redPacket && state.redPacket.today) || 0) + " 个 / " + ((state.redPacket && state.redPacket.green) || 0) + " 绿钻"
         : "未就绪：" + (state.error || "等待进入游戏主界面"),
       ok ? "ok" : "bad"
     );
 
     var red = state.redPacket || {};
+    var redStatusEl = $("redStatus");
+    if (redStatusEl) {
+      var redParts = [];
+      if (red.today) redParts.push("今日已领 " + red.today + " 个红包 · " + (red.green || 0) + " 绿钻");
+      if (red.reason) redParts.push(red.reason);
+      redStatusEl.textContent = redParts.join(" · ") || "尚未开启";
+    }
     var rv = state.revive || {};
     var mob = state.mob || {};
     var boss = state.boss || {};
@@ -1784,9 +1795,107 @@
     $("mStatus").textContent = "已复制首领属性";
   }
 
+  function arenaReadConfig() {
+    function num(id, def, min, max) {
+      var el = $(id);
+      var value = el ? parseInt(String(el.value || ""), 10) : def;
+      if (!isFinite(value)) value = def;
+      return Math.max(min, Math.min(max, value));
+    }
+    return {
+      count: num("arenaCount", 0, 0, 99),
+      target: num("arenaTarget", 3, 0, 6),
+      gap: num("arenaGap", 12, 2, 60),
+      native: !!($("arenaNative") && $("arenaNative").checked)
+    };
+  }
+
+  function arenaSaveConfig(cfg) {
+    try {
+      localStorage.setItem("zz_arena_count", String(cfg.count));
+      localStorage.setItem("zz_arena_target", String(cfg.target));
+      localStorage.setItem("zz_arena_gap", String(cfg.gap));
+      localStorage.setItem("zz_arena_native", cfg.native ? "1" : "0");
+    } catch (e) { /* ignore */ }
+  }
+
+  function arenaLoadConfig() {
+    try {
+      if ($("arenaCount")) $("arenaCount").value = localStorage.getItem("zz_arena_count") || "0";
+      if ($("arenaTarget")) $("arenaTarget").value = localStorage.getItem("zz_arena_target") || "3";
+      if ($("arenaGap")) $("arenaGap").value = localStorage.getItem("zz_arena_gap") || "12";
+      if ($("arenaNative")) $("arenaNative").checked = localStorage.getItem("zz_arena_native") === "1";
+    } catch (e) { /* ignore */ }
+  }
+
+  function arenaSetRunning(running) {
+    var start = $("arenaStart");
+    var stop = $("arenaStop");
+    if (start) start.disabled = !!running;
+    if (stop) stop.disabled = !running;
+  }
+
+  function arenaStart() {
+    var cfg = arenaReadConfig();
+    arenaSaveConfig(cfg);
+    var payload = {
+      count: cfg.count,
+      takeFirst: false,
+      targetIndex: cfg.target,
+      gapMs: cfg.gap * 1000,
+      native: cfg.native
+    };
+    var code = "(function(){try{var a=window.__zzAssist;"
+      + "if(!a||!a.arenaStart)return JSON.stringify({ok:false,message:'运行时还没注入'});"
+      + "return JSON.stringify(a.arenaStart(" + JSON.stringify(payload) + "));"
+      + "}catch(e){return JSON.stringify({ok:false,message:String((e&&e.message)||e)})}})()";
+    var raw = unquote(evalGame(code));
+    var res = {};
+    try { res = JSON.parse(raw) || {}; } catch (e) { res = {}; }
+    if (!res.ok) {
+      if ($("arenaStatus")) $("arenaStatus").textContent = res.message || "启动失败";
+      return;
+    }
+    arenaSetRunning(true);
+    if ($("arenaStatus")) $("arenaStatus").textContent = "开始挑战…";
+    if (arenaTimer) clearInterval(arenaTimer);
+    arenaTimer = setInterval(arenaPoll, 900);
+    arenaPoll();
+  }
+
+  function arenaStop() {
+    try {
+      evalGame("(window.__zzAssist&&window.__zzAssist.arenaStop&&window.__zzAssist.arenaStop(),'ok')");
+    } catch (e) { /* ignore */ }
+    if (arenaTimer) { clearInterval(arenaTimer); arenaTimer = null; }
+    arenaSetRunning(false);
+    if ($("arenaStatus")) $("arenaStatus").textContent = "已停止";
+  }
+
+  function arenaPoll() {
+    var raw = unquote(evalGame(
+      "(function(){try{var a=window.__zzAssist;if(!a||!a.arenaState)return 'null';return JSON.stringify(a.arenaState());}catch(e){return 'null'}})()"
+    ));
+    var st = null;
+    try { st = JSON.parse(raw); } catch (e) { st = null; }
+    if (!st) return;
+    var text = "竞技场：" + (st.step || "") + " · 已打 " + (st.done || 0) + " 场";
+    if (st.rank) text += " · " + st.rank;
+    if (st.last) text += " · " + st.last;
+    if (st.toast) text += " · 提示：" + st.toast;
+    if (st.error) text += " · " + st.error;
+    if ($("arenaStatus")) $("arenaStatus").textContent = text;
+    if (!st.running) {
+      if (arenaTimer) { clearInterval(arenaTimer); arenaTimer = null; }
+      arenaSetRunning(false);
+      if ($("arenaStatus")) $("arenaStatus").textContent = "已结束：" + text.replace(/^竞技场：/, "");
+    }
+  }
+
   function showFeature(key) {
     var features = [
       ["daily", "dailyPanel", "playDaily"],
+      ["arena", "arenaPanel", "playArena"],
       ["plank", "plankPanel", "playPlank"],
       ["farm", "farmPanel", "playFarm"],
       ["talisman", "talismanPanel", "playTalisman"],
@@ -2160,6 +2269,12 @@
     };
     var playDailyBtn = $("playDaily");
     if (playDailyBtn) playDailyBtn.onclick = function () { showFeature("daily"); };
+    var playArenaBtn = $("playArena");
+    if (playArenaBtn) playArenaBtn.onclick = function () { showFeature("arena"); };
+    var arenaStartBtn = $("arenaStart");
+    if (arenaStartBtn) arenaStartBtn.onclick = arenaStart;
+    var arenaStopBtn = $("arenaStop");
+    if (arenaStopBtn) arenaStopBtn.onclick = arenaStop;
     var playPlankBtn = $("playPlank");
     if (playPlankBtn) playPlankBtn.onclick = function () {
       needLicense("跳一跳", function () { showFeature("plank"); });
@@ -2218,6 +2333,7 @@
     if (mQueryBtn) mQueryBtn.onclick = function () { queryMaze(true); };
     var mCopyBtn = $("mCopy");
     if (mCopyBtn) mCopyBtn.onclick = mazeCopy;
+    arenaLoadConfig();
     var homeVer = $("homeVer");
     if (homeVer) {
       var rv = (String(window.ZZ_RUNTIME || "").match(/const VERSION = (\d+);/) || [])[1] || "";

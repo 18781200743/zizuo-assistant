@@ -1,1 +1,1 @@
-window.ZZ_APP_VERSION = "2026.11.26";
+window.ZZ_APP_VERSION = "2026.11.27";
