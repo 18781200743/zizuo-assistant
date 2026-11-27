@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 205
+RUNTIME_VERSION = 206
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 205
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 205;
+  const VERSION = 206;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -470,9 +470,11 @@ RUNTIME_JS = r"""
     if (state.red.day !== today()) loadRedDay();
   }
 
-  /** 显示用：有精确金额就用精确金额，没有才退回余额估算。 */
+  /** 显示用：优先用绿钻余额增量（覆盖所有红包）；精确金额只作兜底/补漏。 */
   function redGreenValue() {
-    return state.red.exactCount > 0 ? state.red.exactGreen : state.red.green;
+    const balanceGreen = Math.max(0, Number(state.red.green) || 0);
+    const exactGreen = Math.max(0, Number(state.red.exactGreen) || 0);
+    return Math.max(balanceGreen, exactGreen);
   }
 
   /** 当前登录角色 ID，用来从红包领取记录里找自己。 */
