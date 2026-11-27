@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 200
+RUNTIME_VERSION = 201
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 200
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 200;
+  const VERSION = 201;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -129,6 +129,7 @@ RUNTIME_JS = r"""
     red: {
       enabled: false, reason: '尚未开启', today: 0, date: '', claimed: 0, failed: 0,
       pending: 0, seen: Object.create(null), lastAt: 0, available: false,
+      tickMs: 20, gapMs: 0,
       // 失败重试：id -> { tries, at }；seen[id] = -2 表示等重试
       retry: Object.create(null),
       lastCode: 0, lastFailId: '', failReason: '', hookId: '',
@@ -600,7 +601,7 @@ RUNTIME_JS = r"""
       saveRedDay();
       // 余额更新可能比 Promise 晚一点，接下来几轮都对一次余额
       state.red.greenUntil = now() + 2500;
-      syncRedGreen();
+      setTimeout(() => { try { syncRedGreen(); } catch (_) { /* ignore */ } }, 0);
       state.red.reason = '今日已领 ' + state.red.today + ' 个红包 · ' + redGreenValue() + ' 绿钻';
     };
     const settle = code => {
@@ -638,6 +639,53 @@ RUNTIME_JS = r"""
   }
 
   /** 按红包自身的发送时间取排序值（新的优先）；没有时间字段就保持原顺序。 */
+  /** 从 onReceive 事件参数里尽量直接取出红包对象，省掉全量扫描。 */
+  function redExtractFromEvent(args) {
+    const cfg = state.ctx && state.ctx.redCfg;
+    if (!cfg) return null;
+    const fields = cfg.fields || {};
+    if (!fields.id) return null;
+    function looksLikePacket(obj) {
+      if (!obj || typeof obj !== 'object') return false;
+      if (obj[fields.id] === undefined) return false;
+      return obj[fields.channel] !== undefined || obj[fields.type] !== undefined
+        || obj[fields.total] !== undefined || obj[fields.expire] !== undefined;
+    }
+    function find(obj, depth) {
+      if (!obj || typeof obj !== 'object' || depth > 3) return null;
+      if (looksLikePacket(obj)) return obj;
+      let keys = [];
+      try { keys = Object.keys(obj); } catch (_) { return null; }
+      for (const key of keys) {
+        const value = obj[key];
+        if (value && typeof value === 'object') {
+          const hit = find(value, depth + 1);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    }
+    for (const arg of args) {
+      if (!arg || typeof arg !== 'object') continue;
+      const hit = find(arg, 0);
+      if (hit) return hit;
+    }
+    // 有些版本回调是 (id, channel, type)
+    if (args.length >= 2) {
+      const first = args[0];
+      if ((typeof first === 'string' || typeof first === 'number') && String(first)) {
+        const info = {};
+        info[fields.id] = first;
+        if (args[1] !== undefined) info[fields.channel] = args[1];
+        if (args[2] !== undefined) info[fields.type] = args[2];
+        if (args[3] !== undefined) info[fields.total] = args[3];
+        if (args[4] !== undefined) info[fields.expire] = args[4];
+        return info;
+      }
+    }
+    return null;
+  }
+
   function redTime(info, fields) {
     const key = fields && fields.time;
     if (!key) return 0;
@@ -649,9 +697,9 @@ RUNTIME_JS = r"""
     rollRedDay();
     if (!state.red.enabled || !state.ready) return;
     if (state.red.greenUntil && now() < state.red.greenUntil) syncRedGreen();
-    if (!force && now() - state.red.lastAt < CLAIM_GAP_MS) return;
+    if (!force && now() - state.red.lastAt < (state.red.gapMs || 0)) return;
     // 已经有几个请求在飞就别再堆，避免瞬间并发被服务端限流
-    if (state.red.pending >= 6) return;
+    if (state.red.pending >= 12) return;
     pruneRedSeen();
     let list = [];
     try { list = packetSources(); } catch (_) { return; }
@@ -690,7 +738,7 @@ RUNTIME_JS = r"""
       state.red.lastAt = now();
       claim(item.info);
       picks += 1;
-      if (picks >= 3) break;
+      if (picks >= 10) break;
     }
 
     // 清掉很久以前的失败记录，避免 map 无限增长
@@ -700,6 +748,20 @@ RUNTIME_JS = r"""
         if (nowMs - (retry[id].at || 0) > 15000) delete retry[id];
       }
     }
+  }
+
+  /** 按当前间隔重启红包定时器（开启/改间隔时用）。 */
+  function resetRedTimer() {
+    if (state.redTimer) {
+      clearInterval(state.redTimer);
+      state.redTimer = 0;
+    }
+    const ms = Math.max(10, Math.min(1000, Number(state.red.tickMs) || 20));
+    state.redTimer = setInterval(() => {
+      if (!state.red.enabled || !state.ready) return;
+      try { tickRed(); } catch (cause) { state.red.reason = '红包异常：' + msgOf(cause); }
+    }, ms);
+    if (window.__zzAssist) window.__zzAssist.__redTimer = state.redTimer;
   }
 
   /**
@@ -733,8 +795,25 @@ RUNTIME_JS = r"""
         const orig = svc[recv];
         svc.__zzOrigRecv = orig;
         svc[recv] = function () {
+          const args = Array.prototype.slice.call(arguments);
           const result = orig.apply(this, arguments);
           try {
+            const direct = redExtractFromEvent(args);
+            if (direct) {
+              const id = packetId(direct);
+              if (id && state.red.seen[id] === undefined) {
+                let claimable = false;
+                try {
+                  const codes = state.ctx.map.statusCodes || {};
+                  claimable = Number(svc[ctx.redCfg.status](direct)) === Number(codes.claimable);
+                } catch (_) { claimable = false; }
+                if (claimable) {
+                  state.red.seen[id] = 9;
+                  claim(direct);
+                  return result;
+                }
+              }
+            }
             setTimeout(() => { try { tickRed(true); } catch (_) { /* ignore */ } }, 0);
           } catch (_) { /* ignore */ }
           return result;
@@ -6674,6 +6753,14 @@ RUNTIME_JS = r"""
       return { ok: true, message: '已全部关闭（战斗数值已恢复）' };
     }
 
+    if (feature === 'redConfig') {
+      const cfg = value || {};
+      state.red.tickMs = Math.max(10, Math.min(1000, Number(cfg.tickMs) || 20));
+      state.red.gapMs = Math.max(0, Math.min(500, Number(cfg.gapMs) || 0));
+      resetRedTimer();
+      return { ok: true, message: '红包间隔已设为 ' + state.red.tickMs + 'ms' };
+    }
+
     if (feature === 'clearStuck') {
       // 切图标记卡住时，游戏会静默忽略所有传送/回城（标记名按版本来）
       const mapCfg = mapConfig() || {};
@@ -6912,7 +6999,7 @@ RUNTIME_JS = r"""
         state.red.greenUntil = 0;
       }
       state.red.reason = value
-        ? '监控中：红包一进聊天立刻领（60ms 轮询兜底）'
+        ? '监控中：红包一进聊天立刻领（' + state.red.tickMs + 'ms 轮询兜底）'
         : '已关闭（今日 ' + state.red.today + ' 个 / ' + redGreenValue() + ' 绿钻）';
       return {
         ok: true,
@@ -8336,11 +8423,8 @@ RUNTIME_JS = r"""
   state.timer = setInterval(() => {
     try { tick(); } catch (_) { /* 定时器里绝不抛出 */ }
   }, TICK_MS);
-  // 红包专用定时器：主循环 250ms 太慢，这里 60ms 转一圈，开启时才有开销
-  state.redTimer = setInterval(() => {
-    if (!state.red.enabled || !state.ready) return;
-    try { tickRed(); } catch (cause) { state.red.reason = '红包异常：' + msgOf(cause); }
-  }, RED_TICK_MS);
+  // 红包专用定时器：间隔可在界面上改，默认 20ms；开启时才有开销
+  resetRedTimer();
   // 留给下一次注入：新运行时先 clearInterval 掉旧定时器，不然两套一起跑
   window.__zzAssist.__timer = state.timer;
   window.__zzAssist.__redTimer = state.redTimer;

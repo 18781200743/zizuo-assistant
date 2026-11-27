@@ -416,6 +416,7 @@ class GameAssist:
         self._thread: Optional[threading.Thread] = None
         self._red_thread: Optional[threading.Thread] = None
         self._red_fast = False
+        self._red_fast_ms = 20
         self._stop = threading.Event()
         self._queue: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
         self._desired: Dict[str, Any] = {}
@@ -466,7 +467,7 @@ class GameAssist:
             if self._red_fast and (self.state or {}).get("ready"):
                 try:
                     self.bridge.eval_js(expr)
-                    time.sleep(0.09)
+                    time.sleep(max(0.02, min(0.2, self._red_fast_ms / 1000.0)))
                 except Exception:  # noqa: BLE001
                     # 连接断了：别每 90ms 去重连，歇半秒等主线程把状态改掉
                     time.sleep(0.5)
@@ -504,6 +505,12 @@ class GameAssist:
         """只排队，真正的调用在轮询线程里做，UI 永远不会卡。"""
         if feature == "redPacket":
             self._red_fast = bool(value)
+        elif feature == "redConfig":
+            if isinstance(value, dict):
+                try:
+                    self._red_fast_ms = max(10, min(1000, int(value.get("tickMs") or 20)))
+                except (TypeError, ValueError):
+                    pass
         elif feature == "stopAll" and value:
             self._red_fast = False
         self._desired[feature] = value

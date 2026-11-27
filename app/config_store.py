@@ -13,6 +13,8 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     # 小怪 / BOSS 死亡后各等多少秒再重进地图
     "mob_seconds": 1,
     "boss_seconds": 3,
+    # 红包扫描间隔（毫秒，10-1000）：越小越快，注意风控
+    "red_interval_ms": 20,
     # 开关状态：重启工具后自动恢复（以前重启就变「已关闭」）
     "mob_enabled": False,
     "boss_enabled": False,
@@ -138,6 +140,11 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
             elif key == "names":
                 if isinstance(item, dict):
                     data[key] = {str(k): str(v) for k, v in item.items() if isinstance(v, str)}
+            elif key == "red_interval_ms":
+                try:
+                    data[key] = max(10, min(1000, int(item)))
+                except (TypeError, ValueError):
+                    continue
             elif key == "auto_open_window":
                 data[key] = bool(item)
     return data

@@ -1997,6 +1997,15 @@ class AppUI:
         self.assist_red_status = tk.StringVar(value="尚未开启")
         ttk.Label(free, textvariable=self.assist_red_status, foreground="#9fb0c9").grid(row=0, column=4, sticky=tk.W)
 
+        ttk.Label(free, text="红包间隔").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        self.assist_red_ms_var = tk.StringVar(value=str(assist.get("red_interval_ms", 20)))
+        ttk.Entry(
+            free, textvariable=self.assist_red_ms_var, width=6, justify="center",
+        ).grid(row=2, column=1, sticky=tk.W, padx=6, pady=(6, 0))
+        ttk.Label(
+            free, text="毫秒（10-1000，越小越快）", foreground="#9fb0c9",
+        ).grid(row=2, column=2, columnspan=3, sticky=tk.W, pady=(6, 0))
+
         ttk.Label(free, text="祈愿领取").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
         self.assist_wish_btn = ttk.Button(free, text="开启", width=10, command=lambda: self.toggle_assist("wish"))
         self.assist_wish_btn.grid(row=1, column=3, padx=(6, 4), pady=(6, 0))
@@ -4168,6 +4177,12 @@ class AppUI:
                 assist["revive_delay"] = max(0.0, min(10.0, float(revive_delay_var.get().strip())))
             except (ValueError, AttributeError, TypeError):
                 pass
+        red_ms_var = getattr(self, "assist_red_ms_var", None)
+        if red_ms_var is not None:
+            try:
+                assist["red_interval_ms"] = max(10, min(1000, int(red_ms_var.get().strip() or "20")))
+            except (ValueError, AttributeError):
+                pass
         assist["revive_mode"] = "tp"
         assist["revive_delay"] = 0
         self.config["assist"] = assist
@@ -5202,12 +5217,28 @@ class AppUI:
                 )
             return
 
+        if feature == "redPacket":
+            try:
+                red_ms = max(10, min(1000, int(self.assist_red_ms_var.get().strip() or "20")))
+            except (ValueError, AttributeError):
+                messagebox.showerror("参数错误", "红包间隔需要是 10-1000 的整数毫秒")
+                return
+            self.assist.set_feature("redConfig", {"tickMs": red_ms, "gapMs": 0})
+            try:
+                assist_cfg = normalize_assist(self.config.get("assist"))
+                assist_cfg["red_interval_ms"] = red_ms
+                self.config["assist"] = assist_cfg
+                save_config(self.config)
+            except Exception:  # noqa: BLE001
+                pass
         enabled = bool((state.get(feature) or {}).get("enabled"))
         self.assist.set_feature(feature, not enabled)
         label = {"redPacket": "快速抢红包", "wish": "祈愿领取"}.get(feature, feature)
         if feature == "redPacket":
             self.assist_red_btn.configure(text="关闭" if not enabled else "开启")
-            self.assist_red_status.set("正在开启…" if not enabled else "正在关闭…")
+            self.assist_red_status.set(
+                ("正在开启（%dms）…" % red_ms) if not enabled else "正在关闭…"
+            )
         elif feature == "wish":
             self.assist_wish_btn.configure(text="关闭" if not enabled else "开启")
             self.assist_wish_status.set("正在开启…" if not enabled else "正在关闭…")
