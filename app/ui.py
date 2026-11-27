@@ -2800,7 +2800,7 @@ class AppUI:
             text="先打开游戏里的荣耀竞技场，再点开始。\n"
                  "次数填 0 = 一直打到没次数；打第几个填 0 = 自动优先免费，"
                  "填 1/2/3 就固定打列表对应位置的对手。\n"
-                 "每场间隔默认 8 秒，太快会被游戏提示「操作频率过快」。",
+                 "默认用游戏自带自动挑战控制节奏；免费次数用完后每场消耗 10 绿钻。",
             foreground="#7a5b00", background="#fff7e6", justify=tk.LEFT,
             anchor="w", wraplength=440, padx=8, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
@@ -2829,6 +2829,16 @@ class AppUI:
         ).pack(side=tk.LEFT, padx=(6, 8))
         ttk.Label(
             arena_row2, text="太快会提示操作频率过快",
+            foreground="#7a5b00",
+        ).pack(side=tk.LEFT)
+        arena_row3 = ttk.Frame(arena)
+        arena_row3.pack(fill=tk.X, pady=(0, 6))
+        self.arena_native_var = tk.BooleanVar(value=bool(arena_cfg.get("arena_native", True)))
+        ttk.Checkbutton(
+            arena_row3, text="用游戏自带自动挑战（推荐）", variable=self.arena_native_var,
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            arena_row3, text="取消勾选则按上面的间隔逐场点",
             foreground="#7a5b00",
         ).pack(side=tk.LEFT)
         arena_btns = ttk.Frame(arena)
@@ -3173,10 +3183,12 @@ class AppUI:
         except (TypeError, ValueError):
             gap = 8
         gap = max(2, min(60, gap))
+        native = bool(self.arena_native_var.get())
         try:
             assist_cfg = normalize_assist(self.config.get("assist"))
             assist_cfg["arena_target"] = target
             assist_cfg["arena_gap"] = gap
+            assist_cfg["arena_native"] = native
             self.config["assist"] = assist_cfg
             save_config(self.config)
         except Exception:  # noqa: BLE001
@@ -3186,6 +3198,7 @@ class AppUI:
             "takeFirst": bool(self.arena_first_var.get()),
             "targetIndex": target,
             "gapMs": gap * 1000,
+            "native": native,
         })
         try:
             raw = self._plank_eval(

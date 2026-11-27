@@ -17,6 +17,8 @@ DEFAULT_ASSIST: Dict[str, Any] = {
     "arena_target": 3,
     # 竞技场两场之间的间隔（秒），太小会被服务器提示“操作频率过快”
     "arena_gap": 8,
+    # 竞技场用游戏自带的自动挑战：由游戏控制挑战节奏，避免手动连点被限频
+    "arena_native": True,
     # 红包扫描间隔（毫秒，10-1000）：越小越快，注意风控
     "red_interval_ms": 20,
     # 开关状态：重启工具后自动恢复（以前重启就变「已关闭」）
@@ -154,6 +156,8 @@ def normalize_assist(value: Any) -> Dict[str, Any]:
                     data[key] = max(2, min(60, int(item)))
                 except (TypeError, ValueError):
                     continue
+            elif key == "arena_native":
+                data[key] = bool(item)
             elif key == "red_interval_ms":
                 try:
                     data[key] = max(10, min(1000, int(item)))

@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-RUNTIME_VERSION = 203
+RUNTIME_VERSION = 204
 """运行时代码版本：改 RUNTIME_JS 的行为时 +1。
 
 页面里的旧运行时不会被自动覆盖（`window.__zzAssist` 已存在就直接复用），
@@ -35,7 +35,7 @@ RUNTIME_VERSION = 203
 
 RUNTIME_JS = r"""
 (() => {
-  const VERSION = 203;
+  const VERSION = 204;
 
   // 同一页里可能还留着旧版本注入的运行时（改了代码但没关窗口），
   // 那套状态机会继续报旧错误，这里先把它停掉再重装。
@@ -4427,6 +4427,7 @@ RUNTIME_JS = r"""
     gapMs: 8000,
     lastChallengeAt: 0,
     retries: 0,
+    native: false,
   };
 
   function arenaLog(text) {
@@ -4543,9 +4544,10 @@ RUNTIME_JS = r"""
       rank: rank || arenaAuto.rank,
       log: arenaAuto.log.slice(-10),
       viewed: !!root,
+      native: arenaAuto.native,
       toast: arenaToastText(),
       retries: arenaAuto.retries,
-      resultAt: arenaResultPoint(),
+      resultAt: arenaAuto.native ? null : arenaResultPoint(),
     };
   }
 
@@ -4721,7 +4723,134 @@ RUNTIME_JS = r"""
     return { status: 'stuck' };
   }
 
-  async function arenaRun(count, takeFirst, targetIndex, token, gapMs) {
+  /** 竞技场主界面的控制组件（带 FDBS + YTQU）。名字被混淆过，按结构找。 */
+  function arenaViewComp() {
+    const root = arenaView();
+    if (!root) return null;
+    const comps = root.components || root._components || [];
+    for (let i = 0; i < comps.length; i += 1) {
+      const comp = comps[i];
+      if (!comp) continue;
+      try {
+        if (comp.FDBS && typeof comp.YTQU === 'function') return comp;
+      } catch (_) { /* ignore */ }
+    }
+    return null;
+  }
+
+  function arenaController() {
+    const view = arenaViewComp();
+    if (!view) return null;
+    try {
+      const model = view.FDBS;
+      if (model && typeof model.IFBD === 'function') return model.IFBD();
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function arenaSetAuto(on) {
+    const ctl = arenaController();
+    if (!ctl) return false;
+    try {
+      if (typeof ctl.CPAE === 'function') ctl.CPAE(!!on);
+      else ctl.LRRX = !!on;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** 用游戏自带的「自动挑战」：先选目标，再交给游戏控制每场节奏。 */
+  async function arenaNativeRun(count, targetIndex, token) {
+    const alive = function () { return arenaAuto.running && arenaAuto.token === token; };
+    const view = arenaViewComp();
+    const ctl = arenaController();
+    if (!view || !ctl || typeof view.YTQU !== 'function') return 'fallback';
+    const items = arenaOpponents();
+    if (!items.length) return 'fallback';
+    const limit = Math.max(1, Math.min(99, Number(count) || 99));
+    let target = Math.max(1, Math.min(6, Math.floor(Number(targetIndex) || 3)));
+    target = Math.min(target, items.length);
+    try { if (typeof ctl.PCIC === 'function') ctl.PCIC(target); else ctl.SAJJ = target; } catch (_) { /* ignore */ }
+    try { if (typeof ctl.BTYB === 'function') ctl.BTYB(limit); else ctl.WWBP = limit; } catch (_) { /* ignore */ }
+    try { if (typeof ctl.CPAE === 'function') ctl.CPAE(true); else ctl.LRRX = true; } catch (_) { /* ignore */ }
+    arenaAuto.native = true;
+    arenaAuto.done = 0;
+    arenaAuto.step = '游戏自动挑战';
+    arenaLog('开始游戏自动挑战：第 ' + target + ' 个，共 ' + limit + ' 场');
+    let resultOpen = false;
+    let lastResultAt = 0;
+    let idle = 0;
+    let ticks = 0;
+    try {
+      try {
+        void view.YTQU();
+      } catch (cause) {
+        arenaAuto.error = msgOf(cause);
+        arenaLog('自动挑战启动失败：' + msgOf(cause));
+        return 'done';
+      }
+      while (alive()) {
+        await dailySleep(500);
+        if (!alive()) break;
+        ticks += 1;
+        const toast = arenaToastText();
+        if (toast && arenaRateTip(toast)) {
+          arenaAuto.error = toast;
+          arenaLog('游戏自动挑战被限频：' + toast);
+          break;
+        }
+        const result = dailyActiveNode('Modal_ArenaBattleResultView') || dailyActiveNode('ArenaBattleResultView');
+        if (result) {
+          if (!resultOpen && Date.now() - lastResultAt > 2500) {
+            resultOpen = true;
+            lastResultAt = Date.now();
+            arenaAuto.done += 1;
+            const st = arenaState();
+            arenaAuto.rank = st.rank || arenaAuto.rank;
+            arenaLog('完成第 ' + arenaAuto.done + ' 场' + (arenaAuto.rank ? '（' + arenaAuto.rank + '）' : ''));
+            if (arenaAuto.done >= limit) break;
+          }
+          idle = 0;
+        } else {
+          resultOpen = false;
+          if (!arenaView()) {
+            idle = 0;
+            if (ticks % 8 === 0) dailyClickTexts(['跳过'], 1);
+          } else {
+            idle += 1;
+          }
+        }
+        let remain = null;
+        try { if (typeof ctl.MNAZ === 'function') remain = ctl.MNAZ(); } catch (_) { remain = null; }
+        if (remain !== null && remain <= 0 && arenaView() && arenaAuto.done < limit) {
+          arenaLog('游戏自动挑战次数用完');
+          break;
+        }
+        if (idle > 240) {
+          arenaAuto.error = '自动挑战长时间没有进展';
+          arenaLog('自动挑战长时间没有进展');
+          break;
+        }
+      }
+    } finally {
+      try { if (typeof ctl.CPAE === 'function') ctl.CPAE(false); else ctl.LRRX = false; } catch (_) { /* ignore */ }
+      try { if (typeof ctl.BTYB === 'function') ctl.BTYB(0); else ctl.WWBP = 0; } catch (_) { /* ignore */ }
+      arenaAuto.native = false;
+      // 停掉结算界面的自动倒计时，避免停止/限频后又自动开一场
+      await dailySleep(400);
+      arenaCloseResult();
+      await dailySleep(300);
+      arenaSetAuto(false);
+      if (!arenaAuto.error) {
+        arenaAuto.step = '完成';
+        arenaLog('竞技场完成');
+      }
+    }
+    return 'done';
+  }
+
+  async function arenaRun(count, takeFirst, targetIndex, token, gapMs, native) {
     const alive = function () { return arenaAuto.running && arenaAuto.token === token; };
     arenaAuto.running = true;
     arenaAuto.error = '';
@@ -4739,6 +4868,11 @@ RUNTIME_JS = r"""
         arenaAuto.error = '请先打开荣耀竞技场';
         arenaLog('请先打开荣耀竞技场');
         return;
+      }
+      if (native) {
+        const nativeResult = await arenaNativeRun(count, targetIndex, token);
+        if (nativeResult !== 'fallback') return;
+        arenaLog('当前版本找不到游戏自动挑战，改用普通模式');
       }
       const limit = Math.max(0, Number(count) || 0) || 99;
       let idle = 0;
@@ -4782,9 +4916,9 @@ RUNTIME_JS = r"""
           arenaAuto.error = res.toast || '操作频率过快';
           arenaAuto.step = '操作太快，等 ' + Math.ceil(wait / 1000) + ' 秒重试';
           arenaLog('操作太快：' + (res.toast || '') + '，等 ' + Math.ceil(wait / 1000) + ' 秒重试');
-          if (arenaAuto.retries > 6) {
-            arenaAuto.error = '服务器一直提示操作频率过快，请稍后再试';
-            arenaLog('服务器一直提示操作频率过快，已停止');
+          if (arenaAuto.retries > 2) {
+            arenaAuto.error = '服务器限频，请重启游戏窗口或等几分钟再试';
+            arenaLog('服务器一直提示操作频率过快，建议重启游戏后再试');
             break;
           }
           await dailySleep(wait);
@@ -4852,7 +4986,8 @@ RUNTIME_JS = r"""
       !!(opts && opts.takeFirst),
       opts && opts.targetIndex,
       token,
-      opts && opts.gapMs
+      opts && opts.gapMs,
+      !!(opts && opts.native)
     );
     return { ok: true, message: '开始竞技场挑战' };
   }
@@ -4861,6 +4996,9 @@ RUNTIME_JS = r"""
     arenaAuto.running = false;
     arenaAuto.token += 1;
     arenaAuto.step = '';
+    arenaAuto.native = false;
+    arenaSetAuto(false);
+    arenaCloseResult();
     arenaLog('已停止');
     return { ok: true };
   }
