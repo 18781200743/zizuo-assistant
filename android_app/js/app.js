@@ -569,6 +569,7 @@
   var gachaPollBusy = false;
   var gachaEpoch = 0;
   var gachaStarting = false;
+  var gachaTurbo = false;
   var gachaDebug = window.__zzGachaDebug = window.__zzGachaDebug || {};
   var GACHA_CHECK_KEY = "zz_gacha_checked";
 
@@ -892,6 +893,47 @@
     }, 15000);
   }
 
+  function syncGachaTurboButton() {
+    var el = $("gTurbo");
+    if (!el) return;
+    el.classList.toggle("on", gachaTurbo);
+    el.textContent = gachaTurbo ? "极速：开" : "极速模式";
+  }
+
+  function loadGachaTurbo() {
+    try {
+      gachaTurbo = localStorage.getItem("zz_gacha_turbo") === "1";
+      var saved = parseInt(localStorage.getItem("zz_gacha_delay") || "", 10);
+      var delayEl = $("gDelay");
+      if (delayEl) {
+        if (isFinite(saved) && saved > 0) delayEl.value = String(saved);
+        delayEl.min = gachaTurbo ? "20" : "300";
+      }
+    } catch (e) { /* ignore */ }
+    syncGachaTurboButton();
+  }
+
+  function toggleGachaTurbo() {
+    gachaTurbo = !gachaTurbo;
+    var delayEl = $("gDelay");
+    var delay = delayEl ? parseInt(delayEl.value || "0", 10) : 0;
+    if (gachaTurbo && (!isFinite(delay) || delay <= 0 || delay > 300)) {
+      delay = 50;
+      if (delayEl) delayEl.value = "50";
+    }
+    if (delayEl) delayEl.min = gachaTurbo ? "20" : "300";
+    try {
+      localStorage.setItem("zz_gacha_turbo", gachaTurbo ? "1" : "0");
+      localStorage.setItem("zz_gacha_delay", String(delay || (gachaTurbo ? 50 : 1200)));
+    } catch (e) { /* ignore */ }
+    syncGachaTurboButton();
+    if ($("gHint")) {
+      $("gHint").textContent = gachaTurbo
+        ? "极速模式已开：约 " + (delay || 50) + "ms/次，注意风控"
+        : "极速模式已关闭";
+    }
+  }
+
   function startGachaRun() {
     if (gachaRunning) {
       gachaEpoch += 1;
@@ -910,9 +952,15 @@
     if (!game) { setGachaHint("先点「打开游戏」"); return; }
     var targets = gachaCheckedIds();
     if (!targets.length) { setGachaHint("先勾选要保留的英雄"); return; }
+    var delay = numVal("gDelay", gachaTurbo ? 50 : 1200);
+    delay = gachaTurbo ? Math.max(20, delay) : Math.max(300, delay);
+    try {
+      localStorage.setItem("zz_gacha_turbo", gachaTurbo ? "1" : "0");
+      localStorage.setItem("zz_gacha_delay", String(delay));
+    } catch (e) { /* ignore */ }
     var opts = {
       targets: targets, keepQuality: 0,
-      maxDraws: numVal("gMax", 0), delayMs: 1200,
+      maxDraws: numVal("gMax", 0), delayMs: delay, turbo: gachaTurbo,
       refresh: false, maxGreen: numVal("gGreen", 0),
       maxBet: true, alwaysAbandon: true
     };
@@ -2402,6 +2450,9 @@
 
     var gStart = $("gStart");
     if (gStart) gStart.onclick = startGachaRun;
+    var gTurbo = $("gTurbo");
+    if (gTurbo) gTurbo.onclick = toggleGachaTurbo;
+    loadGachaTurbo();
 
     var gClear = $("gClear");
     if (gClear) gClear.onclick = clearGachaStats;
