@@ -4441,7 +4441,7 @@ class AppUI:
                 "选中据点后，下方成员明细会自动读取并显示每个人三个队各自的战力（需要几秒）。"
             ),
             foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
-            anchor="w", wraplength=700, padx=10, pady=6,
+            anchor="w", wraplength=400, padx=10, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
         )
         note.pack(fill=tk.X, pady=(0, 6))
@@ -4981,7 +4981,7 @@ class AppUI:
                 "不会发起挑战或修改游戏数据；离开战斗后仍会保留本次结果，刷新页面后清空。"
             ),
             foreground="#8a5a00", background="#fff7e6", justify=tk.LEFT,
-            anchor="w", wraplength=700, padx=10, pady=6,
+            anchor="w", wraplength=400, padx=10, pady=6,
             highlightthickness=1, highlightbackground="#f0d9a8",
         )
         note.pack(fill=tk.X, pady=(0, 6))
@@ -4995,7 +4995,7 @@ class AppUI:
         self._maze_status = tk.StringVar(value="进入公会迷宫首领战斗后点「查询首领」")
         ttk.Label(
             parent, textvariable=self._maze_status, foreground="#1a4d8f",
-            wraplength=700, justify=tk.LEFT,
+            wraplength=400, justify=tk.LEFT,
         ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
 
         self._maze_context_var = tk.StringVar(value="当前迷宫：未进入公会迷宫")
@@ -5007,7 +5007,7 @@ class AppUI:
         self._maze_summary = tk.StringVar(value="尚未查询")
         ttk.Label(
             parent, textvariable=self._maze_summary, foreground="#334155",
-            wraplength=700, justify=tk.LEFT, font=("Microsoft YaHei UI", 9, "bold"),
+            wraplength=400, justify=tk.LEFT, font=("Microsoft YaHei UI", 9, "bold"),
         ).pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
 
         body = ttk.Frame(parent)
@@ -5015,8 +5015,8 @@ class AppUI:
         tree = ttk.Treeview(body, columns=("name", "value"), show="headings", height=8)
         tree.heading("name", text="属性")
         tree.heading("value", text="数值")
-        tree.column("name", width=240, anchor=tk.W, stretch=False)
-        tree.column("value", width=430, anchor=tk.W, stretch=True)
+        tree.column("name", width=120, anchor=tk.W, stretch=False)
+        tree.column("value", width=250, anchor=tk.W, stretch=True)
         vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         tree.grid(row=0, column=0, sticky="nsew")
