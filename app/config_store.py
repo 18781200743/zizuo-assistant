@@ -52,7 +52,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "match_threshold": 0.85,
     "click_delay_ms": 300,
     "loop_interval_ms": 800,
-    "target_window_title": "Zizuo游戏窗",
+    "target_window_title": "小太阳",
     "game_url": "https://mprogram.boomegg.cn/box/game/wx77200645d1c7f35f/h5?appid=wx77200645d1c7f35f&game_platform=h5",
     "game_width": 390,
     "game_height": 844,
@@ -185,6 +185,11 @@ def load_config() -> Dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     merged = DEFAULT_CONFIG.copy()
     merged.update(data)
+    # 旧版游戏窗口标题已从「Zizuo游戏窗」改为「小太阳」，自动迁移
+    if str(merged.get("target_window_title") or "").strip() in (
+        "Zizuo游戏窗", "Zizuo游戏窗口",
+    ):
+        merged["target_window_title"] = "小太阳"
     if not isinstance(merged.get("tasks"), list):
         merged["tasks"] = []
     try:

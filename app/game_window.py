@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from .platform_compat import IS_MAC, mac_chromium_candidates, mac_chromium_path
 
-GAME_WINDOW_TITLE = "Zizuo游戏窗"
+GAME_WINDOW_TITLE = "小太阳"
 
 DEFAULT_URL = (
     "https://mprogram.boomegg.cn/box/game/wx77200645d1c7f35f/h5"
@@ -208,6 +208,72 @@ def _cleanup_profile_processes(image_name: str, profile: str) -> None:
             pass
 
 
+def _game_icon_path() -> str:
+    """游戏窗口图标：优先打包资源，其次源码 assets。"""
+    roots = []
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        roots.append(Path(base) / "app" / "assets" / "sunny.ico")
+    roots.append(Path(__file__).resolve().parent / "assets" / "sunny.ico")
+    for path in roots:
+        if path.exists():
+            return str(path)
+    return ""
+
+
+def _apply_game_window_icon() -> None:
+    """给 WebView2 游戏窗口换上太阳图标（Windows）。"""
+    if sys.platform != "win32":
+        return
+    icon = _game_icon_path()
+    if not icon:
+        return
+
+    def worker() -> None:
+        try:
+            import win32con
+            import win32gui
+        except Exception:  # noqa: BLE001
+            return
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            matched = []
+
+            def callback(hwnd, _):
+                try:
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return
+                    title = win32gui.GetWindowText(hwnd) or ""
+                    if not title.startswith(GAME_WINDOW_TITLE):
+                        return
+                    if "Tk" in win32gui.GetClassName(hwnd):
+                        return
+                    matched.append(hwnd)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            try:
+                win32gui.EnumWindows(callback, None)
+            except Exception:  # noqa: BLE001
+                return
+            if matched:
+                try:
+                    hicon = win32gui.LoadImage(
+                        0, icon, win32con.IMAGE_ICON, 0, 0,
+                        win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE,
+                    )
+                    if hicon:
+                        for hwnd in matched:
+                            win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, hicon)
+                            win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, hicon)
+                        return
+                except Exception:  # noqa: BLE001
+                    return
+            time.sleep(0.3)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _keep_window_title(pid: int, title: str) -> None:
     """Edge/Chrome 的 --app 窗口标题默认是网页标题，持续改回固定标题。"""
     if sys.platform != "win32":
@@ -400,6 +466,7 @@ def _run_window(
 
     def _on_loaded():
         _refresh_title()
+        _apply_game_window_icon()
         try:
             window.evaluate_js(DISMISS_OVERLAY_JS)
         except Exception:  # noqa: BLE001

@@ -243,7 +243,7 @@ class _AutoChestAdapter:
 class AppUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("小太阳脚本")
+        self.root.title("小太阳")
         _w, _h = 480, 760
         try:
             _sw = self.root.winfo_screenwidth()
@@ -255,6 +255,7 @@ class AppUI:
             self.root.geometry("480x760")
         # 固定窗口大小：拉大后缩回来会错位，干脆不让拉伸
         self.root.resizable(False, False)
+        self._apply_window_icon()
 
         self.config: Dict[str, Any] = load_config()
         # 后台线程只往队列里丢日志，由 UI 线程统一写进日志框（跨线程操作 Tk 会卡死/丢日志）
@@ -662,6 +663,20 @@ class AppUI:
         self.log = None
 
         self.root.after(200, self._tick_cursor)
+
+    def _apply_window_icon(self) -> None:
+        """窗口/任务栏图标：Windows 用 ico，其它平台退回 png。"""
+        try:
+            ico = os.path.join(self.ASSET_DIR, "sunny.ico")
+            png = os.path.join(self.ASSET_DIR, "sunny.png")
+            if os.name == "nt" and os.path.exists(ico):
+                self.root.iconbitmap(default=ico)
+                return
+            if os.path.exists(png):
+                self._window_icon_photo = tk.PhotoImage(file=png)
+                self.root.iconphoto(True, self._window_icon_photo)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _switch_mode(self, mode: str) -> None:
         self.mode_var.set(mode)

@@ -83,6 +83,11 @@ def find_window_hwnd(title_keyword: str) -> Optional[int]:
         if not title or keyword not in title.lower():
             return
         try:
+            if "Tk" in win32gui.GetClassName(hwnd):
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         except Exception:  # noqa: BLE001
             return

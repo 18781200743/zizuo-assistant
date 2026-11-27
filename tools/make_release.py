@@ -200,6 +200,8 @@ def make_exe() -> Path | None:
         "--windowed",
         "--name",
         "Zizuo助手",
+        "--icon",
+        str(ROOT / "app" / "assets" / "sunny.ico"),
         "--distpath",
         str(out),
         "--workpath",
